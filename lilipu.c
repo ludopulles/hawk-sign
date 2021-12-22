@@ -1,3 +1,4 @@
+#include <assert.h>
 #include <stddef.h>
 #include <string.h>
 #include <stdio.h>
@@ -28,15 +29,18 @@
 #define CRYPTO_SECRETKEYBYTES   2305
 #define CRYPTO_PUBLICKEYBYTES   1793
 #define CRYPTO_BYTES            1330
-// #define CRYPTO_ALGNAME          "Falcon-1024"
+#define CRYPTO_ALGNAME          "Lilipu-1024"
 
 
 // 32 MB buffer of random data:
 unsigned char _randomness_buffer[32 * 1024 * 1024], *_randomness_ptr = NULL;
 
-void prepare_random() {
-	for (size_t i = 0; i < 32 * 1024 * 1024; i++)
+void
+prepare_random()
+{
+	for (size_t i = 0; i < 32 * 1024 * 1024; i++) {
 		_randomness_buffer[i] = (unsigned char) rand();
+	}
 	_randomness_ptr = _randomness_buffer;
 }
 
@@ -44,7 +48,9 @@ void prepare_random() {
 // Perhaps not the way to go:
 // void randombytes_init(unsigned char *entropy_input,
 //		unsigned char *personalization_string, int security_strength);
-int randombytes(unsigned char *x, unsigned long long xlen) {
+int
+randombytes(unsigned char *x, unsigned long long xlen)
+{
 	// TODO: make proper randomness generator
 
 	memcpy(x, _randomness_ptr, xlen);
@@ -57,7 +63,9 @@ int randombytes(unsigned char *x, unsigned long long xlen) {
 	return 1;
 }
 
-long long time_diff(const struct timeval *begin, const struct timeval *end) {
+long long
+time_diff(const struct timeval *begin, const struct timeval *end)
+{
 	return 1000000LL * (end->tv_sec - begin->tv_sec)
 			+ (end->tv_usec - begin->tv_usec);
 }
@@ -74,6 +82,8 @@ long long time_diff(const struct timeval *begin, const struct timeval *end) {
 // - lilipu_inner_do_sign
 // - lilipu_sign
 
+// =============================================================================
+// | FUNCTIONS FOR KEY GENERATION                                              |
 // =============================================================================
 /*
  * Solving the NTRU equation for q = 1, deepest level: compute the resultants
@@ -241,7 +251,7 @@ lilipu_solve_NTRU(unsigned logn, int8_t *F, int8_t *G,
 // =============================================================================
 void
 lilipu_keygen(inner_shake256_context *rng,
-	int8_t *f, int8_t *g, int8_t *F, int8_t *G,
+	int8_t *f, int8_t *g, fpr *q00, fpr *q10, fpr *q11,
 	unsigned logn, uint8_t *tmp)
 {
 	/*
@@ -287,8 +297,8 @@ lilipu_keygen(inner_shake256_context *rng,
 	 * NTRU equation solver requires it).
 	 */
 	for (;;) {
-		fpr *rt1, *rt2, *rt3;
-		fpr bnorm;
+		int8_t *F, *G, *rec_tmp;
+		fpr *qxx, *rt1, *rt2, *rt3, *rt4, bnorm;
 		uint32_t normf, normg, norm;
 		int lim;
 
@@ -368,13 +378,51 @@ lilipu_keygen(inner_shake256_context *rng,
 
 		// Changed: do not calculate h.
 
-		/*
-		 * Solve the NTRU equation to get F and G.
-		 */
+		// since we store F, G in tmp, we need 30*1024 instead of 28*1024
+		// temporary bytes.
+		F = (int8_t *)tmp;
+		G = F + n;
+		rec_tmp = G + n;
+
+		// Solve the NTRU equation to get F and G.
 		lim = (1 << (Zf(max_FG_bits)[logn] - 1)) - 1;
-		if (!lilipu_solve_NTRU(logn, F, G, f, g, lim, (uint32_t *)tmp)) {
+		if (!lilipu_solve_NTRU(logn, F, G, f, g, lim, (uint32_t *)rec_tmp)) {
 			continue;
 		}
+
+		// Calculate q00, q10, q11 (in FFT representation) using
+		// Q = B * adj(B^{T})
+		qxx = (fpr *)rec_tmp;
+		rt1 = qxx + n;
+		rt2 = rt1 + n;
+		rt3 = rt2 + n;
+		rt4 = rt3 + n;
+		poly_small_to_fp(rt1, f, logn);
+		poly_small_to_fp(rt2, g, logn);
+		poly_small_to_fp(rt3, F, logn);
+		poly_small_to_fp(rt4, G, logn);
+		Zf(FFT)(rt1, logn);
+		Zf(FFT)(rt2, logn);
+		Zf(FFT)(rt3, logn);
+		Zf(FFT)(rt4, logn);
+
+		memcpy(q00, rt1, n * sizeof *rt1);
+		Zf(poly_mulselfadj_fft)(q00, logn);
+		memcpy(qxx, rt2, n * sizeof *rt2);
+		Zf(poly_mulselfadj_fft)(qxx, logn);
+		Zf(poly_add)(q00, qxx, logn); // q00 = f*bar(f) + g*bar(g)
+
+		memcpy(q10, rt3, n * sizeof *rt3);
+		Zf(poly_muladj_fft)(q10, rt1, logn);
+		memcpy(qxx, rt4, n * sizeof *rt4);
+		Zf(poly_muladj_fft)(qxx, rt2, logn);
+		Zf(poly_add)(q10, qxx, logn); // q10 = F*bar(f) + G*bar(g)
+
+		memcpy(q11, rt3, n * sizeof *rt3);
+		Zf(poly_mulselfadj_fft)(q11, logn);
+		memcpy(qxx, rt4, n * sizeof *rt4);
+		Zf(poly_mulselfadj_fft)(qxx, logn);
+		Zf(poly_add)(q11, qxx, logn); // q11 = F*bar(F) + G*bar(G)
 
 		/*
 		 * Key pair is generated.
@@ -383,6 +431,8 @@ lilipu_keygen(inner_shake256_context *rng,
 	}
 }
 
+// =============================================================================
+// | FUNCTIONS TO CREATE SIGNATURES                                            |
 // =============================================================================
 // Calculate (f*g) mod (2, phi) and store the result (mod 2) in f.
 // tmp must be of size at least 2n.
@@ -434,15 +484,15 @@ lilipu_inner_mulmod2(int8_t *restrict f, const int8_t *restrict g,
 static int
 lilipu_inner_do_sign(samplerZ samp, void *samp_ctx, int16_t *s1,
 	const int8_t *restrict f, const int8_t *restrict g,
-	const int16_t *hm, unsigned logn, fpr isigma_sig, int8_t *restrict tmp)
+	const int16_t *hm, unsigned logn, fpr isigma_sig, uint8_t *restrict tmp)
 {
 	size_t n, u;
 	int8_t *x0, *x1;
 	fpr *t0, *t1, *t2;
 
 	n = MKN(logn);
-	x0 = tmp;
-	x1 = tmp + n;
+	x0 = (int8_t *)tmp;
+	x1 = x0 + n;
 	t0 = align_fpr(tmp, x1 + n);
 	t1 = t0 + n;
 	t2 = t1 + n;
@@ -465,10 +515,10 @@ lilipu_inner_do_sign(samplerZ samp, void *samp_ctx, int16_t *s1,
 	 * Perform Gaussian smoothing to not reveal information on the secret basis.
 	 */
 	for (u = 0; u < n; u ++) {
-		x0[u] = 2*samp(samp_ctx, fpr_scaled(x0[u]&1, -1), isigma_sig) - (x0[u]&1);
+		x0[u] = 2*samp(samp_ctx, fpr_half(fpr_of(x0[u]&1)), isigma_sig) - (x0[u]&1);
 	}
 	for (u = 0; u < n; u ++) {
-		x1[u] = 2*samp(samp_ctx, fpr_scaled(x1[u]&1, -1), isigma_sig) - (x1[u]&1);
+		x1[u] = 2*samp(samp_ctx, fpr_half(fpr_of(x1[u]&1)), isigma_sig) - (x1[u]&1);
 	}
 
 	/*
@@ -517,7 +567,7 @@ lilipu_inner_do_sign(samplerZ samp, void *samp_ctx, int16_t *s1,
 void
 lilipu_sign(int16_t *sig, inner_shake256_context *rng,
 	const int8_t *restrict f, const int8_t *restrict g,
-	const int16_t *hm, unsigned logn, fpr isigma_sig, int8_t *restrict tmp)
+	const int16_t *hm, unsigned logn, fpr isigma_sig, uint8_t *restrict tmp)
 {
 	for (;;) {
 		/*
@@ -553,13 +603,115 @@ lilipu_sign(int16_t *sig, inner_shake256_context *rng,
 }
 
 // =============================================================================
+// | FUNCTIONS FOR SIGNATURE VERIFICATION                                      |
+// =============================================================================
+/*
+ * Add to polynomial its own adjoint. This function works only in FFT
+ * representation.
+ */
+void
+lilipu_inner_poly_addselfadj_fft(fpr *a, unsigned logn)
+{
+	/*
+	 * Since its own conjugate is added to each coefficient,
+	 * the result contains only real values.
+	 */
+	size_t hn, u;
+
+	hn = MKN(logn) >> 1;
+	for (u = 0; u < hn; u ++) {
+		a[u] = fpr_double(a[u]);
+	}
+	for (u = 0; u < hn; u ++) {
+		a[u + hn] = fpr_zero;
+	}
+}
+
+// Note: q00, q11 are self adjoint.
+// tmp must have size at least 32 * 1024 bytes
+int
+lilipu_verify(const int16_t *hm, int16_t *s0, const int16_t *s1,
+	const fpr *q00, const fpr *q10, const fpr *q11, unsigned logn, const fpr verif_bound, fpr *tmp)
+{
+	size_t u, n, s1mod2;
+	fpr *t0, *t1, *t2, *t3;
+
+	n = MKN(logn);
+	t0 = tmp;
+	t1 = t0 + n;
+	t2 = t1 + n;
+	t3 = t2 + n;
+
+	// if s1 is a valid signature, then s1 == 0 (mod 2)
+	s1mod2 = 0;
+	for (u = 0; u < n; u ++) {
+		s1mod2 |= s1[u] & 1;
+	}
+
+	// Reduce s1 elements modulo q ([0..q-1] range).
+	for (u = 0; u < n; u ++) {
+		t0[u] = fpr_of(s1[u]);
+	}
+
+	// Compute s0 = h%2 + 2 round(-q10 s1 / (2 q00))
+	falcon_inner_FFT(t0, logn);
+	// copy s1 for later.
+	memcpy(t1, t0, n * sizeof *t0);
+
+	falcon_inner_poly_mulconst(t0, fpr_onehalf, logn);
+	falcon_inner_poly_neg(t0, logn);
+	falcon_inner_poly_mul_fft(t0, q10, logn); // -q10 s1 / 2
+	// Note: q00 is self adjoint
+	falcon_inner_poly_div_autoadj_fft(t0, q00, logn); // -q10 s1 / (2 q00)
+	falcon_inner_iFFT(t0, logn);
+
+	for (u = 0; u < n; u ++) {
+		s0[u] = (hm[u] & 1) | fpr_rint(t0[u]) << 1;
+	}
+
+	// Currently in memory: s0, s1 (in FFT representation)
+	for (u = 0; u < n; u ++) {
+		t0[u] = fpr_of(s0[u]);
+	}
+	falcon_inner_FFT(t0, logn);
+
+	// Currently in memory: s0, s1, s1, s0 (in FFT representation)
+	memcpy(t2, t1, n * sizeof *t0);
+	memcpy(t3, t0, n * sizeof *t0);
+
+	// Compute s0 q00 s0* + s0 q01 s1* + s1 q10 s0* + s1 q11 s1*
+	falcon_inner_poly_mulselfadj_fft(t2, logn);
+	falcon_inner_poly_mulselfadj_fft(t3, logn);
+	falcon_inner_poly_mul_autoadj_fft(t2, q11, logn); // t2 = s1 q11 s1*
+	falcon_inner_poly_mul_autoadj_fft(t3, q00, logn); // t3 = s0 q00 s0*
+	falcon_inner_poly_muladj_fft(t1, t0, logn); // t1 = s1 s0*
+	falcon_inner_poly_mul_fft(t1, q10, logn); // t1 = s1 q10 s0*
+
+	lilipu_inner_poly_addselfadj_fft(t1, logn); // t1 = s1 q10 s0* + s0 q01 s1*
+	falcon_inner_poly_add(t1, t2, logn);
+	falcon_inner_poly_add(t1, t3, logn);
+
+	fpr v = fpr_zero;
+	for (u = 0; u < n; u ++) {
+		v = fpr_add(v, t1[u]);
+	}
+
+	/*
+	 * Signature is valid if and only if `v` is short enough and s2%2 == 0 (<=> s1mod2 = 0).
+	 */
+	return fpr_lt(v, verif_bound) & ~s1mod2;
+}
+
+// =============================================================================
+// | TODO: make this into an actually NIST-compatible function like `nist.c`   |
+// =============================================================================
 int
 crypto_lilipu_sign(unsigned char *sm, unsigned long long *smlen,
 	const unsigned char *m, unsigned long long mlen,
 	const int8_t *restrict f, const int8_t *restrict g, fpr isigma_sig)
 {
 	TEMPALLOC union {
-		int8_t b[28 * 1024];
+		uint8_t b[28 * 1024];
 		uint64_t dummy_u64;
 		fpr dummy_fpr;
 	} tmp;
@@ -623,22 +775,18 @@ crypto_lilipu_sign(unsigned char *sm, unsigned long long *smlen,
 }
 
 // =============================================================================
-// | Code for testing the above functions                                      |
+// | TESTING CODE                                                              |
 // =============================================================================
 const size_t logn = 10, n = MKN(logn);
 
 void benchmark_lilipu(fpr isigma_sig) {
 	TEMPALLOC union {
-		uint8_t b[FALCON_KEYGEN_TEMP_10];
+		uint8_t b[42 * 1024];
 		uint64_t dummy_u64;
 		fpr dummy_fpr;
 	} tmp;
-	TEMPALLOC union {
-		int8_t b[28 * 1024];
-		uint64_t dummy_u64;
-		fpr dummy_fpr;
-	} tmp2;
-	TEMPALLOC int8_t f[1024], g[1024], F[1024], G[1024];
+	TEMPALLOC int8_t f[1024], g[1024];
+	TEMPALLOC fpr q00[1024], q10[1024], q11[1024];
 	TEMPALLOC int16_t h[1024], sig[1024];
 	TEMPALLOC unsigned char seed[48];
 	TEMPALLOC inner_shake256_context sc;
@@ -655,7 +803,7 @@ void benchmark_lilipu(fpr isigma_sig) {
 	gettimeofday(&t0, NULL);
 
 	// Generate key pair.
-	lilipu_keygen(&sc, f, g, F, G, logn, tmp.b);
+	lilipu_keygen(&sc, f, g, q00, q10, q11, logn, tmp.b);
 
 	gettimeofday(&t1, NULL);
 	printf("Key generation took %lld microseconds\n", time_diff(&t0, &t1));
@@ -670,11 +818,12 @@ void benchmark_lilipu(fpr isigma_sig) {
 		randombytes((unsigned char *)h, sizeof h);
 
 		// Compute the signature.
-		lilipu_sign(sig, &sc, f, g, h, logn, isigma_sig, tmp2.b);
+		lilipu_sign(sig, &sc, f, g, h, logn, isigma_sig, tmp.b);
 	}
 
 	gettimeofday(&t1, NULL);
-	printf("Lilipu Signing %d random messages took: %lld microseconds\n", n_repetitions, time_diff(&t0, &t1));
+	double sign_ps = 1000000LL * n_repetitions / (double)time_diff(&t0, &t1);
+	printf("Lilipu sign/s = %.1f\n", sign_ps);
 }
 
 void benchmark_falcon() {
@@ -728,7 +877,38 @@ void benchmark_falcon() {
 	}
 
 	gettimeofday(&t1, NULL);
-	printf("Falcon Signing %d random messages took: %lld microseconds\n", n_repetitions, time_diff(&t0, &t1));
+	double sign_ps = 1000000LL * n_repetitions / (double)time_diff(&t0, &t1);
+	printf("Falcon sign/s = %.1f\n", sign_ps);
+}
+
+void test_lilipu_valid_signature(fpr isigma_sig, fpr verif_bound) {
+	TEMPALLOC union {
+		uint8_t b[42 * 1024];
+		uint64_t dummy_u64;
+		fpr dummy_fpr;
+	} tmp;
+	TEMPALLOC int8_t f[1024], g[1024];
+	TEMPALLOC fpr q00[1024], q10[1024], q11[1024];
+	TEMPALLOC int16_t h[1024], sig[1024], s0[1024];
+	TEMPALLOC unsigned char seed[48];
+	TEMPALLOC inner_shake256_context sc;
+
+	// Initialize a RNG.
+	randombytes(seed, sizeof seed);
+	inner_shake256_init(&sc);
+	inner_shake256_inject(&sc, seed, sizeof seed);
+	inner_shake256_flip(&sc);
+
+	// Generate key pair.
+	lilipu_keygen(&sc, f, g, q00, q10, q11, logn, tmp.b);
+
+	// make a signature of a random message...
+	randombytes((unsigned char *)h, sizeof h);
+
+	// Compute the signature.
+	lilipu_sign(sig, &sc, f, g, h, logn, isigma_sig, tmp.b);
+
+	assert(lilipu_verify(h, s0, sig, q00, q10, q11, logn, verif_bound, (fpr *)tmp.b) != 0);
 }
 
 void testmod2() {
@@ -757,10 +937,15 @@ int main() {
 	prepare_random();
 
 	// 1.3 ~ 1331 / 1024
-	const fpr isigma_sig = fpr_inv(fpr_scaled(1331, -10));
+	const fpr isigma_sig = fpr_div(fpr_of(13), fpr_of(10)); // 1.3
+	// See scheme.sage
+	// verif_margin = 1 + √(64 * ln(2) / 1024).
+	// verif_bound = (verif_margin*2*sigma_sig)^2 * (2d)
+	const fpr verif_bound = fpr_div(fpr_of(20207389), fpr_of(1000)); // 20207.389
 
 	benchmark_lilipu(isigma_sig);
 	benchmark_falcon();
 
+	test_lilipu_valid_signature(isigma_sig, verif_bound);
 	return 0;
 }
