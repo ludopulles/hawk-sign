@@ -4,6 +4,9 @@
 #include <stdlib.h>
 #include <time.h>
 
+// x86_64 specific:
+#include<sys/time.h>
+
 // #include "api.h"
 // #include "inner.h"
 #include "codec.c"
@@ -27,15 +30,36 @@
 #define CRYPTO_BYTES            1330
 // #define CRYPTO_ALGNAME          "Falcon-1024"
 
+
+// 32 MB buffer of random data:
+unsigned char _randomness_buffer[32 * 1024 * 1024], *_randomness_ptr = NULL;
+
+void prepare_random() {
+	for (size_t i = 0; i < 32 * 1024 * 1024; i++)
+		_randomness_buffer[i] = (unsigned char) rand();
+	_randomness_ptr = _randomness_buffer;
+}
+
+
 // Perhaps not the way to go:
-// void randombytes_init(unsigned char *entropy_input, unsigned char *personalization_string, int security_strength);
+// void randombytes_init(unsigned char *entropy_input,
+//		unsigned char *personalization_string, int security_strength);
 int randombytes(unsigned char *x, unsigned long long xlen) {
 	// TODO: make proper randomness generator
-	while (xlen -- > 0) {
+
+	memcpy(x, _randomness_ptr, xlen);
+	_randomness_ptr += xlen;
+
+	/* while (xlen -- > 0) {
 		*x = ((unsigned char) rand());
 		++x;
-	}
+	} */
 	return 1;
+}
+
+long long time_diff(const struct timeval *begin, const struct timeval *end) {
+	return 1000000LL * (end->tv_sec - begin->tv_sec)
+			+ (end->tv_usec - begin->tv_usec);
 }
 
 // =============================================================================
@@ -363,7 +387,8 @@ lilipu_keygen(inner_shake256_context *rng,
 // Calculate (f*g) mod (2, phi) and store the result (mod 2) in f.
 // tmp must be of size at least 2n.
 static void
-lilipu_inner_mulmod2(int8_t *restrict f, const int8_t *restrict g, unsigned logn, uint16_t *tmp)
+lilipu_inner_mulmod2(int8_t *restrict f, const int8_t *restrict g,
+		unsigned logn, uint16_t *tmp)
 {
 	size_t n, u;
 	uint16_t *ft, *gt;
@@ -409,7 +434,7 @@ lilipu_inner_mulmod2(int8_t *restrict f, const int8_t *restrict g, unsigned logn
 static int
 lilipu_inner_do_sign(samplerZ samp, void *samp_ctx, int16_t *s1,
 	const int8_t *restrict f, const int8_t *restrict g,
-	const uint16_t *hm, unsigned logn, fpr isigma_sig, int8_t *restrict tmp)
+	const int16_t *hm, unsigned logn, fpr isigma_sig, int8_t *restrict tmp)
 {
 	size_t n, u;
 	int8_t *x0, *x1;
@@ -440,16 +465,10 @@ lilipu_inner_do_sign(samplerZ samp, void *samp_ctx, int16_t *s1,
 	 * Perform Gaussian smoothing to not reveal information on the secret basis.
 	 */
 	for (u = 0; u < n; u ++) {
-		int16_t T;
-		T = 2*samp(samp_ctx, fpr_scaled(x0[u] & 1, -1), isigma_sig) - (x0[u] & 1);
-		assert((T - x0[u]) % 2 == 0); // TODO remove debugging
-		x0[u] = T;
+		x0[u] = 2*samp(samp_ctx, fpr_scaled(x0[u]&1, -1), isigma_sig) - (x0[u]&1);
 	}
 	for (u = 0; u < n; u ++) {
-		int16_t T;
-		T = 2*samp(samp_ctx, fpr_scaled(x1[u] & 1, -1), isigma_sig) - (x1[u] & 1);
-		assert((T - x1[u]) % 2 == 0); // TODO remove debugging
-		x1[u] = T;
+		x1[u] = 2*samp(samp_ctx, fpr_scaled(x1[u]&1, -1), isigma_sig) - (x1[u]&1);
 	}
 
 	/*
@@ -498,7 +517,7 @@ lilipu_inner_do_sign(samplerZ samp, void *samp_ctx, int16_t *s1,
 void
 lilipu_sign(int16_t *sig, inner_shake256_context *rng,
 	const int8_t *restrict f, const int8_t *restrict g,
-	const uint16_t *hm, unsigned logn, fpr isigma_sig, int8_t *restrict tmp)
+	const int16_t *hm, unsigned logn, fpr isigma_sig, int8_t *restrict tmp)
 {
 	for (;;) {
 		/*
@@ -545,8 +564,7 @@ crypto_lilipu_sign(unsigned char *sm, unsigned long long *smlen,
 		fpr dummy_fpr;
 	} tmp;
 	TEMPALLOC union {
-		int16_t sig[1024];
-		uint16_t hm[1024];
+		int16_t sig[1024], hm[1024];
 	} r;
 	TEMPALLOC unsigned char seed[48], nonce[NONCELEN];
 	TEMPALLOC unsigned char esig[CRYPTO_BYTES - 2 - sizeof nonce];
@@ -565,7 +583,7 @@ crypto_lilipu_sign(unsigned char *sm, unsigned long long *smlen,
 	inner_shake256_inject(&sc, nonce, sizeof nonce);
 	inner_shake256_inject(&sc, m, mlen);
 	inner_shake256_flip(&sc);
-	Zf(hash_to_point_vartime)(&sc, r.hm, 10);
+	Zf(hash_to_point_vartime)(&sc, (uint16_t *)r.hm, 10);
 
 	/*
 	 * Initialize a RNG.
@@ -607,73 +625,114 @@ crypto_lilipu_sign(unsigned char *sm, unsigned long long *smlen,
 // =============================================================================
 // | Code for testing the above functions                                      |
 // =============================================================================
+const size_t logn = 10, n = MKN(logn);
 
-void run() {
-	const size_t logn = 10, n = MKN(logn);
-	const fpr isigma_sig = fpr_inv(fpr_scaled(1331, -10)); // 1.3 ~ 1331 / 1024
-
+void benchmark_lilipu(fpr isigma_sig) {
 	TEMPALLOC union {
 		uint8_t b[FALCON_KEYGEN_TEMP_10];
 		uint64_t dummy_u64;
 		fpr dummy_fpr;
 	} tmp;
-	TEMPALLOC int8_t f[n], g[n], F[n], G[n];
-	TEMPALLOC uint16_t h[n];
-	TEMPALLOC unsigned char seed[48];
-	TEMPALLOC inner_shake256_context rng;
-
-	/*
-	 * Generate key pair.
-	 */
-	randombytes(seed, sizeof seed);
-	inner_shake256_init(&rng);
-	inner_shake256_inject(&rng, seed, sizeof seed);
-	inner_shake256_flip(&rng);
-	lilipu_keygen(&rng, f, g, F, G, logn, tmp.b);
-
-	printf("f, g, F, G:\n");
-	for (size_t i = 0; i < n; i++) printf("%d,", f[i]);
-	printf("\n");
-	for (size_t i = 0; i < n; i++) printf("%d,", g[i]);
-	printf("\n");
-	for (size_t i = 0; i < n; i++) printf("%d,", F[i]);
-	printf("\n");
-	for (size_t i = 0; i < n; i++) printf("%d,", G[i]);
-	printf("\n");
-
-	randombytes((unsigned char *)h, sizeof h);
-	// make a signature of a random message...
-
 	TEMPALLOC union {
 		int8_t b[28 * 1024];
 		uint64_t dummy_u64;
 		fpr dummy_fpr;
 	} tmp2;
-	TEMPALLOC union {
-		int16_t sig[1024];
-	} r;
+	TEMPALLOC int8_t f[1024], g[1024], F[1024], G[1024];
+	TEMPALLOC int16_t h[1024], sig[1024];
+	TEMPALLOC unsigned char seed[48];
 	TEMPALLOC inner_shake256_context sc;
 
-	/*
-	 * Initialize a RNG.
-	 */
+	struct timeval t0, t1;
+	const int n_repetitions = 1000;
+
+	// Initialize a RNG.
 	randombytes(seed, sizeof seed);
 	inner_shake256_init(&sc);
 	inner_shake256_inject(&sc, seed, sizeof seed);
 	inner_shake256_flip(&sc);
 
-	/*
-	 * Compute the signature.
-	 */
-	lilipu_sign(r.sig, &sc, f, g, h, logn, isigma_sig, tmp2.b);
-	for (size_t i = 0; i < n; i++)
-		printf("%d,", r.sig[i]);
-	printf("\n");
+	gettimeofday(&t0, NULL);
+
+	// Generate key pair.
+	lilipu_keygen(&sc, f, g, F, G, logn, tmp.b);
+
+	gettimeofday(&t1, NULL);
+	printf("Key generation took %lld microseconds\n", time_diff(&t0, &t1));
+
+	// =========================================================================
+	// | Benchmark the signing of random messages                              |
+	// =========================================================================
+	gettimeofday(&t0, NULL);
+
+	for (int rep = 0; rep < n_repetitions; rep++) {
+		// make a signature of a random message...
+		randombytes((unsigned char *)h, sizeof h);
+
+		// Compute the signature.
+		lilipu_sign(sig, &sc, f, g, h, logn, isigma_sig, tmp2.b);
+	}
+
+	gettimeofday(&t1, NULL);
+	printf("Lilipu Signing %d random messages took: %lld microseconds\n", n_repetitions, time_diff(&t0, &t1));
+}
+
+void benchmark_falcon() {
+	TEMPALLOC union {
+		uint8_t b[FALCON_KEYGEN_TEMP_10];
+		uint64_t dummy_u64;
+		fpr dummy_fpr;
+	} tmp;
+	TEMPALLOC union {
+		uint8_t b[72 * 1024];
+		uint64_t dummy_u64;
+		fpr dummy_fpr;
+	} tmp2;
+	TEMPALLOC union {
+		int16_t sig[1024];
+		uint16_t hm[1024];
+	} r;
+	TEMPALLOC int8_t f[1024], g[1024], F[1024], G[1024];
+	TEMPALLOC uint16_t h[1024];
+	TEMPALLOC unsigned char seed[48];
+	TEMPALLOC inner_shake256_context sc;
+
+	struct timeval t0, t1;
+	const int n_repetitions = 1000;
+
+	// Initialize a RNG.
+	randombytes(seed, sizeof seed);
+	inner_shake256_init(&sc);
+	inner_shake256_inject(&sc, seed, sizeof seed);
+	inner_shake256_flip(&sc);
+
+	gettimeofday(&t0, NULL);
+
+	// Generate key pair.
+	falcon_inner_keygen(&sc, f, g, F, G, h, 10, tmp.b);
+
+	gettimeofday(&t1, NULL);
+	printf("Key generation took %lld microseconds\n", time_diff(&t0, &t1));
+
+	// =========================================================================
+	// | Start the signing                                                     |
+	// =========================================================================
+	gettimeofday(&t0, NULL);
+
+	for (int rep = 0; rep < n_repetitions; rep++) {
+		// make a signature of a random message...
+		randombytes((unsigned char *)h, sizeof h);
+
+		// Compute the signature.
+		falcon_inner_sign_dyn(r.sig, &sc, f, g, F, G, r.hm, 10, tmp2.b);
+	}
+
+	gettimeofday(&t1, NULL);
+	printf("Falcon Signing %d random messages took: %lld microseconds\n", n_repetitions, time_diff(&t0, &t1));
 }
 
 void testmod2() {
-	const size_t logn = 10, n = MKN(logn);
-	int8_t f[n], g[n], check[n];
+	int8_t f[1024], g[1024], check[1024];
 	uint16_t tmp[2*n];
 
 	for (size_t i=0; i < n; i++)
@@ -695,13 +754,13 @@ void testmod2() {
 
 int main() {
 	srand(time(NULL));
+	prepare_random();
 
-	// fpr x = fpr_inv(fpr_scaled(1331, -10));
-	// long long N = fpr_rint(fpr_mul(x, fpr_of(1000000)));
-	// printf("%lld.%6lld\n", N / 1000000, N % 1000000);
+	// 1.3 ~ 1331 / 1024
+	const fpr isigma_sig = fpr_inv(fpr_scaled(1331, -10));
 
-	run();
-	// testmod2();
+	benchmark_lilipu(isigma_sig);
+	benchmark_falcon();
 
 	return 0;
 }
