@@ -253,10 +253,55 @@ lilipu_solve_NTRU(unsigned logn, int8_t *F, int8_t *G,
 }
 
 // =============================================================================
+/*
+ * Generate a random polynomial with a Gaussian distribution. This function
+ * also makes sure that the resultant of the polynomial with phi is odd.
+ */
+static void
+lilipu_poly_small_mkgauss(samplerZ samp, void *samp_ctx, int8_t *f, unsigned logn, fpr isigma_kg)
+{
+	size_t n, u;
+	unsigned mod2;
+
+	n = MKN(logn);
+	mod2 = 0;
+	for (u = 0; u < n; u ++) {
+		int s;
+
+	restart:
+		s = samp(samp_ctx, fpr_zero, isigma_kg);
+
+		/*
+		 * We need the coefficient to fit within -127..+127;
+		 * realistically, this is always the case except for
+		 * the very low degrees (N = 2 or 4), for which there
+		 * is no real security anyway.
+		 */
+		if (s < -127 || s > 127) {
+			goto restart;
+		}
+
+		/*
+		 * We need the sum of all coefficients to be 1; otherwise,
+		 * the resultant of the polynomial with X^N+1 will be even,
+		 * and the binary GCD will fail.
+		 */
+		if (u == n - 1) {
+			if ((mod2 ^ (unsigned)(s & 1)) == 0) {
+				goto restart;
+			}
+		} else {
+			mod2 ^= (unsigned)(s & 1);
+		}
+		f[u] = (int8_t)s;
+	}
+}
+
+// =============================================================================
 void
 lilipu_keygen(inner_shake256_context *rng,
 	int8_t *f, int8_t *g, fpr *q00, fpr *q10, fpr *q11,
-	unsigned logn, uint8_t *tmp, uint8_t tosage)
+	unsigned logn, uint8_t *tmp, fpr isigma_kg, uint8_t tosage)
 {
 	/*
 	 * Algorithm is the following:
@@ -264,12 +309,6 @@ lilipu_keygen(inner_shake256_context *rng,
 	 *  - Generate f and g with the Gaussian distribution.
 	 *
 	 *  - If either Res(f,phi) or Res(g,phi) is even, try again.
-	 *
-	 *  - If ||(f,g)|| is too large, try again.
-	 *
-	 *  - If ||B~_{f,g}|| is too large, try again.
-	 *
-	 *  - If f is not invertible mod phi mod q, try again.
 	 *
 	 *  - Solve the NTRU equation fG - gF = 1; if the solving fails,
 	 *    try again. Usual failure condition is when Res(f,phi)
@@ -290,12 +329,8 @@ lilipu_keygen(inner_shake256_context *rng,
 	 *
 	 * In the binary case, coefficients of f and g are generated
 	 * independently of each other, with a discrete Gaussian
-	 * distribution of standard deviation 1.17*sqrt(q/(2*N)). Then,
-	 * the two vectors have expected norm 1.17*sqrt(q), which is
-	 * also our acceptance bound: we require both vectors to be no
-	 * larger than that (this will be satisfied about 1/4th of the
-	 * time, thus we expect sampling new (f,g) about 4 times for that
-	 * step).
+	 * distribution of standard deviation 1/isigma_kg. Then,
+	 * the two vectors have expected norm 2n/isigma_kg.
 	 *
 	 * We require that Res(f,phi) and Res(g,phi) are both odd (the
 	 * NTRU equation solver requires it).
@@ -306,6 +341,7 @@ lilipu_keygen(inner_shake256_context *rng,
 		uint32_t normf, normg, norm;
 		int lim;
 
+
 		/*
 		 * The poly_small_mkgauss() function makes sure
 		 * that the sum of coefficients is 1 modulo 2
@@ -314,6 +350,19 @@ lilipu_keygen(inner_shake256_context *rng,
 		 */
 		poly_small_mkgauss(rc, f, logn);
 		poly_small_mkgauss(rc, g, logn);
+
+/*
+		// Normal sampling. We use a fast PRNG seeded from our SHAKE context ('rng').
+		sampler_context spc;
+		samplerZ samp;
+		void *samp_ctx;
+		spc.sigma_min = fpr_sigma_min[logn];
+		falcon_inner_prng_init(&spc.p, rng);
+		samp = Zf(sampler);
+		samp_ctx = &spc;
+		lilipu_poly_small_mkgauss(samp, samp_ctx, f, logn, isigma_kg);
+		lilipu_poly_small_mkgauss(samp, samp_ctx, g, logn, isigma_kg);
+*/
 
 		/*
 		 * Verify that all coefficients are within the bounds
@@ -345,6 +394,7 @@ lilipu_keygen(inner_shake256_context *rng,
 		 * Since f and g are integral, the squared norm
 		 * of (g,-f) is an integer.
 		 */
+
 		normf = poly_small_sqnorm(f, logn);
 		normg = poly_small_sqnorm(g, logn);
 		norm = (normf + normg) | -((normf | normg) >> 31);
@@ -355,6 +405,7 @@ lilipu_keygen(inner_shake256_context *rng,
 		/*
 		 * We compute the orthogonalized vector norm.
 		 */
+
 		rt1 = (fpr *)tmp;
 		rt2 = rt1 + n;
 		rt3 = rt2 + n;
@@ -379,7 +430,6 @@ lilipu_keygen(inner_shake256_context *rng,
 		if (!fpr_lt(bnorm, fpr_bnorm_max)) {
 			continue;
 		}
-
 		// Changed: do not calculate h.
 
 		// since we store F, G in tmp, we need 30*1024 instead of 28*1024
@@ -401,6 +451,8 @@ lilipu_keygen(inner_shake256_context *rng,
 			to_sage("G", G, logn);
 		}
 
+		// TODO: use less memory by first calculating q10 and storing
+		//       f, g, F, G halfway in the q's.
 		// Calculate q00, q10, q11 (in FFT representation) using
 		// Q = B * adj(B^{T})
 		qxx = (fpr *)rec_tmp;
@@ -448,38 +500,45 @@ lilipu_keygen(inner_shake256_context *rng,
 // Calculate (f*g) mod (2, phi) and store the result (mod 2) in fg.
 // tmp must be of size at least 2n.
 static void
-lilipu_inner_mulmod2(int8_t *restrict fg, const int8_t *restrict f,
-		const uint16_t *restrict g, unsigned logn, uint16_t *tmp)
+lilipu_inner_mulmod2(int8_t *restrict ab, const int8_t *restrict a,
+		const uint16_t *restrict b, unsigned logn, uint16_t *tmp)
 {
 	size_t n, u;
-	uint16_t *ft, *gt;
 
 	n = MKN(logn);
+	if (logn < 5) {
+		size_t v;
+		memset(ab, (int8_t)0, n);
+		for (u = 0; u < n; u ++)
+			for (v = 0; v < n; v ++)
+				ab[modp_add(u, v, n)] ^= a[u] & (int8_t)b[v];
+		for (u = 0; u < n; u ++)
+			ab[u] &= 1;
+	} else {
+		uint16_t *at, *bt;
 
-	ft = tmp;
-	gt = ft + n;
+		n = MKN(logn);
+		at = tmp;
+		bt = at + n;
 
-	for (u = 0; u < n; u ++) {
-		ft[u] = (uint16_t)f[u] & 1;
-	}
-	for (u = 0; u < n; u ++) {
-		gt[u] = (uint16_t)g[u] & 1;
-	}
+		for (u = 0; u < n; u ++) {
+			at[u] = (uint16_t)a[u] & 1;
+		}
+		for (u = 0; u < n; u ++) {
+			bt[u] = (uint16_t)b[u] & 1;
+		}
 
-	/*
-	 * Use NTT with q = 12289 from vrfy.c
-	 */
-	mq_NTT(ft, logn);
-	mq_NTT(gt, logn);
-	mq_poly_tomonty(gt, logn);
-	mq_poly_montymul_ntt(ft, gt, logn);
-	mq_iNTT(ft, logn);
+		// Use NTT with q = 12289 from vrfy.c
+		mq_NTT(at, logn);
+		mq_NTT(bt, logn);
+		mq_poly_tomonty(bt, logn);
+		mq_poly_montymul_ntt(at, bt, logn);
+		mq_iNTT(at, logn);
 
-	/*
-	 * Reduce the output to {0,1} where (Q-x) for 0 < x < Q/2 is cast to x%2.
-	 */
-	for (u = 0; u < n; u ++) {
-		fg[u] = (ft[u] ^ -(((Q >> 1) - (uint32_t)ft[u]) >> 31)) & 1;
+		// Reduce the output to {0,1} where (Q-x) for 0 < x < Q/2 is cast to x%2.
+		for (u = 0; u < n; u ++) {
+			ab[u] = (at[u] ^ -(((Q >> 1) - (uint32_t)at[u]) >> 31)) & 1;
+		}
 	}
 }
 
@@ -653,7 +712,7 @@ lilipu_verify(const uint16_t *hm, int16_t *s0, const int16_t *s1,
 	const fpr *q00, const fpr *q10, const fpr *q11, unsigned logn, const fpr verif_bound, fpr *tmp)
 {
 	size_t u, n, s1mod2;
-	fpr *t0, *t1, *t2, *t3;
+	fpr *t0, *t1, *t2, *t3, trace;
 
 	n = MKN(logn);
 	t0 = tmp;
@@ -717,16 +776,23 @@ lilipu_verify(const uint16_t *hm, int16_t *s0, const int16_t *s1,
 	falcon_inner_poly_add(t1, t2, logn);
 	falcon_inner_poly_add(t1, t3, logn);
 
-	fpr v = fpr_zero, w = fpr_zero;
-	for (u = 0; u < n/2; u ++)
-		v = fpr_add(v, t1[u]);
-	for (u = n/2; u < n; u ++)
+	trace = fpr_zero;
+	for (u = 0; u < n/2; u ++) {
+		trace = fpr_add(trace, t1[u]);
+	}
+
+/*
+	fpr w = fpr_zero;
+	for (u = n/2; u < n; u ++) {
 		w = fpr_add(w, t1[u]);
+	}
 	assert(fpr_lt(w, fpr_inv(fpr_of(1000 * 1000)))); // imag. embeddings < 10^{-6}
+*/
+
 	// note: only n/2 embeddings are stored,
 	// the others are simply the conjugate embeddings.
 	// TODO: this can be optimized in the verif_bound, cancelling with 2 in (2d).
-	v = fpr_double(v);
+	trace = fpr_double(trace);
 
 	// falcon_inner_iFFT(t1, logn);
 	// printf("t1[0] = %.8f\n", t1[0]);
@@ -734,7 +800,7 @@ lilipu_verify(const uint16_t *hm, int16_t *s0, const int16_t *s1,
 	/*
 	 * Signature is valid if and only if `v` is short enough and s2%2 == 0 (<=> s1mod2 = 0).
 	 */
-	return fpr_lt(v, verif_bound) & ~s1mod2;
+	return fpr_lt(trace, verif_bound) & ~s1mod2;
 }
 
 // =============================================================================
@@ -815,7 +881,7 @@ crypto_lilipu_sign(unsigned char *sm, unsigned long long *smlen,
 // =============================================================================
 const size_t logn = 10, n = MKN(logn);
 
-void benchmark_lilipu(fpr isigma_sig) {
+void benchmark_lilipu(fpr isigma_kg, fpr isigma_sig) {
 	TEMPALLOC union {
 		uint8_t b[42 * 1024];
 		uint64_t dummy_u64;
@@ -840,7 +906,7 @@ void benchmark_lilipu(fpr isigma_sig) {
 	gettimeofday(&t0, NULL);
 
 	// Generate key pair.
-	lilipu_keygen(&sc, f, g, q00, q10, q11, logn, tmp.b, 0);
+	lilipu_keygen(&sc, f, g, q00, q10, q11, logn, tmp.b, isigma_kg, 1);
 
 	gettimeofday(&t1, NULL);
 	printf("Key generation took %lld microseconds\n", time_diff(&t0, &t1));
@@ -918,7 +984,7 @@ void benchmark_falcon() {
 	printf("Falcon sign/s = %.1f\n", sign_ps);
 }
 
-void test_lilipu_valid_signature(fpr isigma_sig, fpr verif_bound) {
+void test_lilipu_valid_signature(fpr isigma_kg, fpr isigma_sig, fpr verif_bound) {
 	TEMPALLOC union {
 		uint8_t b[42 * 1024];
 		uint64_t dummy_u64;
@@ -938,7 +1004,7 @@ void test_lilipu_valid_signature(fpr isigma_sig, fpr verif_bound) {
 	inner_shake256_flip(&sc);
 
 	// Generate key pair.
-	lilipu_keygen(&sc, f, g, q00, q10, q11, logn, tmp.b, 0);
+	lilipu_keygen(&sc, f, g, q00, q10, q11, logn, tmp.b, isigma_kg, 0);
 
 	for (int rep = 0; rep < 1000; rep++) {
 		// make a signature of a random message...
@@ -950,14 +1016,19 @@ void test_lilipu_valid_signature(fpr isigma_sig, fpr verif_bound) {
 		// to_sage16("s1", sig, logn);
 
 		assert(lilipu_verify(h, s0, sig, q00, q10, q11, logn, verif_bound, (fpr *)tmp.b));
-		randombytes((unsigned char *)sig, sizeof sig);
+		// randombytes((unsigned char *)sig, sizeof sig);
+		for (size_t u = 0; u < n; u ++)
+			sig[u] = h[u] & 1;
 		assert(!lilipu_verify(h, s0, sig, q00, q10, q11, logn, verif_bound, (fpr *)tmp.b));
 	}
+
+	printf("Valid signatures were signed.\n");
+	printf("No simple forgeries were possible.\n");
 }
 
 void testmod2() {
 	int8_t f[1024], fg[1024], check[1024];
-	uint16_t g[1024], tmp[2*n];
+	uint16_t g[1024], tmp[2*1024];
 
 	for (size_t rep = 0; rep < 100; rep ++) {
 		for (size_t u = 0; u < n; u ++)
@@ -969,13 +1040,36 @@ void testmod2() {
 
 		for (size_t u = 0; u < n; u ++)
 			for (size_t v = 0; v < n; v ++)
-				check[modp_add(u, v, n)] ^= (f[u] & g[v]) & 1;
+				check[modp_add(u, v, n)] ^= f[u] & g[v];
+		for (size_t u = 0; u < n; u ++)
+			check[u] &= 1;
 
 		lilipu_inner_mulmod2(fg, f, g, logn, tmp);
 
 		for (size_t u = 0; u < n; u ++)
 			assert(fg[u] == check[u]);
 	}
+
+/*
+	struct timeval t0, t1;
+	gettimeofday(&t0, NULL);
+	for (size_t rep = 0; rep < 100; rep ++) {
+		for (size_t u = 0; u < n; u ++) f[u] = rand();
+		for (size_t u = 0; u < n; u ++) g[u] = rand();
+		lilipu_inner_mulmod2_old(fg, f, g, logn, tmp);
+	}
+	gettimeofday(&t1, NULL);
+	printf("d log d took: %d μs\n", time_diff(&t0, &t1));
+
+	gettimeofday(&t0, NULL);
+	for (size_t rep = 0; rep < 100; rep ++) {
+		for (size_t u = 0; u < n; u ++) f[u] = rand();
+		for (size_t u = 0; u < n; u ++) g[u] = rand();
+		lilipu_inner_mulmod2(fg, f, g, logn);
+	}
+	gettimeofday(&t1, NULL);
+	printf("d^2 took: %d μs\n", time_diff(&t0, &t1));
+*/
 }
 
 int8_t valid_sigma(fpr sigma_sig) {
@@ -986,6 +1080,14 @@ int8_t valid_sigma(fpr sigma_sig) {
 int main() {
 	unsigned seed = time(NULL);
 
+	const fpr sigma_kg  = fpr_div(fpr_of(18), fpr_of(10)); // 1.3
+
+#ifdef __AVX2__
+	const fpr sigma_FALCON = fpr_sqrt(fpr_div(fpr_of(117*117*Q), fpr_of(100*100*2*n))); // 1.17 √(q/2n)
+	printf("Sigmas: %.2f (lilipu) vs %.2f (falcon)\n", sigma_kg.v, sigma_FALCON.v);
+#else
+#endif
+
 	const fpr sigma_sig = fpr_div(fpr_of(13), fpr_of(10)); // 1.3
 	// verif_margin = 1 + √(64 * ln(2) / 1024)   (see scheme.sage)
 	const fpr verif_margin = fpr_add(fpr_one, fpr_sqrt(fpr_mul(fpr_log2, fpr_div(fpr_of(64), fpr_of(n)))));
@@ -994,15 +1096,19 @@ int main() {
 	// Using trace(s Q s^H) = trace(x x^H) = ||x||^2 [K:\QQ] = ||x||^2 d, we arrive at the verif_bound.
 	const fpr verif_bound = fpr_mul(fpr_sqr(fpr_mul(verif_margin, fpr_double(sigma_sig))), fpr_double(fpr_sqr(fpr_of(n))));
 
+	// sigmas used in FALCON:
+	// for (int i = 1; i <= 10; i++) printf("%d: %.2f\n", i, 1.17 * sqrt(Q / (2 << i)));
+
 	printf("Seed: %u\n", seed);
 	srand(seed);
 	// prepare_random();
 	// testmod2();
-	assert(valid_sigma(sigma_sig));
+	// testmod2();
+	assert(valid_sigma(sigma_kg) && valid_sigma(sigma_sig));
 
-	// benchmark_lilipu(isigma_sig);
+	benchmark_lilipu(fpr_inv(sigma_kg), fpr_inv(sigma_sig));
 	// benchmark_falcon();
 
-	test_lilipu_valid_signature(fpr_inv(sigma_sig), verif_bound);
+	test_lilipu_valid_signature(fpr_inv(sigma_kg), fpr_inv(sigma_sig), verif_bound);
 	return 0;
 }
