@@ -9,7 +9,7 @@
 .POSIX:
 
 CC = c99
-CFLAGS = -W -Wall -O2
+CFLAGS = -W -Wall -Wshadow -O2
 LD = c99
 LDFLAGS = 
 LIBS = 
@@ -28,6 +28,11 @@ build:
 
 clean:
 	-rm -f build/kat1024int $(OBJ1) $(OBJ2)
+
+
+a:
+	$(CC) $(CFLAGS) -o a.out lilipu.c
+
 
 build/kat1024int: $(OBJ1) $(OBJ2)
 	$(LD) $(LDFLAGS) -o build/kat1024int $(OBJ1) $(OBJ2) $(LIBS)
