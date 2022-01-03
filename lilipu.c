@@ -31,7 +31,7 @@
 #define CRYPTO_BYTES            1330
 #define CRYPTO_ALGNAME          "Lilipu-1024"
 
-
+/*
 // 32 MB buffer of random data:
 unsigned char _randomness_buffer[32 * 1024 * 1024], *_randomness_ptr = NULL;
 
@@ -41,13 +41,18 @@ void prepare_random() {
 	_randomness_ptr = _randomness_buffer;
 }
 
+int randombytes(unsigned char *x, unsigned long long xlen) {
+	memcpy(x, _randomness_ptr, xlen);
+	_randomness_ptr += xlen;
+	return 1;
+}
+*/
+
 // Perhaps not the way to go:
 // void randombytes_init(unsigned char *entropy_input,
 //		unsigned char *personalization_string, int security_strength);
 int randombytes(unsigned char *x, unsigned long long xlen) {
 	// TODO: make proper randomness generator
-	// memcpy(x, _randomness_ptr, xlen);
-	// _randomness_ptr += xlen;
 	for (; xlen -- > 0; ++x) *x = ((unsigned char) rand());
 	return 1;
 }
@@ -362,7 +367,7 @@ lilipu_keygen(inner_shake256_context *rng,
 		samp_ctx = &spc;
 		lilipu_poly_small_mkgauss(samp, samp_ctx, f, logn, isigma_kg);
 		lilipu_poly_small_mkgauss(samp, samp_ctx, g, logn, isigma_kg);
-*/
+// */
 
 		/*
 		 * Verify that all coefficients are within the bounds
@@ -395,17 +400,20 @@ lilipu_keygen(inner_shake256_context *rng,
 		 * of (g,-f) is an integer.
 		 */
 
+// /*
 		normf = poly_small_sqnorm(f, logn);
 		normg = poly_small_sqnorm(g, logn);
 		norm = (normf + normg) | -((normf | normg) >> 31);
 		if (norm >= 16823) {
 			continue;
 		}
+// */
 
 		/*
 		 * We compute the orthogonalized vector norm.
 		 */
 
+// /*
 		rt1 = (fpr *)tmp;
 		rt2 = rt1 + n;
 		rt3 = rt2 + n;
@@ -430,6 +438,7 @@ lilipu_keygen(inner_shake256_context *rng,
 		if (!fpr_lt(bnorm, fpr_bnorm_max)) {
 			continue;
 		}
+// */
 		// Changed: do not calculate h.
 
 		// since we store F, G in tmp, we need 30*1024 instead of 28*1024
