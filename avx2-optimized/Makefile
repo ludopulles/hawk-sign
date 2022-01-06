@@ -33,6 +33,8 @@ clean:
 a:
 	$(CC) $(CFLAGS) -o a.out lilipu.c
 
+b:
+	$(CC) -g -Wall -Wshadow -fsanitize=address,undefined -mavx2 -o b.out lilipu.c
 
 build/kat1024avx2: $(OBJ1) $(OBJ2)
 	$(LD) $(LDFLAGS) -o build/kat1024avx2 $(OBJ1) $(OBJ2) $(LIBS)

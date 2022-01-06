@@ -19,7 +19,10 @@
 #include "rng.c"
 #include "shake.c"
 #include "sign.c"
+
+#include "lilipu64.c"
 #include "vrfy.c"
+
 
 // See nist.c for info on how to use TEMPALLOC
 #define TEMPALLOC
@@ -74,54 +77,6 @@ void to_sage16(const char *varname, const int16_t *f, unsigned logn) {
 // =============================================================================
 // | FUNCTIONS FOR KEY GENERATION                                              |
 // =============================================================================
-/*
- * Solving the NTRU equation for q = 1, deepest level: compute the resultants
- * of f and g with X^N+1, and use binary GCD. The F and G values are returned
- * in tmp[].
- *
- * Returned value: 1 on success, 0 on error.
- */
-static int
-lilipu_solve_NTRU_deepest(unsigned logn_top,
-	const int8_t *f, const int8_t *g, uint32_t *tmp)
-{
-	size_t len;
-	uint32_t *Fp, *Gp, *fp, *gp, *t1;
-	const small_prime *primes;
-
-	len = MAX_BL_SMALL[logn_top];
-	primes = PRIMES;
-
-	Fp = tmp;
-	Gp = Fp + len;
-	fp = Gp + len;
-	gp = fp + len;
-	t1 = gp + len;
-
-	make_fg(fp, f, g, logn_top, logn_top, 0);
-
-	/*
-	 * We use the CRT to rebuild the resultants as big integers.
-	 * There are two such big integers. The resultants are always
-	 * nonnegative.
-	 */
-	zint_rebuild_CRT(fp, len, len, 2, primes, 0, t1);
-
-	/*
-	 * Apply the binary GCD. The zint_bezout() function works only
-	 * if both inputs are odd.
-	 *
-	 * We can test on the result and return 0 because that would
-	 * imply failure of the NTRU solving equation, and the (f,g)
-	 * values will be abandoned in that case.
-	 */
-	if (!zint_bezout(Gp, Fp, fp, gp, len, t1)) {
-		return 0;
-	}
-
-	return 1;
-}
-
 // =============================================================================
 /*
  * Solve the NTRU equation, but now for q = 1. Returned value is 1 on success,
@@ -140,7 +95,7 @@ lilipu_solve_NTRU(unsigned logn, int8_t *F, int8_t *G,
 
 	n = MKN(logn);
 
-	if (!lilipu_solve_NTRU_deepest(logn, f, g, tmp)) {
+	if (!lilipu_solve_NTRU_deepest64(logn, f, g, tmp)) {
 		return 0;
 	}
 
@@ -154,7 +109,7 @@ lilipu_solve_NTRU(unsigned logn, int8_t *F, int8_t *G,
 
 		depth = logn;
 		while (depth -- > 0) {
-			if (!solve_NTRU_intermediate(logn, f, g, depth, tmp)) {
+			if (!solve_NTRU_intermediate64(logn, f, g, depth, tmp)) {
 				return 0;
 			}
 		}
@@ -163,7 +118,9 @@ lilipu_solve_NTRU(unsigned logn, int8_t *F, int8_t *G,
 
 		depth = logn;
 		while (depth -- > 2) {
-			if (!solve_NTRU_intermediate(logn, f, g, depth, tmp)) {
+			printf("Doing depth %d\n", depth);
+			if (!solve_NTRU_intermediate64(logn, f, g, depth, tmp)) {
+				printf("Nope at depth %d\n", depth);
 				return 0;
 			}
 		}
@@ -189,6 +146,14 @@ lilipu_solve_NTRU(unsigned logn, int8_t *F, int8_t *G,
 	if (!poly_big_to_small(F, tmp, lim, logn)
 		|| !poly_big_to_small(G, tmp + n, lim, logn))
 	{
+		printf("Values(F):");
+		for (u = 0; u < n; u++)
+			printf(" %d", tmp[u]);
+		printf("\n");
+		printf("Values(G):");
+		for (u = 0; u < n; u++)
+			printf(" %d", tmp[u+n]);
+		printf("\n");
 		return 0;
 	}
 
@@ -243,43 +208,38 @@ lilipu_solve_NTRU(unsigned logn, int8_t *F, int8_t *G,
  * also makes sure that the resultant of the polynomial with phi is odd.
  */
 static void
-lilipu_poly_small_mkgauss(samplerZ samp, void *samp_ctx, int8_t *f, unsigned logn, fpr isigma_kg)
+lilipu_poly_small_mkgauss(samplerZ samp, void *samp_ctx, int8_t *f, unsigned logn, fpr isigma_kg, int lim)
 {
 	size_t n, u;
+	int s;
 	unsigned mod2;
 
 	n = MKN(logn);
 	mod2 = 0;
-	for (u = 0; u < n; u ++) {
-		int s;
 
-	restart:
+	for (u = n; u -- > 1; ) {
+		do {
+			s = samp(samp_ctx, fpr_zero, isigma_kg);
+			/*
+			 * We need the coefficient to fit within -127..+127;
+			 * realistically, this is always the case except for
+			 * the very low degrees (N = 2 or 4), for which there
+			 * is no real security anyway.
+			 */
+		} while (s <= -lim || s >= lim);
+		mod2 ^= (unsigned)(s & 1);
+		f[u] = (int8_t)s;
+	}
+
+	do {
 		s = samp(samp_ctx, fpr_zero, isigma_kg);
-
-		/*
-		 * We need the coefficient to fit within -127..+127;
-		 * realistically, this is always the case except for
-		 * the very low degrees (N = 2 or 4), for which there
-		 * is no real security anyway.
-		 */
-		if (s < -127 || s > 127) {
-			goto restart;
-		}
-
 		/*
 		 * We need the sum of all coefficients to be 1; otherwise,
 		 * the resultant of the polynomial with X^N+1 will be even,
 		 * and the binary GCD will fail.
 		 */
-		if (u == n - 1) {
-			if ((mod2 ^ (unsigned)(s & 1)) == 0) {
-				goto restart;
-			}
-		} else {
-			mod2 ^= (unsigned)(s & 1);
-		}
-		f[u] = (int8_t)s;
-	}
+	} while (s <= -lim || s >= lim || mod2 == (unsigned)(s & 1));
+	f[0] = (int8_t)s;
 }
 
 // =============================================================================
@@ -299,19 +259,11 @@ lilipu_keygen(inner_shake256_context *rng,
 	 *    try again. Usual failure condition is when Res(f,phi)
 	 *    and Res(g,phi) are not prime to each other.
 	 */
-	size_t n, u;
-	RNG_CONTEXT *rc;
+	size_t n;
 
 	n = MKN(logn);
-	rc = rng;
 
 	/*
-	 * We need to generate f and g randomly, until we find values
-	 * such that the norm of (g,-f), and of the orthogonalized
-	 * vector, are satisfying. The orthogonalized vector is:
-	 *   (q*adj(f)/(f*adj(f)+g*adj(g)), q*adj(g)/(f*adj(f)+g*adj(g)))
-	 * (it is actually the (N+1)-th row of the Gram-Schmidt basis).
-	 *
 	 * In the binary case, coefficients of f and g are generated
 	 * independently of each other, with a discrete Gaussian
 	 * distribution of standard deviation 1/isigma_kg. Then,
@@ -322,21 +274,9 @@ lilipu_keygen(inner_shake256_context *rng,
 	 */
 	for (;;) {
 		int8_t *F, *G, *rec_tmp;
-		fpr *qxx, *rt1, *rt2, *rt3, *rt4, bnorm;
-		uint32_t normf, normg, norm;
+		fpr *qxx, *rt1, *rt2, *rt3, *rt4;
 		int lim;
 
-
-		/*
-		 * The poly_small_mkgauss() function makes sure
-		 * that the sum of coefficients is 1 modulo 2
-		 * (i.e. the resultant of the polynomial with phi
-		 * will be odd).
-		 */
-		poly_small_mkgauss(rc, f, logn);
-		poly_small_mkgauss(rc, g, logn);
-
-/*
 		// Normal sampling. We use a fast PRNG seeded from our SHAKE context ('rng').
 		sampler_context spc;
 		samplerZ samp;
@@ -345,9 +285,6 @@ lilipu_keygen(inner_shake256_context *rng,
 		falcon_inner_prng_init(&spc.p, rng);
 		samp = Zf(sampler);
 		samp_ctx = &spc;
-		lilipu_poly_small_mkgauss(samp, samp_ctx, f, logn, isigma_kg);
-		lilipu_poly_small_mkgauss(samp, samp_ctx, g, logn, isigma_kg);
-// */
 
 		/*
 		 * Verify that all coefficients are within the bounds
@@ -356,70 +293,18 @@ lilipu_keygen(inner_shake256_context *rng,
 		 * key will be encodable with FALCON_COMP_TRIM.
 		 */
 		lim = 1 << (Zf(max_fg_bits)[logn] - 1);
-		for (u = 0; u < n; u ++) {
-			/*
-			 * We can use non-CT tests since on any failure
-			 * we will discard f and g.
-			 */
-			if (f[u] >= lim || f[u] <= -lim
-				|| g[u] >= lim || g[u] <= -lim)
-			{
-				lim = -1;
-				break;
-			}
-		}
-		if (lim < 0) {
-			continue;
-		}
 
-		/*
-		 * Bound is 1.17*sqrt(q). We compute the squared
-		 * norms. With q = 12289, the squared bound is:
-		 *   (1.17^2)* 12289 = 16822.4121
-		 * Since f and g are integral, the squared norm
-		 * of (g,-f) is an integer.
-		 */
+		int8_t hardf[256] = { -1, 0, 2, 0, 1, 1, -3, -1, -2, -1, -1, 0, -1, -1, 3, 1, 0, 1, -2, -1, 1, 0, 0, 0, 0, 0, -2, 2, 0, 0, 1, 0, -2, 0, -2, -1, 2, 2, 0, 0, 2, 0, -1, 1, 0, 2, -3, 0, 1, -2, 1, 1, -1, 1, -1, 1, -3, -1, 1, -3, -1, 1, -2, -1, -2, 2, 0, 2, 0, 0, -2, 0, 2, 3, -1, 0, 2, 2, 0, 2, -1, -1, -1, 0, 1, -1, 1, 0, -1, -1, 1, 0, -3, 1, -2, 0, -1, 1, 0, 2, 0, 1, 0, 0, 2, 0, -1, 0, 0, 0, -1, 0, 1, 0, 0, 0, 1, 2, -1, -2, -1, 2, 0, 1, 0, 0, 0, -2, -2, -1, -2, -1, -1, 1, 1, -1, 2, 1, 0, 3, -1, -1, 0, 1, 0, 1, 3, -1, -2, 1, 0, 2, 0, -1, 1, 0, -1, 0, 3, 1, 0, 0, 0, -2, 0, 0, -1, -2, 0, -1, 1, 0, -2, 0, -1, -1, 1, -1, 3, 1, 0, 1, -2, 1, 2, 0, 1, 0, 0, 2, 0, 0, -2, -1, 1, 1, 0, 1, 1, 4, 2, 0, 3, 1, 2, 0, 1, 0, 1, 2, 2, 0, -1, 2, 0, 1, -1, -1, -1, 2, -1, 1, -1, 0, 1, 0, -1, 0, -2, -1, 2, -1, -1, 1, 2, -1, 0, 2, 3, -3, 0, 0, 0, 2, 1, -1, 1, 2, -2, 1, 2, 1, 0, 1, -1, 0 };
+		int8_t hardg[256] = { 0, 0, 2, 3, 3, 1, 0, -2, 0, 0, 0, -1, 0, 2, 0, -1, 0, 1, 1, 0, -2, 2, -1, -2, 2, 1, -1, 0, 0, -1, 1, 3, 1, -2, 0, 0, 1, 2, 1, 0, -1, -2, 0, -3, 0, -1, -1, -1, 1, -1, 0, 1, 1, -2, -1, 0, 0, 0, 1, -1, 2, 0, 0, 0, 1, -1, 1, 4, 0, -1, 1, -1, 0, -1, 0, -1, 0, 2, 0, 0, -1, 0, 1, 0, 1, 2, -1, 1, -2, 1, 1, -1, 0, 2, -1, -2, 0, 1, 1, 0, 0, -2, 2, 0, 2, 1, 1, 1, -1, -1, 2, 0, 0, 0, 1, 1, 1, 2, -2, 0, 0, 1, -2, 1, -1, 0, 1, 0, 1, -1, -2, 1, 0, -1, -1, -1, 1, 0, 1, 1, 0, 2, 1, -2, 1, 0, -3, -1, 0, 1, 0, -1, 3, 1, -1, 0, 0, -1, 2, -1, -1, -1, 1, 3, -2, 1, 0, 0, 2, 0, 0, -2, 0, -1, 1, -3, 1, -1, 0, 1, 2, 1, 0, -1, -3, -3, -1, 1, 2, -1, 0, -3, -1, 0, 1, 2, 2, 1, 0, 0, -1, -3, 2, -1, 0, 3, 1, -1, 2, 2, -1, 0, 2, 1, 0, 0, 1, 0, 1, -3, 0, 0, -2, 0, 2, 1, -1, -1, -1, -2, -1, -2, 1, -2, -1, -1, -1, -1, 1, -2, 2, -1, -1, -1, -1, 0, 1, -3, -2, -2, -1, 2, 1, -3, -2, -1 };
+		assert(n == 256);
+		// lilipu_poly_small_mkgauss(samp, samp_ctx, f, logn, isigma_kg, lim);
+		// lilipu_poly_small_mkgauss(samp, samp_ctx, g, logn, isigma_kg, lim);
+		memcpy(f, hardf, sizeof hardf);
+		memcpy(g, hardg, sizeof hardg);
 
-// /*
-		normf = poly_small_sqnorm(f, logn);
-		normg = poly_small_sqnorm(g, logn);
-		norm = (normf + normg) | -((normf | normg) >> 31);
-		if (norm >= 16823) {
-			continue;
-		}
-// */
+// F = [-8, -10, 1, 7, 3, -7, -18, -3, 9, 4, 2, 7, -4, 0, 3, 7, -1, 3, -8, -2, -8, 8, -14, -9, -5, 2, -8, 5, 5, -4, 8, 9, -10, 0, -3, 0, 0, 3, -9, 0, -4, -19, -11, -2, -8, 1, -10, 7, -1, -5, 5, -6, -1, 9, -9, 12, 12, -1, -2, 14, -3, -4, 1, 4, -17, -3, -5, -5, -3, 11, -5, 1, 7, -3, -14, -6, 1, -8, -11, -7, -10, 6, 7, 10, 3, -7, -9, -11, -4, 13, -2, -1, -1, 9, 8, 10, 6, -4, -2, -1, 4, -6, -10, 0, -4, 0, 5, 3, 1, 4, -9, -8, -1, -1, 2, -1, -1, 6, -5, 12, 3, 3, 15, -4, -6, 4, -7, -12, -9, -8, -1, 3, 3, 1, 6, -1, -11, 10, -2, -5, -7, 10, -15, 4, 1, 2, -6, -7, 2, 4, 1, 1, -14, -7, 8, 1, 19, 3, -1, 1, 5, 6, 6, -2, -12, 2, -10, -1, 9, 5, -7, 4, -14, -1, -1, -6, 2, 7, 2, -13, -1, 0, -9, -3, 6, -5, -15, 1, -6, -1, 8, -3, -4, 14, 10, -2, 0, 6, -5, -1, 5, 6, -2, -4, -5, 3, 1, -18, -9, 6, -7, -5, 1, 4, -3, 3, 0, -3, 13, 5, -7, 4, 3, 5, 1, -3, 6, -14, -1, 8, -2, -6, 7, 3, -1, 4, 4, 11, -5, -12, 6, -7, 12, 4, -1, -2, -4, -2, 0, 0, 12, -17, 2, -3, 7, 5]
+// G = [-15, -13, 4, -4, -3, -3, -8, -2, 4, 11, -5, 9, 5, 7, 14, -2, 3, -3, -3, 7, 15, 2, 2, 3, 4, -4, 0, 3, -6, -7, 2, 7, 1, -5, 0, 5, -7, 16, -3, -2, -1, 1, -5, -8, 4, -3, 5, 8, 3, 2, 13, -3, 5, 2, 1, 1, 4, -2, -7, -9, -10, 3, 3, 3, 5, 0, 8, 5, 0, 10, -4, -1, 1, -2, -3, 9, -1, 6, -12, -8, 3, 3, 10, 19, -1, -8, -6, -3, -9, 0, 1, -3, 8, 12, -3, -7, 8, -8, 5, 5, 4, 2, 1, 2, 4, -10, -6, 0, 12, 11, 5, 1, 3, -9, 2, 1, 4, 0, -2, 0, 9, 8, 9, -4, 8, 6, 2, -4, 0, -11, -7, 5, -4, -9, -1, 4, 8, 7, -3, -4, -4, -8, 0, -1, 5, -14, -7, -15, 14, 5, 3, 8, 3, -13, 9, 3, 6, -2, 10, -4, 6, 4, 4, -3, 3, -13, -8, 6, 9, -4, 7, 0, -9, -5, -2, -3, 12, 7, -2, -4, 1, 0, 6, -2, 8, -7, 1, 6, 5, -9, 3, -5, 1, 2, 9, 13, 6, -1, -1, -13, 8, -8, -4, 7, 0, -1, 4, 1, 8, 3, 4, 5, -6, 4, 5, -7, -1, -5, -8, 0, 8, 10, 8, 4, 4, 1, 4, 1, 0, -8, -7, 5, 0, -7, 8, 11, -3, 3, 1, -4, 1, -2, -2, 4, -1, -2, 5, 1, 2, -1, 11, 4, -2, -4, -11, 1]
 
-		/*
-		 * We compute the orthogonalized vector norm.
-		 */
-
-// /*
-		rt1 = (fpr *)tmp;
-		rt2 = rt1 + n;
-		rt3 = rt2 + n;
-		poly_small_to_fp(rt1, f, logn);
-		poly_small_to_fp(rt2, g, logn);
-		Zf(FFT)(rt1, logn);
-		Zf(FFT)(rt2, logn);
-		Zf(poly_invnorm2_fft)(rt3, rt1, rt2, logn);
-		Zf(poly_adj_fft)(rt1, logn);
-		Zf(poly_adj_fft)(rt2, logn);
-		Zf(poly_mulconst)(rt1, fpr_q, logn);
-		Zf(poly_mulconst)(rt2, fpr_q, logn);
-		Zf(poly_mul_autoadj_fft)(rt1, rt3, logn);
-		Zf(poly_mul_autoadj_fft)(rt2, rt3, logn);
-		Zf(iFFT)(rt1, logn);
-		Zf(iFFT)(rt2, logn);
-		bnorm = fpr_zero;
-		for (u = 0; u < n; u ++) {
-			bnorm = fpr_add(bnorm, fpr_sqr(rt1[u]));
-			bnorm = fpr_add(bnorm, fpr_sqr(rt2[u]));
-		}
-		if (!fpr_lt(bnorm, fpr_bnorm_max)) {
-			continue;
-		}
-// */
-		// Changed: do not calculate h.
 
 		// since we store F, G in tmp, we need 30*1024 instead of 28*1024
 		// temporary bytes.
@@ -430,6 +315,7 @@ lilipu_keygen(inner_shake256_context *rng,
 		// Solve the NTRU equation to get F and G.
 		lim = (1 << (Zf(max_FG_bits)[logn] - 1)) - 1;
 		if (!lilipu_solve_NTRU(logn, F, G, f, g, lim, (uint32_t *)rec_tmp)) {
+			exit(1);
 			continue;
 		}
 
@@ -867,7 +753,7 @@ crypto_lilipu_sign(unsigned char *sm, unsigned long long *smlen,
 // =============================================================================
 // | TESTING CODE                                                              |
 // =============================================================================
-const size_t logn = 10, n = MKN(logn);
+const size_t logn = 8, n = MKN(logn);
 
 void benchmark_lilipu(fpr isigma_kg, fpr isigma_sig) {
 	TEMPALLOC union {
@@ -1227,8 +1113,8 @@ int main() {
 	testmod2();
 	assert(valid_sigma(sigma_kg) && valid_sigma(sigma_sig));
 
-	test_forge_signature(fpr_inv(sigma_kg), fpr_inv(sigma_sig), verif_bound);
-	// benchmark_lilipu(fpr_inv(sigma_kg), fpr_inv(sigma_sig));
+	// test_forge_signature(fpr_inv(sigma_kg), fpr_inv(sigma_sig), verif_bound);
+	benchmark_lilipu(fpr_inv(sigma_kg), fpr_inv(sigma_sig));
 	// benchmark_falcon();
 
 	// test_lilipu_valid_signature(fpr_inv(sigma_kg), fpr_inv(sigma_sig), verif_bound);
