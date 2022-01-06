@@ -99,35 +99,18 @@ lilipu_solve_NTRU(unsigned logn, int8_t *F, int8_t *G,
 		return 0;
 	}
 
-	/*
-	 * For logn <= 2, we need to use solve_NTRU_intermediate()
-	 * directly, because coefficients are a bit too large and
-	 * do not fit the hypotheses in solve_NTRU_binary_depth0().
-	 */
-	if (logn <= 2) {
-		unsigned depth;
+/*
+	printf("Initial normDown(F), normDown(G):\n");
+	size_t len = MAX_BL_SMALL64[logn];
+	for (u = 0; u < len; u++) printf("%u,", tmp[u]);
+	printf("\n");
+	for (u = 0; u < len; u++) printf("%u,", tmp[len + u]);
+	printf("\n");
+*/
 
-		depth = logn;
-		while (depth -- > 0) {
-			if (!solve_NTRU_intermediate64(logn, f, g, depth, tmp)) {
-				return 0;
-			}
-		}
-	} else {
-		unsigned depth;
-
-		depth = logn;
-		while (depth -- > 2) {
-			printf("Doing depth %d\n", depth);
-			if (!solve_NTRU_intermediate64(logn, f, g, depth, tmp)) {
-				printf("Nope at depth %d\n", depth);
-				return 0;
-			}
-		}
-		if (!solve_NTRU_binary_depth1(logn, f, g, tmp)) {
-			return 0;
-		}
-		if (!solve_NTRU_binary_depth0(logn, f, g, tmp)) {
+	unsigned depth = logn;
+	while (depth -- > 0) {
+		if (!solve_NTRU_intermediate64(logn, f, g, depth, tmp)) {
 			return 0;
 		}
 	}
@@ -146,13 +129,14 @@ lilipu_solve_NTRU(unsigned logn, int8_t *F, int8_t *G,
 	if (!poly_big_to_small(F, tmp, lim, logn)
 		|| !poly_big_to_small(G, tmp + n, lim, logn))
 	{
+		printf("Values for F, G are too big!\n");
 		printf("Values(F):");
 		for (u = 0; u < n; u++)
-			printf(" %d", tmp[u]);
+			printf(" %d", (int32_t)tmp[u]);
 		printf("\n");
 		printf("Values(G):");
 		for (u = 0; u < n; u++)
-			printf(" %d", tmp[u+n]);
+			printf(" %d", (int32_t)tmp[u+n]);
 		printf("\n");
 		return 0;
 	}
@@ -293,18 +277,11 @@ lilipu_keygen(inner_shake256_context *rng,
 		 * key will be encodable with FALCON_COMP_TRIM.
 		 */
 		lim = 1 << (Zf(max_fg_bits)[logn] - 1);
-
-		int8_t hardf[256] = { -1, 0, 2, 0, 1, 1, -3, -1, -2, -1, -1, 0, -1, -1, 3, 1, 0, 1, -2, -1, 1, 0, 0, 0, 0, 0, -2, 2, 0, 0, 1, 0, -2, 0, -2, -1, 2, 2, 0, 0, 2, 0, -1, 1, 0, 2, -3, 0, 1, -2, 1, 1, -1, 1, -1, 1, -3, -1, 1, -3, -1, 1, -2, -1, -2, 2, 0, 2, 0, 0, -2, 0, 2, 3, -1, 0, 2, 2, 0, 2, -1, -1, -1, 0, 1, -1, 1, 0, -1, -1, 1, 0, -3, 1, -2, 0, -1, 1, 0, 2, 0, 1, 0, 0, 2, 0, -1, 0, 0, 0, -1, 0, 1, 0, 0, 0, 1, 2, -1, -2, -1, 2, 0, 1, 0, 0, 0, -2, -2, -1, -2, -1, -1, 1, 1, -1, 2, 1, 0, 3, -1, -1, 0, 1, 0, 1, 3, -1, -2, 1, 0, 2, 0, -1, 1, 0, -1, 0, 3, 1, 0, 0, 0, -2, 0, 0, -1, -2, 0, -1, 1, 0, -2, 0, -1, -1, 1, -1, 3, 1, 0, 1, -2, 1, 2, 0, 1, 0, 0, 2, 0, 0, -2, -1, 1, 1, 0, 1, 1, 4, 2, 0, 3, 1, 2, 0, 1, 0, 1, 2, 2, 0, -1, 2, 0, 1, -1, -1, -1, 2, -1, 1, -1, 0, 1, 0, -1, 0, -2, -1, 2, -1, -1, 1, 2, -1, 0, 2, 3, -3, 0, 0, 0, 2, 1, -1, 1, 2, -2, 1, 2, 1, 0, 1, -1, 0 };
-		int8_t hardg[256] = { 0, 0, 2, 3, 3, 1, 0, -2, 0, 0, 0, -1, 0, 2, 0, -1, 0, 1, 1, 0, -2, 2, -1, -2, 2, 1, -1, 0, 0, -1, 1, 3, 1, -2, 0, 0, 1, 2, 1, 0, -1, -2, 0, -3, 0, -1, -1, -1, 1, -1, 0, 1, 1, -2, -1, 0, 0, 0, 1, -1, 2, 0, 0, 0, 1, -1, 1, 4, 0, -1, 1, -1, 0, -1, 0, -1, 0, 2, 0, 0, -1, 0, 1, 0, 1, 2, -1, 1, -2, 1, 1, -1, 0, 2, -1, -2, 0, 1, 1, 0, 0, -2, 2, 0, 2, 1, 1, 1, -1, -1, 2, 0, 0, 0, 1, 1, 1, 2, -2, 0, 0, 1, -2, 1, -1, 0, 1, 0, 1, -1, -2, 1, 0, -1, -1, -1, 1, 0, 1, 1, 0, 2, 1, -2, 1, 0, -3, -1, 0, 1, 0, -1, 3, 1, -1, 0, 0, -1, 2, -1, -1, -1, 1, 3, -2, 1, 0, 0, 2, 0, 0, -2, 0, -1, 1, -3, 1, -1, 0, 1, 2, 1, 0, -1, -3, -3, -1, 1, 2, -1, 0, -3, -1, 0, 1, 2, 2, 1, 0, 0, -1, -3, 2, -1, 0, 3, 1, -1, 2, 2, -1, 0, 2, 1, 0, 0, 1, 0, 1, -3, 0, 0, -2, 0, 2, 1, -1, -1, -1, -2, -1, -2, 1, -2, -1, -1, -1, -1, 1, -2, 2, -1, -1, -1, -1, 0, 1, -3, -2, -2, -1, 2, 1, -3, -2, -1 };
-		assert(n == 256);
-		// lilipu_poly_small_mkgauss(samp, samp_ctx, f, logn, isigma_kg, lim);
-		// lilipu_poly_small_mkgauss(samp, samp_ctx, g, logn, isigma_kg, lim);
-		memcpy(f, hardf, sizeof hardf);
-		memcpy(g, hardg, sizeof hardg);
-
-// F = [-8, -10, 1, 7, 3, -7, -18, -3, 9, 4, 2, 7, -4, 0, 3, 7, -1, 3, -8, -2, -8, 8, -14, -9, -5, 2, -8, 5, 5, -4, 8, 9, -10, 0, -3, 0, 0, 3, -9, 0, -4, -19, -11, -2, -8, 1, -10, 7, -1, -5, 5, -6, -1, 9, -9, 12, 12, -1, -2, 14, -3, -4, 1, 4, -17, -3, -5, -5, -3, 11, -5, 1, 7, -3, -14, -6, 1, -8, -11, -7, -10, 6, 7, 10, 3, -7, -9, -11, -4, 13, -2, -1, -1, 9, 8, 10, 6, -4, -2, -1, 4, -6, -10, 0, -4, 0, 5, 3, 1, 4, -9, -8, -1, -1, 2, -1, -1, 6, -5, 12, 3, 3, 15, -4, -6, 4, -7, -12, -9, -8, -1, 3, 3, 1, 6, -1, -11, 10, -2, -5, -7, 10, -15, 4, 1, 2, -6, -7, 2, 4, 1, 1, -14, -7, 8, 1, 19, 3, -1, 1, 5, 6, 6, -2, -12, 2, -10, -1, 9, 5, -7, 4, -14, -1, -1, -6, 2, 7, 2, -13, -1, 0, -9, -3, 6, -5, -15, 1, -6, -1, 8, -3, -4, 14, 10, -2, 0, 6, -5, -1, 5, 6, -2, -4, -5, 3, 1, -18, -9, 6, -7, -5, 1, 4, -3, 3, 0, -3, 13, 5, -7, 4, 3, 5, 1, -3, 6, -14, -1, 8, -2, -6, 7, 3, -1, 4, 4, 11, -5, -12, 6, -7, 12, 4, -1, -2, -4, -2, 0, 0, 12, -17, 2, -3, 7, 5]
-// G = [-15, -13, 4, -4, -3, -3, -8, -2, 4, 11, -5, 9, 5, 7, 14, -2, 3, -3, -3, 7, 15, 2, 2, 3, 4, -4, 0, 3, -6, -7, 2, 7, 1, -5, 0, 5, -7, 16, -3, -2, -1, 1, -5, -8, 4, -3, 5, 8, 3, 2, 13, -3, 5, 2, 1, 1, 4, -2, -7, -9, -10, 3, 3, 3, 5, 0, 8, 5, 0, 10, -4, -1, 1, -2, -3, 9, -1, 6, -12, -8, 3, 3, 10, 19, -1, -8, -6, -3, -9, 0, 1, -3, 8, 12, -3, -7, 8, -8, 5, 5, 4, 2, 1, 2, 4, -10, -6, 0, 12, 11, 5, 1, 3, -9, 2, 1, 4, 0, -2, 0, 9, 8, 9, -4, 8, 6, 2, -4, 0, -11, -7, 5, -4, -9, -1, 4, 8, 7, -3, -4, -4, -8, 0, -1, 5, -14, -7, -15, 14, 5, 3, 8, 3, -13, 9, 3, 6, -2, 10, -4, 6, 4, 4, -3, 3, -13, -8, 6, 9, -4, 7, 0, -9, -5, -2, -3, 12, 7, -2, -4, 1, 0, 6, -2, 8, -7, 1, 6, 5, -9, 3, -5, 1, 2, 9, 13, 6, -1, -1, -13, 8, -8, -4, 7, 0, -1, 4, 1, 8, 3, 4, 5, -6, 4, 5, -7, -1, -5, -8, 0, 8, 10, 8, 4, 4, 1, 4, 1, 0, -8, -7, 5, 0, -7, 8, 11, -3, 3, 1, -4, 1, -2, -2, 4, -1, -2, 5, 1, 2, -1, 11, 4, -2, -4, -11, 1]
-
+		lilipu_poly_small_mkgauss(samp, samp_ctx, f, logn, isigma_kg, lim);
+		lilipu_poly_small_mkgauss(samp, samp_ctx, g, logn, isigma_kg, lim);
+		// when using Falcon sigma (~2.88):
+		// poly_small_mkgauss(rng, f, logn);
+		// poly_small_mkgauss(rng, g, logn);
 
 		// since we store F, G in tmp, we need 30*1024 instead of 28*1024
 		// temporary bytes.
@@ -315,7 +292,6 @@ lilipu_keygen(inner_shake256_context *rng,
 		// Solve the NTRU equation to get F and G.
 		lim = (1 << (Zf(max_FG_bits)[logn] - 1)) - 1;
 		if (!lilipu_solve_NTRU(logn, F, G, f, g, lim, (uint32_t *)rec_tmp)) {
-			exit(1);
 			continue;
 		}
 
@@ -757,7 +733,8 @@ const size_t logn = 8, n = MKN(logn);
 
 void benchmark_lilipu(fpr isigma_kg, fpr isigma_sig) {
 	TEMPALLOC union {
-		uint8_t b[42 * 1024];
+		// uint8_t b[42 * 1024];
+		uint8_t b[100 * 1024];
 		uint64_t dummy_u64;
 		fpr dummy_fpr;
 	} tmp;
@@ -780,7 +757,7 @@ void benchmark_lilipu(fpr isigma_kg, fpr isigma_sig) {
 	gettimeofday(&t0, NULL);
 
 	// Generate key pair.
-	lilipu_keygen(&sc, f, g, q00, q10, q11, logn, tmp.b, isigma_kg, 1);
+	lilipu_keygen(&sc, f, g, q00, q10, q11, logn, tmp.b, isigma_kg, 0);
 
 	gettimeofday(&t1, NULL);
 	printf("Key generation took %lld microseconds\n", time_diff(&t0, &t1));
@@ -835,7 +812,7 @@ void benchmark_falcon() {
 	gettimeofday(&t0, NULL);
 
 	// Generate key pair.
-	falcon_inner_keygen(&sc, f, g, F, G, h, 10, tmp.b);
+	falcon_inner_keygen(&sc, f, g, F, G, h, logn, tmp.b);
 
 	gettimeofday(&t1, NULL);
 	printf("Key generation took %lld microseconds\n", time_diff(&t0, &t1));
@@ -850,7 +827,7 @@ void benchmark_falcon() {
 		randombytes((unsigned char *)h, sizeof h);
 
 		// Compute the signature.
-		falcon_inner_sign_dyn(r.sig, &sc, f, g, F, G, r.hm, 10, tmp2.b);
+		falcon_inner_sign_dyn(r.sig, &sc, f, g, F, G, r.hm, logn, tmp2.b);
 	}
 
 	gettimeofday(&t1, NULL);
@@ -984,10 +961,12 @@ int try_forge(int16_t *s0, int16_t *s1, const fpr *q00, const fpr *q10, const fp
 			memcpy(s1, s1p, sizeof s1p);
 			return 1; // we are done
 		}
+#ifdef AVX2
 		printf("Nope, trace = %.2f\tvs %.2f.\n", trace.v, verif_bound.v);
 		printf("s1p = ");
 		for (u = 0; u < n; u++) printf("%d,", s1p[u]);
 		printf("\n");
+#endif
 	}
 }
 
@@ -1087,7 +1066,7 @@ int8_t valid_sigma(fpr sigma_sig) {
 int main() {
 	unsigned seed = time(NULL);
 
-	const fpr sigma_kg  = fpr_div(fpr_of(14), fpr_of(10));
+	const fpr sigma_kg  = fpr_div(fpr_of(14), fpr_of(100));
 	const fpr sigma_sig = fpr_div(fpr_of(14), fpr_of(10));
 	// verif_margin = 1 + √(64 * ln(2) / 1024)   (see scheme.sage)
 	const fpr verif_margin = fpr_add(fpr_one, fpr_sqrt(fpr_mul(fpr_log2, fpr_div(fpr_of(64), fpr_of(n)))));

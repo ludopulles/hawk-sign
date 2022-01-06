@@ -2,148 +2,41 @@
 
 #include "inner.h"
 
-
-/*
- * Align (upwards) the provided 'data' pointer with regards to 'base'
- * so that the offset is a multiple of the size of 'uint32_t'.
- */
-static uint64_t *
-align_u64(void *base, void *data)
-{
-	uint8_t *cb, *cd;
-	size_t k, km;
-
-	cb = base;
-	cd = data;
-	k = (size_t)(cd - cb);
-	km = k % sizeof(uint64_t);
-	if (km) {
-		k += (sizeof(uint64_t)) - km;
-	}
-	return (uint64_t *)(cb + k);
-}
-
-
-/*
- * Subtract k*f from F, where F, f and k are polynomials modulo X^N+1.
- * Coefficients of polynomial k are small integers (signed values in the
- * -2^31..2^31 range) scaled by 2^sc. Value sc is provided as sch = sc / 31
- * and scl = sc % 31.
- *
- * This function implements the basic quadratic multiplication algorithm,
- * which is efficient in space (no extra buffer needed) but slow at
- * high degree.
- */
-static void
-poly_sub_scaled64(uint32_t *restrict F, size_t Flen, size_t Fstride,
-	const uint32_t *restrict f, size_t flen, size_t fstride,
-	const int64_t *restrict k, uint32_t sch, uint32_t scl, unsigned logn)
-{
-	size_t n, u;
-
-	n = MKN(logn);
-	for (u = 0; u < n; u ++) {
-		int64_t kf;
-		size_t v;
-		uint32_t *x;
-		const uint32_t *y;
-
-		kf = -k[u];
-		x = F + u * Fstride;
-		y = f;
-		for (v = 0; v < n; v ++) {
-			zint_add_scaled_mul_small( x, Flen, y, flen, (int32_t)kf, sch, scl);
-			// zint_add_scaled_mul_small64( x, Flen, y, flen, kf, sch, scl);
-			if (u + v == n - 1) {
-				x = F;
-				kf = -kf;
-			} else {
-				x += Fstride;
-			}
-			y += fstride;
-		}
-	}
-}
-
-/*
- * Subtract k*f from F. Coefficients of polynomial k are small integers
- * (signed values in the -2^31..2^31 range) scaled by 2^sc. This function
- * assumes that the degree is large, and integers relatively small.
- * The value sc is provided as sch = sc / 31 and scl = sc % 31.
- */
-static void
-poly_sub_scaled_ntt64(uint32_t *restrict F, size_t Flen, size_t Fstride,
-	const uint32_t *restrict f, size_t flen, size_t fstride,
-	const int64_t *restrict k, uint32_t sch, uint32_t scl, unsigned logn,
-	uint32_t *restrict tmp)
-{
-	uint32_t *gm, *igm, *fk, *t1, *x;
-	const uint32_t *y;
-	size_t n, u, tlen;
-	const small_prime *primes;
-
-	n = MKN(logn);
-	tlen = flen + 1;
-	gm = tmp;
-	igm = gm + MKN(logn);
-	fk = igm + MKN(logn);
-	t1 = fk + n * tlen;
-
-	primes = PRIMES;
-
-	/*
-	 * Compute k*f in fk[], in RNS notation.
-	 */
-	for (u = 0; u < tlen; u ++) {
-		uint32_t p, p0i, R2, Rx;
-		size_t v;
-
-		p = primes[u].p;
-		p0i = modp_ninv31(p);
-		R2 = modp_R2(p, p0i);
-		Rx = modp_Rx((unsigned)flen, p, p0i, R2);
-		modp_mkgm2(gm, igm, logn, primes[u].g, p, p0i);
-
-		for (v = 0; v < n; v ++) {
-			t1[v] = modp_set(k[v] % p, p);
-		}
-		modp_NTT2(t1, gm, logn, p, p0i);
-		for (v = 0, y = f, x = fk + u;
-			v < n; v ++, y += fstride, x += tlen)
-		{
-			*x = zint_mod_small_signed(y, flen, p, p0i, R2, Rx);
-		}
-		modp_NTT2_ext(fk + u, tlen, gm, logn, p, p0i);
-		for (v = 0, x = fk + u; v < n; v ++, x += tlen) {
-			*x = modp_montymul(
-				modp_montymul(t1[v], *x, p, p0i), R2, p, p0i);
-		}
-		modp_iNTT2_ext(fk + u, tlen, igm, logn, p, p0i);
-	}
-
-	/*
-	 * Rebuild k*f.
-	 */
-	zint_rebuild_CRT(fk, tlen, tlen, n, primes, 1, t1);
-
-	/*
-	 * Subtract k*f, scaled, from F.
-	 */
-	for (u = 0, x = F, y = fk; u < n; u ++, x += Fstride, y += tlen) {
-		zint_sub_scaled(x, Flen, y, tlen, sch, scl);
-	}
-}
-
-
 // ================================================================================
+
 static const size_t MAX_BL_SMALL64[] = {
-	1*2, 1*2, 2*2, 2*2, 4*2, 7*2, 14*2, 27*2, 53*2, 106*2, 209*2
+//  1, 1, 2, 2, 4, 7, 14, 27, 53, 106, 209 // (FALCON)
+	1, 1, 2, 2, 4, 7, 13, 22, 43, 90, 209
 };
 
 static const size_t MAX_BL_LARGE64[] = {
-	2*2, 2*2, 5*2, 7*2, 12*2, 21*2, 40*2, 78*2, 157*2, 308*2
+//  2, 2, 5, 7, 12, 21, 40, 78, 157, 308 // (FALCON)
+	2, 2, 5, 7, 12, 19, 30, 55, 120, 308
 };
 
+/*
+ * Average and standard deviation for the maximum size (in bits) of
+ * coefficients of (f,g), depending on depth. These values are used
+ * to compute bounds for Babai's reduction.
+ */
+static const struct {
+	int avg;
+	int std;
+} BITLENGTH64[] = {
+	{    4,  0 },
+	{   11,  1 },
+	{   24,  1 },
+	{   50,  1 },
+	{  102,  1 },
+	{  202,  2 },
+	{  300,  4 },
+	{  524,  5 }, // {  794,  5 },
+	{ 1277,  8 }, // { 1577,  8 },
+	{ 3138, 13 },
+	{ 6308, 25 }
+};
+
+// ================================================================================
 
 /*
  * Input: f,g of degree N = 2^logn; 'depth' is used only to get their
@@ -321,15 +214,14 @@ make_fg64(uint32_t *data, const int8_t *f, const int8_t *g,
 
 	if (depth == 0 && out_ntt) {
 		uint32_t *gm, *igm;
-		uint32_t p, p0i;
+		uint32_t p0i;
 
-		p = primes[0].p;
-		p0i = modp_ninv31(p);
+		p0i = modp_ninv31(p0);
 		gm = gt + n;
-		igm = gm + MKN(logn);
-		modp_mkgm2(gm, igm, logn, primes[0].g, p, p0i);
-		modp_NTT2(ft, gm, logn, p, p0i);
-		modp_NTT2(gt, gm, logn, p, p0i);
+		igm = gm + n;
+		modp_mkgm2(gm, igm, logn, primes[0].g, p0, p0i);
+		modp_NTT2(ft, gm, logn, p0, p0i);
+		modp_NTT2(gt, gm, logn, p0, p0i);
 		return;
 	}
 
@@ -372,6 +264,14 @@ lilipu_solve_NTRU_deepest64(unsigned logn_top,
 	 */
 	zint_rebuild_CRT(fp, len, len, 2, primes, 0, t1);
 
+/*
+	printf("Initial normDown(f), normDown(g):\n");
+	for (size_t u = 0; u < len; u++) printf("%u,", fp[u]);
+	printf("\n");
+	for (size_t u = 0; u < len; u++) printf("%u,", gp[u]);
+	printf("\n");
+*/
+
 	/*
 	 * Apply the binary GCD. The zint_bezout() function works only
 	 * if both inputs are odd.
@@ -400,8 +300,7 @@ solve_NTRU_intermediate64(unsigned logn_top,
 	fpr *rt1, *rt2, *rt3, *rt4, *rt5;
 	int scale_fg, minbl_fg, maxbl_fg, maxbl_FG, scale_k;
 	uint32_t *x, *y;
-	int64_t *k;
-	// int32_t *k;
+	int32_t *k;
 	const small_prime *primes;
 
 	logn = logn_top - depth;
@@ -436,7 +335,7 @@ solve_NTRU_intermediate64(unsigned logn_top,
 	 * and g in RNS + NTT representation.
 	 */
 	ft = Gd + dlen * hn;
-	make_fg(ft, f, g, logn_top, depth, 1);
+	make_fg64(ft, f, g, logn_top, depth, 1);
 
 	/*
 	 * Move the newly computed f and g to make room for our candidate
@@ -612,6 +511,26 @@ solve_NTRU_intermediate64(unsigned logn_top,
 	zint_rebuild_CRT(Ft, llen, llen, n, primes, 1, t1);
 	zint_rebuild_CRT(Gt, llen, llen, n, primes, 1, t1);
 
+/*	printf("Initial ft, gt:\n");
+	for (size_t v = 0; v < n; v++) {
+		for (u = 0; u < slen; u++) printf("%u,", ft[v*slen + u]);
+		printf(" |\n");
+	}
+	for (size_t v = 0; v < n; v++) {
+		for (u = 0; u < slen; u++) printf("%u,", gt[v*slen + u]);
+		printf(" |\n");
+	}
+
+	printf("Initial Ft, Gt:\n");
+	for (size_t v = 0; v < n; v++) {
+		for (u = 0; u < llen; u++) printf("%u,", Ft[v*llen + u]);
+		printf(" |\n");
+	}
+	for (size_t v = 0; v < n; v++) {
+		for (u = 0; u < llen; u++) printf("%u,", Gt[v*llen + u]);
+		printf(" |\n");
+	} */
+
 	/*
 	 * At that point, Ft, Gt, ft and gt are consecutive in RAM (in that
 	 * order).
@@ -680,13 +599,12 @@ solve_NTRU_intermediate64(unsigned logn_top,
 	rt4 = rt3 + n;
 	rt5 = rt4 + n;
 	rt1 = rt5 + (n >> 1);
-	k = (int64_t *)align_u64(tmp, rt1);
-	// k = (int32_t *)align_u32(tmp, rt1);
+	k = (int32_t *)align_u32(tmp, rt1);
 	rt2 = align_fpr(tmp, k + n);
 	if (rt2 < (rt1 + n)) {
 		rt2 = rt1 + n;
 	}
-	t1 = (uint32_t *)(k + n);
+	t1 = (uint32_t *)k + n;
 
 	/*
 	 * Get f and g into rt3 and rt4 as floating-point approximations.
@@ -713,18 +631,34 @@ solve_NTRU_intermediate64(unsigned logn_top,
 	 * allow for a deviation of at most six times the standard
 	 * deviation.
 	 */
-	minbl_fg = BITLENGTH[depth].avg - 6 * BITLENGTH[depth].std;
-	maxbl_fg = BITLENGTH[depth].avg + 6 * BITLENGTH[depth].std;
+	minbl_fg = BITLENGTH64[depth].avg - 6 * BITLENGTH64[depth].std;
+	maxbl_fg = BITLENGTH64[depth].avg + 6 * BITLENGTH64[depth].std;
 
 	/*
 	 * Compute 1/(f*adj(f)+g*adj(g)) in rt5. We also keep adj(f)
 	 * and adj(g) in rt3 and rt4, respectively.
 	 */
+
+/* 	printf("Scale_fg: %d = 31*(%d - %d)\n", scale_fg, (int)slen, (int)rlen);
+	for (u = 0; u < n; u++) printf("%e ", rt3[u].v);
+	printf("\n");
+	for (u = 0; u < n; u++) printf("%e ", rt4[u].v);
+	printf("\n"); */
+
 	Zf(FFT)(rt3, logn);
 	Zf(FFT)(rt4, logn);
 	Zf(poly_invnorm2_fft)(rt5, rt3, rt4, logn);
 	Zf(poly_adj_fft)(rt3, logn);
 	Zf(poly_adj_fft)(rt4, logn);
+
+/*	for (u = 0; u < n; u++) printf("%e ", rt3[u].v);
+	printf("\n");
+	for (u = 0; u < n; u++) printf("%e ", rt4[u].v);
+	printf("\n");
+	for (u = 0; u < n; u++) printf("%e ", rt5[u].v);
+	printf("\n"); */
+
+	// for (u = 0; u < n; u++) assert(rt5[u].v == rt5[u].v);
 
 	/*
 	 * Reduce F and G repeatedly.
@@ -826,6 +760,7 @@ solve_NTRU_intermediate64(unsigned logn_top,
 			pt = fpr_sqr(pt);
 		}
 
+
 		for (u = 0; u < n; u ++) {
 			fpr xv;
 
@@ -834,19 +769,24 @@ solve_NTRU_intermediate64(unsigned logn_top,
 			/*
 			 * Sometimes the values can be out-of-bounds if
 			 * the algorithm fails; we must not call
-			 * fpr_rint() (and cast to int64_t) if the value
+			 * fpr_rint() (and cast to int32_t) if the value
 			 * is not in-bounds. Note that the test does not
 			 * break constant-time discipline, since any
 			 * failure here implies that we discard the current
 			 * secret key (f,g).
 			 */
-			if (!fpr_lt(fpr_mtwo63m1, xv) || !fpr_lt(xv, fpr_ptwo63m1))
-			// if (!fpr_lt(fpr_mtwo31m1, xv) || !fpr_lt(xv, fpr_ptwo31m1))
+			if (!fpr_lt(fpr_mtwo31m1, xv)
+				|| !fpr_lt(xv, fpr_ptwo31m1))
 			{
+/* printf("Scales: %d %d %d (=%d - %d)\n", scale_fg, scale_FG, scale_k, maxbl_FG, minbl_fg);
+printf("Values found: \n");
+for (u = 0; u < n; u ++) {
+	printf("%e ", fpr_mul(rt2[u], pdc).v);
+}
+printf("\n"); */
 				return 0;
 			}
-			k[u] = (int64_t)fpr_rint(xv);
-			// k[u] = (int32_t)fpr_rint(xv);
+			k[u] = (int32_t)fpr_rint(xv);
 		}
 
 		/*
@@ -859,15 +799,15 @@ solve_NTRU_intermediate64(unsigned logn_top,
 		sch = (uint32_t)(scale_k / 31);
 		scl = (uint32_t)(scale_k % 31);
 		if (depth <= DEPTH_INT_FG) {
-			/* poly_sub_scaled_ntt(Ft, FGlen, llen, ft, slen, slen, k, sch, scl, logn, t1);
-			poly_sub_scaled_ntt(Gt, FGlen, llen, gt, slen, slen, k, sch, scl, logn, t1); // */
-			poly_sub_scaled_ntt64(Ft, FGlen, llen, ft, slen, slen, k, sch, scl, logn, t1);
-			poly_sub_scaled_ntt64(Gt, FGlen, llen, gt, slen, slen, k, sch, scl, logn, t1); // */
+			poly_sub_scaled_ntt(Ft, FGlen, llen, ft, slen, slen,
+				k, sch, scl, logn, t1);
+			poly_sub_scaled_ntt(Gt, FGlen, llen, gt, slen, slen,
+				k, sch, scl, logn, t1);
 		} else {
-			/* poly_sub_scaled(Ft, FGlen, llen, ft, slen, slen, k, sch, scl, logn);
-			poly_sub_scaled(Gt, FGlen, llen, gt, slen, slen, k, sch, scl, logn); // */
-			poly_sub_scaled64(Ft, FGlen, llen, ft, slen, slen, k, sch, scl, logn);
-			poly_sub_scaled64(Gt, FGlen, llen, gt, slen, slen, k, sch, scl, logn); // */
+			poly_sub_scaled(Ft, FGlen, llen, ft, slen, slen,
+				k, sch, scl, logn);
+			poly_sub_scaled(Gt, FGlen, llen, gt, slen, slen,
+				k, sch, scl, logn);
 		}
 
 		/*
