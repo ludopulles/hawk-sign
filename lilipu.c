@@ -20,7 +20,7 @@
 #include "shake.c"
 #include "sign.c"
 
-#include "lilipu64.c"
+#include "lilipu_keygen.c"
 #include "vrfy.c"
 
 
@@ -100,10 +100,38 @@ lilipu_solve_NTRU(unsigned logn, int8_t *F, int8_t *G,
 		return 0;
 	}
 
-	unsigned depth = logn;
-	while (depth -- > 0) {
-		if (!lilipu_solve_NTRU_intermediate(logn, f, g, depth, tmp)) {
-			fprintf(stderr, "lilipu_solve_NTRU_intermediate(%d) failed\n", depth);
+	if (logn <= 2) {
+		unsigned depth;
+
+		depth = logn;
+		while (depth -- > 0) {
+			if (!lilipu_solve_NTRU_intermediate(logn, f, g, depth, tmp)) {
+				fprintf(stderr, "lilipu_solve_NTRU_intermediate(%d) failed\n", depth);
+				return 0;
+			}
+		}
+	} else {
+		unsigned depth;
+
+		depth = logn;
+		while (depth -- > 2) {
+			if (!lilipu_solve_NTRU_intermediate(logn, f, g, depth, tmp)) {
+				fprintf(stderr, "lilipu_solve_NTRU_intermediate(%d) failed\n", depth);
+				return 0;
+			}
+		}
+		/*
+		 * Note: we are not making a lilipu_ version of these two functions.
+		 * We can do this since the numbers are <2^64 with overwhelming probability,
+		 * and therefore, LILIPU_MAX_BL_* and MAX_BL_* are equal.
+		 */
+		if (!solve_NTRU_binary_depth1(logn, f, g, tmp)) {
+			fprintf(stderr, "solve_NTRU_binary_depth1 failed\n");
+			return 0;
+		}
+
+		if (!solve_NTRU_binary_depth0(logn, f, g, tmp)) {
+			fprintf(stderr, "solve_NTRU_binary_depth0 failed\n");
 			return 0;
 		}
 	}
@@ -122,15 +150,7 @@ lilipu_solve_NTRU(unsigned logn, int8_t *F, int8_t *G,
 	if (!poly_big_to_small(F, tmp, lim, logn)
 		|| !poly_big_to_small(G, tmp + n, lim, logn))
 	{
-		printf("Values for F, G are too big!\n");
-		printf("Values(F):");
-		for (u = 0; u < n; u++)
-			printf(" %d", (int32_t)tmp[u]);
-		printf("\n");
-		printf("Values(G):");
-		for (u = 0; u < n; u++)
-			printf(" %d", (int32_t)tmp[u+n]);
-		printf("\n");
+		fprintf(stderr, "poly_big_to_small failed\n");
 		return 0;
 	}
 
@@ -164,6 +184,7 @@ lilipu_solve_NTRU(unsigned logn, int8_t *F, int8_t *G,
 	modp_NTT2(gt, gm, logn, p, p0i);
 	modp_NTT2(Ft, gm, logn, p, p0i);
 	modp_NTT2(Gt, gm, logn, p, p0i);
+
 	// Changed: use q=1
 	r = modp_montymul(1, 1, p, p0i);
 	for (u = 0; u < n; u ++) {
@@ -172,51 +193,12 @@ lilipu_solve_NTRU(unsigned logn, int8_t *F, int8_t *G,
 		z = modp_sub(modp_montymul(ft[u], Gt[u], p, p0i),
 			modp_montymul(gt[u], Ft[u], p, p0i), p);
 		if (z != r) {
+			fprintf(stderr, "fG - gF != 1\n");
 			return 0;
 		}
 	}
 
 	return 1;
-}
-
-// =============================================================================
-/*
- * Generate a random polynomial with a Gaussian distribution. This function
- * also makes sure that the resultant of the polynomial with phi is odd.
- */
-static void
-lilipu_poly_small_mkgauss(samplerZ samp, void *samp_ctx, int8_t *f, unsigned logn, fpr isigma_kg, int lim)
-{
-	size_t n, u;
-	int s;
-	unsigned mod2;
-
-	n = MKN(logn);
-	mod2 = 0;
-
-	for (u = n; u -- > 1; ) {
-		do {
-			s = samp(samp_ctx, fpr_zero, isigma_kg);
-			/*
-			 * We need the coefficient to fit within -127..+127;
-			 * realistically, this is always the case except for
-			 * the very low degrees (N = 2 or 4), for which there
-			 * is no real security anyway.
-			 */
-		} while (s <= -lim || s >= lim);
-		mod2 ^= (unsigned)(s & 1);
-		f[u] = (int8_t)s;
-	}
-
-	do {
-		s = samp(samp_ctx, fpr_zero, isigma_kg);
-		/*
-		 * We need the sum of all coefficients to be 1; otherwise,
-		 * the resultant of the polynomial with X^N+1 will be even,
-		 * and the binary GCD will fail.
-		 */
-	} while (s <= -lim || s >= lim || mod2 == (unsigned)(s & 1));
-	f[0] = (int8_t)s;
 }
 
 // =============================================================================

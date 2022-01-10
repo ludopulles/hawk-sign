@@ -1,9 +1,26 @@
+#include <assert.h>
+#include <math.h>
+#include <stddef.h>
+#include <stdio.h>
 #include <stdint.h>
+#include <stdlib.h>
+#include <time.h>
 
-#include "inner.h"
-// #include "util.h"
+#include "codec.c"
+#include "common.c"
+#include "fft.c"
+#include "fpr.c"
 
-// ================================================================================
+
+int
+Zf(compute_public)(uint16_t *h,
+	const int8_t *f, const int8_t *g, unsigned logn, uint8_t *tmp)
+{ return 1; } // needed for compilation....
+
+#include "keygen.c"
+#include "rng.c"
+#include "shake.c"
+#include "sign.c"
 
 /*
 Table of average number of bits required to represent all the coefficients of
@@ -11,26 +28,26 @@ the polynomials f,g taken over 1000 samples:
 
 Depth    avg  ( std) --> (x ints)
 --------------------------------------------------------------------------------
-Depth 0: 3.00 (0.04) --> (1 ints)
-Depth 1: 8.05 (0.21) --> (1 ints)
+Depth 0: 3.00 (0.00) --> (1 ints)
+Depth 1: 8.05 (0.22) --> (1 ints)
 Depth 2: 18.62 (0.49) --> (1 ints)
-Depth 3: 38.68 (0.67) --> (2 ints)
-Depth 4: 77.63 (1.31) --> (3 ints)
-Depth 5: 153.62 (2.40) --> (6 ints)
-Depth 6: 302.97 (4.17) --> (11 ints)
-Depth 7: 598.30 (7.09) --> (21 ints)
-Depth 8: 1184.95 (12.09) --> (41 ints)
-Depth 9: 2369.72 (24.19) --> (82 ints)
+Depth 3: 38.67 (0.65) --> (2 ints)
+Depth 4: 77.61 (1.31) --> (3 ints)
+Depth 5: 153.50 (2.31) --> (6 ints)
+Depth 6: 302.62 (3.95) --> (11 ints)
+Depth 7: 597.95 (6.94) --> (21 ints)
+Depth 8: 1184.35 (12.00) --> (41 ints)
+Depth 9: 2368.50 (23.99) --> (82 ints)
 */
 
-static const size_t LILIPU_MAX_BL_SMALL[] = {
+static const size_t LILIPU_MAX_BL_SMALL[10] = {
 //  1, 1, 2, 2, 4, 7, 14, 27, 53, 106, 209 // (FALCON)
-	1, 1, 2, 2, 4, 6, 11, 21, 41,  82, -1
+	1, 1, 2, 2, 4, 6, 11, 21, 41,  82 //, ??
 };
 
-static const size_t LILIPU_MAX_BL_LARGE[] = {
-//	2, 2, 5, 7, 12, 21, 40, 78, 157, 308 // (FALCON)
-	2, 2, 5, 7, 12, 22, 42, 82, 164, -1
+// Give sufficiently large upper bounds:
+static const size_t LILIPU_MAX_BL_LARGE[9] = {
+	2, 2, 6, 8, 16, 32, 64, 128, 200 //, ??
 };
 
 /*
@@ -41,7 +58,7 @@ static const size_t LILIPU_MAX_BL_LARGE[] = {
 static const struct {
 	int avg;
 	int std;
-} LILIPU_BITLENGTH[] = {
+} LILIPU_BITLENGTH[10] = {
 	{ 4, 0 },
 	{ 9, 1 },
 	{ 19, 1 },
@@ -51,11 +68,32 @@ static const struct {
 	{ 303, 4 },
 	{ 599, 7 },
 	{ 1185, 12 },
-	{ 2370, 24 },
-	{ 6308, 25 }
+	{ 2370, 24 }
+	// , { ???, ??? }
 };
 
-// ================================================================================
+/*
+ * Helper function to measure number of bits required to represent a number.
+ */
+static size_t
+number_of_bits(uint32_t *fp, size_t sz)
+{
+	size_t sgn = (fp[sz-1] >> 30) & 1; // 0 = positive, 1 = negative
+	while (sz > 0 && (fp[sz-1] == 0 || fp[sz-1] == 2147483647U)) sz--;
+
+	if (sz == 0) return 1 + sgn; // 0 or -1 as value
+
+	size_t res = (sz-1) * 31;
+	for (size_t b = 31; b -- > 0; )
+		if (((fp[sz-1] >> b) & 1) != sgn)
+			return res + (b+1);
+	fprintf(stderr, "Unexpected value: %d\n", (int) fp[sz-1]);
+	assert(0);
+}
+
+// =============================================================================
+// | Copied from lilipu_keygen.c                                               |
+// =============================================================================
 
 /*
  * Input: f,g of degree N = 2^logn; 'depth' is used only to get their
@@ -294,7 +332,8 @@ lilipu_solve_NTRU_deepest(unsigned logn_top,
 
 static int
 lilipu_solve_NTRU_intermediate(unsigned logn_top,
-	const int8_t *f, const int8_t *g, unsigned depth, uint32_t *tmp)
+	const int8_t *f, const int8_t *g, size_t *unreduced_bits, unsigned depth,
+	uint32_t *tmp)
 {
 	/*
 	 * In this function, 'logn' is the log2 of the degree for
@@ -519,6 +558,19 @@ lilipu_solve_NTRU_intermediate(unsigned logn_top,
 	 */
 	zint_rebuild_CRT(Ft, llen, llen, n, primes, 1, t1);
 	zint_rebuild_CRT(Gt, llen, llen, n, primes, 1, t1);
+
+	/*
+	 * Record the sizes of Ft, Gt so we know the amount of bits we need to use
+	 * during the calculation of Ft and Gt.
+	 */
+	*unreduced_bits = 0;
+	uint32_t *ptr = Ft;
+	for (size_t u = 2*n, sz; u -- > 0; ) {
+		sz = number_of_bits(ptr, llen);
+		ptr += llen;
+		if (sz > *unreduced_bits)
+			*unreduced_bits = sz;
+	}
 
 	/*
 	 * At that point, Ft, Gt, ft and gt are consecutive in RAM (in that
@@ -837,4 +889,171 @@ lilipu_solve_NTRU_intermediate(unsigned logn_top,
 		memmove(x, y, slen * sizeof *y);
 	}
 	return 1;
+}
+
+/*
+ * Generate a random polynomial with a Gaussian distribution. This function
+ * also makes sure that the resultant of the polynomial with phi is odd.
+ */
+static void
+lilipu_poly_small_mkgauss(samplerZ samp, void *samp_ctx, int8_t *f, unsigned logn, fpr isigma_kg, int lim)
+{
+	size_t n, u;
+	int s;
+	unsigned mod2;
+
+	n = MKN(logn);
+	mod2 = 0;
+
+	for (u = n; u -- > 1; ) {
+		do {
+			s = samp(samp_ctx, fpr_zero, isigma_kg);
+			/*
+			 * We need the coefficient to fit within -127..+127;
+			 * realistically, this is always the case except for
+			 * the very low degrees (N = 2 or 4), for which there
+			 * is no real security anyway.
+			 */
+		} while (s <= -lim || s >= lim);
+		mod2 ^= (unsigned)(s & 1);
+		f[u] = (int8_t)s;
+	}
+
+	do {
+		s = samp(samp_ctx, fpr_zero, isigma_kg);
+		/*
+		 * We need the sum of all coefficients to be 1; otherwise,
+		 * the resultant of the polynomial with X^N+1 will be even,
+		 * and the binary GCD will fail.
+		 */
+	} while (s <= -lim || s >= lim || mod2 == (unsigned)(s & 1));
+	f[0] = (int8_t)s;
+}
+
+// =============================================================================
+// | END                                                                       |
+// =============================================================================
+
+const size_t logn = 9, n = 1<<logn;
+
+void sample_FG(inner_shake256_context *rng, int8_t *f, int8_t *g,
+	size_t *bits_FG, uint8_t *tmp)
+{
+	/*
+	 * Algorithm is the following:
+	 *
+	 *  - Generate f and g with the Gaussian distribution.
+	 *
+	 *  - If either Res(f,phi) or Res(g,phi) is even, try again.
+	 *
+	 *  - Solve the NTRU equation fG - gF = 1; if the solving fails,
+	 *    try again. Usual failure condition is when Res(f,phi)
+	 *    and Res(g,phi) are not prime to each other.
+	 */
+	int lim = 1 << (Zf(max_fg_bits)[logn] - 1);
+	/*
+	 * In the binary case, coefficients of f and g are generated
+	 * independently of each other, with a discrete Gaussian
+	 * distribution of standard deviation 1/isigma_kg. Then,
+	 * the two vectors have expected norm 2n/isigma_kg.
+	 *
+	 * We require that Res(f,phi) and Res(g,phi) are both odd (the
+	 * NTRU equation solver requires it).
+	 */
+	while (1) {
+sample:
+		// Normal sampling. We use a fast PRNG seeded from our SHAKE context ('rng').
+		sampler_context spc;
+		samplerZ samp;
+		void *samp_ctx;
+		spc.sigma_min = fpr_sigma_min[logn];
+		falcon_inner_prng_init(&spc.p, rng);
+		samp = Zf(sampler);
+		samp_ctx = &spc;
+
+		fpr sigma_kg = fpr_div(fpr_of(1425), fpr_of(1000));
+		fpr isigma_kg = fpr_inv(sigma_kg);
+
+		lilipu_poly_small_mkgauss(samp, samp_ctx, f, logn, isigma_kg, lim);
+		lilipu_poly_small_mkgauss(samp, samp_ctx, g, logn, isigma_kg, lim);
+		
+		if (!lilipu_solve_NTRU_deepest(logn, f, g, (uint32_t *)tmp))
+			continue;
+
+		unsigned depth = logn;
+
+		size_t len = LILIPU_MAX_BL_SMALL[logn];
+		uint32_t *ptr = (uint32_t *)tmp;
+		size_t szF = number_of_bits(ptr, len);
+		size_t szG = number_of_bits(ptr + len, len);
+		bits_FG[logn] = szF > szG ? szF : szG;
+
+		while (depth -- > 0) {
+			if (!lilipu_solve_NTRU_intermediate(logn, f, g,
+					&bits_FG[depth], depth, (uint32_t *)tmp)) {
+				// printf("Failed at depth %d\n", depth);
+				goto sample;
+			}
+		}
+
+/*
+		ptr = (uint32_t *)tmp;
+		uint32_t maxval = 0;
+		for (size_t u = 0; u < n + n; u++) {
+			uint32_t val = ptr[u];
+			if (val > (1U<<30)) val = -((1U<<31) + val);
+			if (val > maxval) maxval = val;
+		}
+		printf("%d ", maxval);
+*/
+		break;
+	}
+}
+
+void sample_FG_sizes(inner_shake256_context *rng, uint8_t *tmp)
+{
+	int8_t f[n], g[n];
+	long long sum_b[logn + 1], sum_bsq[logn + 1];
+	size_t bits_FG[logn + 1];
+
+	memset(sum_b, 0, sizeof sum_b);
+	memset(sum_bsq, 0, sizeof sum_bsq);
+
+	size_t nsamples = 100;
+	for (size_t i = 0; i < nsamples; i++) {
+		if (i % (nsamples/100) == 0) printf("."), fflush(stdout);
+		sample_FG(rng, f, g, bits_FG, tmp);
+		for (size_t depth = 0; depth <= logn; depth++) {
+			long long x = bits_FG[depth];
+			sum_b[depth] += x;
+			sum_bsq[depth] += x * x;
+		}
+	}
+
+	printf("\n");
+	// calculate the average and standard deviation
+	for (int depth = 0; depth <= logn; depth++) {
+		double avg = ((double)sum_b[depth]) / nsamples;
+		double stddev = sqrt(((double)sum_bsq[depth]) / nsamples - avg*avg);
+		size_t nr_ints = (int)(avg + 6.0 * stddev + 30) / 31;
+		printf("Depth %d: %.2f (%.2f) --> (%zu ints)\n", depth, avg, stddev, nr_ints);
+	}
+}
+
+
+// =============================================================================
+uint8_t tmp[68 * 512];
+int main() {
+	srand(time(NULL));
+
+	inner_shake256_context sc;
+	uint8_t seed[48];
+	for (int i = 0; i < 48; i++)
+		seed[i] = (uint8_t) rand();
+	inner_shake256_init(&sc);
+	inner_shake256_inject(&sc, seed, sizeof seed);
+	inner_shake256_flip(&sc);
+
+	sample_FG_sizes(&sc, tmp);
+	return 0;
 }

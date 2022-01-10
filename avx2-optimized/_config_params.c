@@ -18,7 +18,6 @@ Zf(compute_public)(uint16_t *h,
 { return 1; } // needed for compilation....
 
 #include "keygen.c"
-// #include "nist.c"
 #include "rng.c"
 #include "shake.c"
 #include "sign.c"
@@ -41,10 +40,34 @@ Depth 8: 1184.35 (12.00) --> (41 ints)
 Depth 9: 2368.50 (23.99) --> (82 ints)
 */
 
-const size_t UPPER_BOUND_SIZE[11] = {
-	// 1, 1, 4, 4, 16, 16, 32, 64, 128, 128, 256
-	1, 1, 2, 2, 4, 6, 12, 22, 42, 83, -1
+// Give sufficiently large upper bounds:
+const size_t LILIPU_MAX_BL_SMALL[10] = {
+	// 1, 1, 4, 4, 16, 16, 32, 64, 128, 128
+	1, 1, 2, 2, 4, 8, 16, 32, 64, 128
 };
+
+/*
+ * Helper function to measure number of bits required to represent a number.
+ */
+static size_t
+number_of_bits(uint32_t *fp, size_t sz)
+{
+	size_t sgn = (fp[sz-1] >> 30) & 1; // 0 = positive, 1 = negative
+	while (sz > 0 && (fp[sz-1] == 0 || fp[sz-1] == 2147483647U)) sz--;
+
+	if (sz == 0) return 1 + sgn; // 0 or -1 as value
+
+	size_t res = (sz-1) * 31;
+	for (size_t b = 30; b >= 0; b--)
+		if (((fp[sz-1] >> b) & 1) != sgn)
+			return res + (b+1);
+	fprintf(stderr, "Unexpected value: %d\n", (int) fp[sz-1]);
+	assert(0);
+}
+
+// =============================================================================
+// | Copied from lilipu_keygen.c                                               |
+// =============================================================================
 
 /*
  * Input: f,g of degree N = 2^logn; 'depth' is used only to get their
@@ -65,8 +88,8 @@ lilipu_make_fg_step(uint32_t *data, unsigned logn, unsigned depth,
 
 	n = (size_t)1 << logn;
 	hn = n >> 1;
-	slen = UPPER_BOUND_SIZE[depth];
-	tlen = UPPER_BOUND_SIZE[depth + 1];
+	slen = LILIPU_MAX_BL_SMALL[depth];
+	tlen = LILIPU_MAX_BL_SMALL[depth + 1];
 	primes = PRIMES;
 
 	/*
@@ -220,16 +243,14 @@ lilipu_make_fg(uint32_t *data, const int8_t *f, const int8_t *g,
 	}
 
 	if (depth == 0 && out_ntt) {
-		uint32_t *gm, *igm;
-		uint32_t p, p0i;
+		uint32_t *gm, *igm, p0i;
 
-		p = primes[0].p;
-		p0i = modp_ninv31(p);
+		p0i = modp_ninv31(p0);
 		gm = gt + n;
-		igm = gm + MKN(logn);
-		modp_mkgm2(gm, igm, logn, primes[0].g, p, p0i);
-		modp_NTT2(ft, gm, logn, p, p0i);
-		modp_NTT2(gt, gm, logn, p, p0i);
+		igm = gm + n;
+		modp_mkgm2(gm, igm, logn, primes[0].g, p0, p0i);
+		modp_NTT2(ft, gm, logn, p0, p0i);
+		modp_NTT2(gt, gm, logn, p0, p0i);
 		return;
 	}
 
@@ -254,7 +275,7 @@ lilipu_solve_NTRU_deepest(unsigned logn_top,
 	uint32_t *Fp, *Gp, *fp, *gp, *t1;
 	const small_prime *primes;
 
-	len = UPPER_BOUND_SIZE[logn_top]; // should be large enough
+	len = LILIPU_MAX_BL_SMALL[logn_top];
 	primes = PRIMES;
 
 	Fp = tmp;
@@ -283,16 +304,12 @@ lilipu_solve_NTRU_deepest(unsigned logn_top,
 	return zint_bezout(Gp, Fp, fp, gp, len, t1);
 }
 
-
-// const fpr sigma_kg = fpr_div(fpr_of(1425), fpr_of(1000));
-const fpr isigma_kg = { v: 1.0 / 1.425 }; // fpr_div(fpr_of(1000), fpr_of(1425));
-
 /*
  * Generate a random polynomial with a Gaussian distribution. This function
  * also makes sure that the resultant of the polynomial with phi is odd.
  */
 static void
-lilipu_poly_small_mkgauss(samplerZ samp, void *samp_ctx, int8_t *f, unsigned logn, int lim)
+lilipu_poly_small_mkgauss(samplerZ samp, void *samp_ctx, int8_t *f, unsigned logn, fpr isigma_kg, int lim)
 {
 	size_t n, u;
 	int s;
@@ -326,23 +343,9 @@ lilipu_poly_small_mkgauss(samplerZ samp, void *samp_ctx, int8_t *f, unsigned log
 	f[0] = (int8_t)s;
 }
 
-size_t number_of_bits(uint32_t *fp, size_t sz)
-{
-	size_t sgn = (fp[sz-1] >> 30) & 1; // 0 = positive, 1 = negative
-	while (sz > 0 && (fp[sz-1] == 0 || fp[sz-1] == 2147483647U)) sz--;
-
-	if (sz == 0) return 1 + sgn; // 0 or -1 as value
-
-	size_t res = (sz-1) * 31;
-	for (size_t b = 30; b >= 0; b--)
-		if (((fp[sz-1] >> b) & 1) != sgn) {
-			if (sz == 1 && fp[0] == 2147483646U) assert(b == 0);
-			if (sz == 1 && fp[0] == 3) assert(b == 1);
-			return res + (b+1);
-		}
-	fprintf(stderr, "Unexpected value: %zu\n", fp[sz-1]);
-	assert(0);
-}
+// =============================================================================
+// | END                                                                       |
+// =============================================================================
 
 const size_t logn = 9, n = 1<<logn;
 
@@ -379,28 +382,29 @@ void sample_fg(inner_shake256_context *rng, int8_t *f, int8_t *g, uint8_t *tmp)
 		samp = Zf(sampler);
 		samp_ctx = &spc;
 
-		lilipu_poly_small_mkgauss(samp, samp_ctx, f, logn, lim);
-		lilipu_poly_small_mkgauss(samp, samp_ctx, g, logn, lim);
+		fpr sigma_kg = fpr_div(fpr_of(1425), fpr_of(1000));
+		fpr isigma_kg = fpr_inv(sigma_kg);
+
+		lilipu_poly_small_mkgauss(samp, samp_ctx, f, logn, isigma_kg, lim);
+		lilipu_poly_small_mkgauss(samp, samp_ctx, g, logn, isigma_kg, lim);
 	} while (!lilipu_solve_NTRU_deepest(logn, f, g, (uint32_t *)tmp));
 }
 
 void sample_fg_sizes(inner_shake256_context *rng, uint8_t *tmp)
 {
 	int8_t f[n], g[n];
-
-	long long sum_b[logn + 1];
-	long long sum_bsq[logn + 1];
+	long long sum_b[logn + 1], sum_bsq[logn + 1];
 
 	memset(sum_b, 0, sizeof sum_b);
 	memset(sum_bsq, 0, sizeof sum_bsq);
 
-	size_t nsamples = 100000, len;
+	size_t nsamples = 100, len;
 	uint32_t *fp, *gp, *t1;
 	for (size_t i = 0; i < nsamples; i++) {
 		sample_fg(rng, f, g, tmp);
 		// now do some statistics
-		for (int depth = 0; depth <= logn; depth++) {
-			len = UPPER_BOUND_SIZE[depth]; // should be large enough
+		for (size_t depth = 0; depth <= logn; depth++) {
+			len = LILIPU_MAX_BL_SMALL[depth]; // should be large enough
 
 			fp = (uint32_t *)tmp;
 			gp = fp + (len << (logn - depth));
@@ -428,7 +432,7 @@ void sample_fg_sizes(inner_shake256_context *rng, uint8_t *tmp)
 	}
 
 	// calculate the average and standard deviation
-	for (int depth = 0; depth <= logn; depth++) {
+	for (size_t depth = 0; depth <= logn; depth++) {
 		double avg = ((double)sum_b[depth]) / nsamples;
 		double stddev = sqrt(((double)sum_bsq[depth]) / nsamples - avg*avg);
 		size_t nr_ints = (int)(avg + 6.0 * stddev + 30) / 31;
@@ -438,7 +442,7 @@ void sample_fg_sizes(inner_shake256_context *rng, uint8_t *tmp)
 
 
 // =============================================================================
-uint8_t tmp[16 * 1024 * 1024];
+uint8_t tmp[26 * 512];
 int main() {
 	srand(time(NULL));
 
