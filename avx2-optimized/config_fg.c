@@ -11,7 +11,6 @@
 #include "fft.c"
 #include "fpr.c"
 
-
 int
 Zf(compute_public)(uint16_t *h,
 	const int8_t *f, const int8_t *g, unsigned logn, uint8_t *tmp)
@@ -58,7 +57,7 @@ number_of_bits(uint32_t *fp, size_t sz)
 	if (sz == 0) return 1 + sgn; // 0 or -1 as value
 
 	size_t res = (sz-1) * 31;
-	for (size_t b = 30; b >= 0; b--)
+	for (size_t b = 31; b -- > 0; )
 		if (((fp[sz-1] >> b) & 1) != sgn)
 			return res + (b+1);
 	fprintf(stderr, "Unexpected value: %d\n", (int) fp[sz-1]);
@@ -418,7 +417,7 @@ void sample_fg_sizes(inner_shake256_context *rng, uint8_t *tmp)
 			// determine sizes of fp, gp
 			uint32_t *ptr = fp;
 			size_t longest = 0;
-			for (size_t u = 0; u < (2 << (logn - depth)); u++, ptr += len) {
+			for (size_t u = 0; u < (2U << (logn - depth)); u++, ptr += len) {
 				// for (size_t v = 0; v < len; v++) printf("%zu ", ptr[v]);
 				// printf("\n");
 				size_t sz = number_of_bits(ptr, len);
@@ -436,7 +435,7 @@ void sample_fg_sizes(inner_shake256_context *rng, uint8_t *tmp)
 		double avg = ((double)sum_b[depth]) / nsamples;
 		double stddev = sqrt(((double)sum_bsq[depth]) / nsamples - avg*avg);
 		size_t nr_ints = (int)(avg + 6.0 * stddev + 30) / 31;
-		printf("Depth %d: %.2f (%.2f) --> (%zu ints)\n", depth, avg, stddev, nr_ints);
+		printf("Depth %zu: %.2f (%.2f) --> (%zu ints)\n", depth, avg, stddev, nr_ints);
 	}
 }
 
