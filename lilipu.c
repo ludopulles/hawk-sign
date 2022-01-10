@@ -96,6 +96,7 @@ lilipu_solve_NTRU(unsigned logn, int8_t *F, int8_t *G,
 	n = MKN(logn);
 
 	if (!lilipu_solve_NTRU_deepest64(logn, f, g, tmp)) {
+		fprintf(stderr, "lilipu_solve_NTRU_deepest64 failed\n");
 		return 0;
 	}
 
@@ -111,6 +112,7 @@ lilipu_solve_NTRU(unsigned logn, int8_t *F, int8_t *G,
 	unsigned depth = logn;
 	while (depth -- > 0) {
 		if (!solve_NTRU_intermediate64(logn, f, g, depth, tmp)) {
+			fprintf(stderr, "solve_NTRU_intermediate64(%d) failed\n", depth);
 			return 0;
 		}
 	}
@@ -729,7 +731,7 @@ crypto_lilipu_sign(unsigned char *sm, unsigned long long *smlen,
 // =============================================================================
 // | TESTING CODE                                                              |
 // =============================================================================
-const size_t logn = 8, n = MKN(logn);
+const size_t logn = 9, n = MKN(logn);
 
 void benchmark_lilipu(fpr isigma_kg, fpr isigma_sig) {
 	TEMPALLOC union {
@@ -1066,8 +1068,8 @@ int8_t valid_sigma(fpr sigma_sig) {
 int main() {
 	unsigned seed = time(NULL);
 
-	const fpr sigma_kg  = fpr_div(fpr_of(14), fpr_of(100));
-	const fpr sigma_sig = fpr_div(fpr_of(14), fpr_of(10));
+	const fpr sigma_kg  = fpr_div(fpr_of(1425), fpr_of(1000));
+	const fpr sigma_sig = fpr_div(fpr_of(1292), fpr_of(1000));
 	// verif_margin = 1 + √(64 * ln(2) / 1024)   (see scheme.sage)
 	const fpr verif_margin = fpr_add(fpr_one, fpr_sqrt(fpr_mul(fpr_log2, fpr_div(fpr_of(64), fpr_of(n)))));
 	// verif_bound = (verif_margin * 2 * sigma_sig)^2 * (2*d) * d

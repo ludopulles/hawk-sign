@@ -1,17 +1,37 @@
 #include <stdint.h>
 
 #include "inner.h"
+#include "util.h"
 
 // ================================================================================
 
+/*
+Table of average number of bits required to represent all the coefficients of
+the polynomials f,g taken over 1000 samples:
+
+Depth    avg  ( std) --> (x ints)
+--------------------------------------------------------------------------------
+Depth 0: 3.00 (0.04) --> (1 ints)
+Depth 1: 8.05 (0.21) --> (1 ints)
+Depth 2: 18.62 (0.49) --> (1 ints)
+Depth 3: 38.68 (0.67) --> (2 ints)
+Depth 4: 77.63 (1.31) --> (3 ints)
+Depth 5: 153.62 (2.40) --> (6 ints)
+Depth 6: 302.97 (4.17) --> (11 ints)
+Depth 7: 598.30 (7.09) --> (21 ints)
+Depth 8: 1184.95 (12.09) --> (41 ints)
+Depth 9: 2369.72 (24.19) --> (82 ints)
+*/
+
 static const size_t MAX_BL_SMALL64[] = {
-//  1, 1, 2, 2, 4, 7, 14, 27, 53, 106, 209 // (FALCON)
-	1, 1, 2, 2, 4, 7, 13, 22, 43, 90, 209
+	// 1, 1, 2, 2, 4, 7, 14, 27, 53, 106, 209 // (FALCON)
+	1, 1, 2, 2, 4, 6, 11, 21, 41, 82, -1
 };
 
 static const size_t MAX_BL_LARGE64[] = {
-//  2, 2, 5, 7, 12, 21, 40, 78, 157, 308 // (FALCON)
-	2, 2, 5, 7, 12, 19, 30, 55, 120, 308
+	// 2, 2, 5, 7, 12, 21, 40, 78, 157, 308 // (FALCON)
+	// 2, 2, 5, 7, 12, 19, 30, 55, 120, 308
+	   2, 2, 5, 7, 12, 22, 42, 82, 164, -1
 };
 
 /*
@@ -23,16 +43,16 @@ static const struct {
 	int avg;
 	int std;
 } BITLENGTH64[] = {
-	{    4,  0 },
-	{   11,  1 },
-	{   24,  1 },
-	{   50,  1 },
-	{  102,  1 },
-	{  202,  2 },
-	{  300,  4 },
-	{  524,  5 }, // {  794,  5 },
-	{ 1277,  8 }, // { 1577,  8 },
-	{ 3138, 13 },
+	{ 4, 0 },
+	{ 9, 1 },
+	{ 19, 1 },
+	{ 39, 1 },
+	{ 78, 2 },
+	{ 154, 3 },
+	{ 303, 4 },
+	{ 599, 7 },
+	{ 1185, 12 },
+	{ 2370, 24 },
 	{ 6308, 25 }
 };
 
@@ -511,26 +531,6 @@ solve_NTRU_intermediate64(unsigned logn_top,
 	zint_rebuild_CRT(Ft, llen, llen, n, primes, 1, t1);
 	zint_rebuild_CRT(Gt, llen, llen, n, primes, 1, t1);
 
-/*	printf("Initial ft, gt:\n");
-	for (size_t v = 0; v < n; v++) {
-		for (u = 0; u < slen; u++) printf("%u,", ft[v*slen + u]);
-		printf(" |\n");
-	}
-	for (size_t v = 0; v < n; v++) {
-		for (u = 0; u < slen; u++) printf("%u,", gt[v*slen + u]);
-		printf(" |\n");
-	}
-
-	printf("Initial Ft, Gt:\n");
-	for (size_t v = 0; v < n; v++) {
-		for (u = 0; u < llen; u++) printf("%u,", Ft[v*llen + u]);
-		printf(" |\n");
-	}
-	for (size_t v = 0; v < n; v++) {
-		for (u = 0; u < llen; u++) printf("%u,", Gt[v*llen + u]);
-		printf(" |\n");
-	} */
-
 	/*
 	 * At that point, Ft, Gt, ft and gt are consecutive in RAM (in that
 	 * order).
@@ -616,6 +616,7 @@ solve_NTRU_intermediate64(unsigned logn_top,
 	 * computed so that average maximum length will fall in the
 	 * middle or the upper half of these top 10 words.
 	 */
+
 	rlen = (slen > 10) ? 10 : slen;
 	poly_big_to_fp(rt3, ft + slen - rlen, rlen, slen, logn);
 	poly_big_to_fp(rt4, gt + slen - rlen, rlen, slen, logn);
@@ -639,11 +640,42 @@ solve_NTRU_intermediate64(unsigned logn_top,
 	 * and adj(g) in rt3 and rt4, respectively.
 	 */
 
-/* 	printf("Scale_fg: %d = 31*(%d - %d)\n", scale_fg, (int)slen, (int)rlen);
-	for (u = 0; u < n; u++) printf("%e ", rt3[u].v);
-	printf("\n");
-	for (u = 0; u < n; u++) printf("%e ", rt4[u].v);
-	printf("\n"); */
+	/* if (depth == 7) {
+		printf("Initial ft, gt:\n[");
+		for (size_t v = 0; v < n; v++) {
+			for (u = 0; u < slen; u++)
+				printf("%d,", ft[v*slen + u]);
+			printf(" or ");
+			print_big(ft + v*slen, slen);
+			printf("\n");
+		}
+		printf("]\n[");
+		for (size_t v = 0; v < n; v++) {
+			for (u = 0; u < slen; u++)
+				printf("%d,", gt[v*slen + u]);
+			printf(" or ");
+			print_big(gt + v*slen, slen);
+			printf("\n");
+		}
+		printf("]\nInitial Ft, Gt:\n[");
+		for (size_t v = 0; v < n; v++) {
+			for (u = 0; u < llen; u++)
+				printf("%d,", Ft[v*llen + u]);
+			printf(" or ");
+			print_big(Ft + v*llen, llen);
+			printf("\n");
+		}
+		printf("]\n[");
+		for (size_t v = 0; v < n; v++) {
+			for (u = 0; u < llen; u++)
+				printf("%d,", Gt[v*llen + u]);
+			printf(" or ");
+			print_big(Gt + v*llen, llen);
+			printf("\n");
+		}
+		printf("\n");
+	} */
+
 
 	Zf(FFT)(rt3, logn);
 	Zf(FFT)(rt4, logn);
@@ -651,14 +683,13 @@ solve_NTRU_intermediate64(unsigned logn_top,
 	Zf(poly_adj_fft)(rt3, logn);
 	Zf(poly_adj_fft)(rt4, logn);
 
-/*	for (u = 0; u < n; u++) printf("%e ", rt3[u].v);
+	/* printf("FFT %d values:\n", depth);
+	for (u = 0; u < n; u++) printf("%e ", rt3[u].v);
 	printf("\n");
 	for (u = 0; u < n; u++) printf("%e ", rt4[u].v);
 	printf("\n");
-	for (u = 0; u < n; u++) printf("%e ", rt5[u].v);
-	printf("\n"); */
-
-	// for (u = 0; u < n; u++) assert(rt5[u].v == rt5[u].v);
+	for (u = 0; u < n/2; u++) printf("%e ", rt5[u].v);
+	printf("\n"); // */
 
 	/*
 	 * Reduce F and G repeatedly.
@@ -707,9 +738,13 @@ solve_NTRU_intermediate64(unsigned logn_top,
 		 * scaling if the current length is more than 10 words.
 		 */
 		rlen = (FGlen > 10) ? 10 : FGlen;
-		scale_FG = 31 * (int)(FGlen - rlen);
 		poly_big_to_fp(rt1, Ft + FGlen - rlen, rlen, llen, logn);
 		poly_big_to_fp(rt2, Gt + FGlen - rlen, rlen, llen, logn);
+
+		/*
+		 * Values in rt1 and rt2 are downscaled by 2^(scale_FG).
+		 */
+		scale_FG = 31 * (int)(FGlen - rlen);
 
 		/*
 		 * Compute (F*adj(f)+G*adj(g))/(f*adj(f)+g*adj(g)) in rt2.
@@ -778,12 +813,13 @@ solve_NTRU_intermediate64(unsigned logn_top,
 			if (!fpr_lt(fpr_mtwo31m1, xv)
 				|| !fpr_lt(xv, fpr_ptwo31m1))
 			{
-/* printf("Scales: %d %d %d (=%d - %d)\n", scale_fg, scale_FG, scale_k, maxbl_FG, minbl_fg);
+// printf("Scales: %d %d %d (=%d - %d)\n", scale_fg, scale_FG, scale_k, maxbl_FG, minbl_fg);
+printf("Fail at reduction step %d/%d\n", scale_k, maxbl_FG - minbl_fg);
 printf("Values found: \n");
 for (u = 0; u < n; u ++) {
 	printf("%e ", fpr_mul(rt2[u], pdc).v);
 }
-printf("\n"); */
+printf("\n");
 				return 0;
 			}
 			k[u] = (int32_t)fpr_rint(xv);
@@ -799,15 +835,11 @@ printf("\n"); */
 		sch = (uint32_t)(scale_k / 31);
 		scl = (uint32_t)(scale_k % 31);
 		if (depth <= DEPTH_INT_FG) {
-			poly_sub_scaled_ntt(Ft, FGlen, llen, ft, slen, slen,
-				k, sch, scl, logn, t1);
-			poly_sub_scaled_ntt(Gt, FGlen, llen, gt, slen, slen,
-				k, sch, scl, logn, t1);
+			poly_sub_scaled_ntt(Ft, FGlen, llen, ft, slen, slen, k, sch, scl, logn, t1);
+			poly_sub_scaled_ntt(Gt, FGlen, llen, gt, slen, slen, k, sch, scl, logn, t1);
 		} else {
-			poly_sub_scaled(Ft, FGlen, llen, ft, slen, slen,
-				k, sch, scl, logn);
-			poly_sub_scaled(Gt, FGlen, llen, gt, slen, slen,
-				k, sch, scl, logn);
+			poly_sub_scaled(Ft, FGlen, llen, ft, slen, slen, k, sch, scl, logn);
+			poly_sub_scaled(Gt, FGlen, llen, gt, slen, slen, k, sch, scl, logn);
 		}
 
 		/*
@@ -832,7 +864,7 @@ printf("\n"); */
 		if (scale_k <= 0) {
 			break;
 		}
-		scale_k -= 25;
+		scale_k -= 20;
 		if (scale_k < 0) {
 			scale_k = 0;
 		}
