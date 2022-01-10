@@ -95,24 +95,15 @@ lilipu_solve_NTRU(unsigned logn, int8_t *F, int8_t *G,
 
 	n = MKN(logn);
 
-	if (!lilipu_solve_NTRU_deepest64(logn, f, g, tmp)) {
+	if (!lilipu_solve_NTRU_deepest(logn, f, g, tmp)) {
 		fprintf(stderr, "lilipu_solve_NTRU_deepest64 failed\n");
 		return 0;
 	}
 
-/*
-	printf("Initial normDown(F), normDown(G):\n");
-	size_t len = MAX_BL_SMALL64[logn];
-	for (u = 0; u < len; u++) printf("%u,", tmp[u]);
-	printf("\n");
-	for (u = 0; u < len; u++) printf("%u,", tmp[len + u]);
-	printf("\n");
-*/
-
 	unsigned depth = logn;
 	while (depth -- > 0) {
-		if (!solve_NTRU_intermediate64(logn, f, g, depth, tmp)) {
-			fprintf(stderr, "solve_NTRU_intermediate64(%d) failed\n", depth);
+		if (!lilipu_solve_NTRU_intermediate(logn, f, g, depth, tmp)) {
+			fprintf(stderr, "lilipu_solve_NTRU_intermediate(%d) failed\n", depth);
 			return 0;
 		}
 	}

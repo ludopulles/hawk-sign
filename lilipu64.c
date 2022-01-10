@@ -1,7 +1,7 @@
 #include <stdint.h>
 
 #include "inner.h"
-#include "util.h"
+// #include "util.h"
 
 // ================================================================================
 
@@ -23,15 +23,14 @@ Depth 8: 1184.95 (12.09) --> (41 ints)
 Depth 9: 2369.72 (24.19) --> (82 ints)
 */
 
-static const size_t MAX_BL_SMALL64[] = {
-	// 1, 1, 2, 2, 4, 7, 14, 27, 53, 106, 209 // (FALCON)
-	1, 1, 2, 2, 4, 6, 11, 21, 41, 82, -1
+static const size_t LILIPU_MAX_BL_SMALL[] = {
+//  1, 1, 2, 2, 4, 7, 14, 27, 53, 106, 209 // (FALCON)
+	1, 1, 2, 2, 4, 6, 11, 21, 41,  82, -1
 };
 
-static const size_t MAX_BL_LARGE64[] = {
-	// 2, 2, 5, 7, 12, 21, 40, 78, 157, 308 // (FALCON)
-	// 2, 2, 5, 7, 12, 19, 30, 55, 120, 308
-	   2, 2, 5, 7, 12, 22, 42, 82, 164, -1
+static const size_t LILIPU_MAX_BL_LARGE[] = {
+//	2, 2, 5, 7, 12, 21, 40, 78, 157, 308 // (FALCON)
+	2, 2, 5, 7, 12, 22, 42, 82, 164, -1
 };
 
 /*
@@ -42,7 +41,7 @@ static const size_t MAX_BL_LARGE64[] = {
 static const struct {
 	int avg;
 	int std;
-} BITLENGTH64[] = {
+} LILIPU_BITLENGTH[] = {
 	{ 4, 0 },
 	{ 9, 1 },
 	{ 19, 1 },
@@ -67,7 +66,7 @@ static const struct {
  * Values are in RNS; input and/or output may also be in NTT.
  */
 static void
-make_fg_step64(uint32_t *data, unsigned logn, unsigned depth,
+lilipu_make_fg_step(uint32_t *data, unsigned logn, unsigned depth,
 	int in_ntt, int out_ntt)
 {
 	size_t n, hn, u;
@@ -77,8 +76,8 @@ make_fg_step64(uint32_t *data, unsigned logn, unsigned depth,
 
 	n = (size_t)1 << logn;
 	hn = n >> 1;
-	slen = MAX_BL_SMALL64[depth];
-	tlen = MAX_BL_SMALL64[depth + 1];
+	slen = LILIPU_MAX_BL_SMALL[depth];
+	tlen = LILIPU_MAX_BL_SMALL[depth + 1];
 	primes = PRIMES;
 
 	/*
@@ -201,7 +200,6 @@ make_fg_step64(uint32_t *data, unsigned logn, unsigned depth,
 	}
 }
 
-
 /*
  * Compute f and g at a specific depth, in RNS notation.
  *
@@ -214,7 +212,7 @@ make_fg_step64(uint32_t *data, unsigned logn, unsigned depth,
  * f and g).
  */
 static void
-make_fg64(uint32_t *data, const int8_t *f, const int8_t *g,
+lilipu_make_fg(uint32_t *data, const int8_t *f, const int8_t *g,
 	unsigned logn, unsigned depth, int out_ntt)
 {
 	size_t n, u;
@@ -233,8 +231,7 @@ make_fg64(uint32_t *data, const int8_t *f, const int8_t *g,
 	}
 
 	if (depth == 0 && out_ntt) {
-		uint32_t *gm, *igm;
-		uint32_t p0i;
+		uint32_t *gm, *igm, p0i;
 
 		p0i = modp_ninv31(p0);
 		gm = gt + n;
@@ -246,7 +243,7 @@ make_fg64(uint32_t *data, const int8_t *f, const int8_t *g,
 	}
 
 	for (d = 0; d < depth; d ++) {
-		make_fg_step64(data, logn - d, d,
+		lilipu_make_fg_step(data, logn - d, d,
 			d != 0, (d + 1) < depth || out_ntt);
 	}
 }
@@ -259,14 +256,14 @@ make_fg64(uint32_t *data, const int8_t *f, const int8_t *g,
  * Returned value: 1 on success, 0 on error.
  */
 static int
-lilipu_solve_NTRU_deepest64(unsigned logn_top,
+lilipu_solve_NTRU_deepest(unsigned logn_top,
 	const int8_t *f, const int8_t *g, uint32_t *tmp)
 {
 	size_t len;
 	uint32_t *Fp, *Gp, *fp, *gp, *t1;
 	const small_prime *primes;
 
-	len = MAX_BL_SMALL64[logn_top];
+	len = LILIPU_MAX_BL_SMALL[logn_top];
 	primes = PRIMES;
 
 	Fp = tmp;
@@ -275,7 +272,7 @@ lilipu_solve_NTRU_deepest64(unsigned logn_top,
 	gp = fp + len;
 	t1 = gp + len;
 
-	make_fg64(fp, f, g, logn_top, logn_top, 0);
+	lilipu_make_fg(fp, f, g, logn_top, logn_top, 0);
 
 	/*
 	 * We use the CRT to rebuild the resultants as big integers.
@@ -283,14 +280,6 @@ lilipu_solve_NTRU_deepest64(unsigned logn_top,
 	 * nonnegative.
 	 */
 	zint_rebuild_CRT(fp, len, len, 2, primes, 0, t1);
-
-/*
-	printf("Initial normDown(f), normDown(g):\n");
-	for (size_t u = 0; u < len; u++) printf("%u,", fp[u]);
-	printf("\n");
-	for (size_t u = 0; u < len; u++) printf("%u,", gp[u]);
-	printf("\n");
-*/
 
 	/*
 	 * Apply the binary GCD. The zint_bezout() function works only
@@ -304,7 +293,7 @@ lilipu_solve_NTRU_deepest64(unsigned logn_top,
 }
 
 static int
-solve_NTRU_intermediate64(unsigned logn_top,
+lilipu_solve_NTRU_intermediate(unsigned logn_top,
 	const int8_t *f, const int8_t *g, unsigned depth, uint32_t *tmp)
 {
 	/*
@@ -339,9 +328,9 @@ solve_NTRU_intermediate64(unsigned logn_top,
 	 * We build our non-reduced F and G as two independent halves each,
 	 * of degree N/2 (F = F0 + X*F1, G = G0 + X*G1).
 	 */
-	slen = MAX_BL_SMALL64[depth];
-	dlen = MAX_BL_SMALL64[depth + 1];
-	llen = MAX_BL_LARGE64[depth];
+	slen = LILIPU_MAX_BL_SMALL[depth];
+	dlen = LILIPU_MAX_BL_SMALL[depth + 1];
+	llen = LILIPU_MAX_BL_LARGE[depth];
 	primes = PRIMES;
 
 	/*
@@ -355,7 +344,7 @@ solve_NTRU_intermediate64(unsigned logn_top,
 	 * and g in RNS + NTT representation.
 	 */
 	ft = Gd + dlen * hn;
-	make_fg64(ft, f, g, logn_top, depth, 1);
+	lilipu_make_fg(ft, f, g, logn_top, depth, 1);
 
 	/*
 	 * Move the newly computed f and g to make room for our candidate
@@ -632,64 +621,19 @@ solve_NTRU_intermediate64(unsigned logn_top,
 	 * allow for a deviation of at most six times the standard
 	 * deviation.
 	 */
-	minbl_fg = BITLENGTH64[depth].avg - 6 * BITLENGTH64[depth].std;
-	maxbl_fg = BITLENGTH64[depth].avg + 6 * BITLENGTH64[depth].std;
+	minbl_fg = LILIPU_BITLENGTH[depth].avg - 6 * LILIPU_BITLENGTH[depth].std;
+	maxbl_fg = LILIPU_BITLENGTH[depth].avg + 6 * LILIPU_BITLENGTH[depth].std;
 
 	/*
 	 * Compute 1/(f*adj(f)+g*adj(g)) in rt5. We also keep adj(f)
 	 * and adj(g) in rt3 and rt4, respectively.
 	 */
 
-	/* if (depth == 7) {
-		printf("Initial ft, gt:\n[");
-		for (size_t v = 0; v < n; v++) {
-			for (u = 0; u < slen; u++)
-				printf("%d,", ft[v*slen + u]);
-			printf(" or ");
-			print_big(ft + v*slen, slen);
-			printf("\n");
-		}
-		printf("]\n[");
-		for (size_t v = 0; v < n; v++) {
-			for (u = 0; u < slen; u++)
-				printf("%d,", gt[v*slen + u]);
-			printf(" or ");
-			print_big(gt + v*slen, slen);
-			printf("\n");
-		}
-		printf("]\nInitial Ft, Gt:\n[");
-		for (size_t v = 0; v < n; v++) {
-			for (u = 0; u < llen; u++)
-				printf("%d,", Ft[v*llen + u]);
-			printf(" or ");
-			print_big(Ft + v*llen, llen);
-			printf("\n");
-		}
-		printf("]\n[");
-		for (size_t v = 0; v < n; v++) {
-			for (u = 0; u < llen; u++)
-				printf("%d,", Gt[v*llen + u]);
-			printf(" or ");
-			print_big(Gt + v*llen, llen);
-			printf("\n");
-		}
-		printf("\n");
-	} */
-
-
 	Zf(FFT)(rt3, logn);
 	Zf(FFT)(rt4, logn);
 	Zf(poly_invnorm2_fft)(rt5, rt3, rt4, logn);
 	Zf(poly_adj_fft)(rt3, logn);
 	Zf(poly_adj_fft)(rt4, logn);
-
-	/* printf("FFT %d values:\n", depth);
-	for (u = 0; u < n; u++) printf("%e ", rt3[u].v);
-	printf("\n");
-	for (u = 0; u < n; u++) printf("%e ", rt4[u].v);
-	printf("\n");
-	for (u = 0; u < n/2; u++) printf("%e ", rt5[u].v);
-	printf("\n"); // */
 
 	/*
 	 * Reduce F and G repeatedly.
@@ -813,13 +757,6 @@ solve_NTRU_intermediate64(unsigned logn_top,
 			if (!fpr_lt(fpr_mtwo31m1, xv)
 				|| !fpr_lt(xv, fpr_ptwo31m1))
 			{
-// printf("Scales: %d %d %d (=%d - %d)\n", scale_fg, scale_FG, scale_k, maxbl_FG, minbl_fg);
-printf("Fail at reduction step %d/%d\n", scale_k, maxbl_FG - minbl_fg);
-printf("Values found: \n");
-for (u = 0; u < n; u ++) {
-	printf("%e ", fpr_mul(rt2[u], pdc).v);
-}
-printf("\n");
 				return 0;
 			}
 			k[u] = (int32_t)fpr_rint(xv);
@@ -864,7 +801,7 @@ printf("\n");
 		if (scale_k <= 0) {
 			break;
 		}
-		scale_k -= 20;
+		scale_k -= 25;
 		if (scale_k < 0) {
 			scale_k = 0;
 		}

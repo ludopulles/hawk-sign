@@ -6,8 +6,6 @@
 #include <stdlib.h>
 #include <time.h>
 
-// #include "api.h"
-// #include "inner.h"
 #include "codec.c"
 #include "common.c"
 #include "fft.c"
@@ -57,7 +55,7 @@ const size_t UPPER_BOUND_SIZE[11] = {
  * Values are in RNS; input and/or output may also be in NTT.
  */
 static void
-make_fg_step64(uint32_t *data, unsigned logn, unsigned depth,
+lilipu_make_fg_step(uint32_t *data, unsigned logn, unsigned depth,
 	int in_ntt, int out_ntt)
 {
 	size_t n, hn, u;
@@ -203,7 +201,7 @@ make_fg_step64(uint32_t *data, unsigned logn, unsigned depth,
  * f and g).
  */
 static void
-make_fg64(uint32_t *data, const int8_t *f, const int8_t *g,
+lilipu_make_fg(uint32_t *data, const int8_t *f, const int8_t *g,
 	unsigned logn, unsigned depth, int out_ntt)
 {
 	size_t n, u;
@@ -236,7 +234,7 @@ make_fg64(uint32_t *data, const int8_t *f, const int8_t *g,
 	}
 
 	for (d = 0; d < depth; d ++) {
-		make_fg_step64(data, logn - d, d,
+		lilipu_make_fg_step(data, logn - d, d,
 			d != 0, (d + 1) < depth || out_ntt);
 	}
 }
@@ -249,7 +247,7 @@ make_fg64(uint32_t *data, const int8_t *f, const int8_t *g,
  * Returned value: 1 on success, 0 on error.
  */
 static int
-lilipu_solve_NTRU_deepest64(unsigned logn_top,
+lilipu_solve_NTRU_deepest(unsigned logn_top,
 	const int8_t *f, const int8_t *g, uint32_t *tmp)
 {
 	size_t len;
@@ -265,7 +263,7 @@ lilipu_solve_NTRU_deepest64(unsigned logn_top,
 	gp = fp + len;
 	t1 = gp + len;
 
-	make_fg64(fp, f, g, logn_top, logn_top, 0);
+	lilipu_make_fg(fp, f, g, logn_top, logn_top, 0);
 
 	/*
 	 * We use the CRT to rebuild the resultants as big integers.
@@ -383,8 +381,9 @@ void sample_fg(inner_shake256_context *rng, int8_t *f, int8_t *g, uint8_t *tmp)
 
 		lilipu_poly_small_mkgauss(samp, samp_ctx, f, logn, lim);
 		lilipu_poly_small_mkgauss(samp, samp_ctx, g, logn, lim);
-	} while (!lilipu_solve_NTRU_deepest64(logn, f, g, (uint32_t *)tmp));
+	} while (!lilipu_solve_NTRU_deepest(logn, f, g, (uint32_t *)tmp));
 }
+
 void sample_fg_sizes(inner_shake256_context *rng, uint8_t *tmp)
 {
 	int8_t f[n], g[n];
@@ -408,7 +407,7 @@ void sample_fg_sizes(inner_shake256_context *rng, uint8_t *tmp)
 			t1 = gp + (len << (logn - depth));
 
 			memset(tmp, 0, (len << (logn - depth)) * sizeof fp);
-			make_fg64(fp, f, g, logn, depth, 0);
+			lilipu_make_fg(fp, f, g, logn, depth, 0);
 			// Rebuild fp, gp as polynomials of big integers
 			zint_rebuild_CRT(fp, len, len, 2 << (logn - depth), PRIMES, 1, t1);
 
