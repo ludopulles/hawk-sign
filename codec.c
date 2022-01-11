@@ -55,7 +55,7 @@ Zf(modq_encode)(
 	if (out_len > max_out_len) {
 		return 0;
 	}
-	buf = out;
+	buf = (uint8_t *)out;
 	acc = 0;
 	acc_len = 0;
 	for (u = 0; u < n; u ++) {
@@ -88,7 +88,7 @@ Zf(modq_decode)(
 	if (in_len > max_in_len) {
 		return 0;
 	}
-	buf = in;
+	buf = (const uint8_t *)in;
 	acc = 0;
 	acc_len = 0;
 	u = 0;
@@ -139,7 +139,7 @@ Zf(trim_i16_encode)(
 	if (out_len > max_out_len) {
 		return 0;
 	}
-	buf = out;
+	buf = (uint8_t *)out;
 	acc = 0;
 	acc_len = 0;
 	mask = ((uint32_t)1 << bits) - 1;
@@ -174,7 +174,7 @@ Zf(trim_i16_decode)(
 	if (in_len > max_in_len) {
 		return 0;
 	}
-	buf = in;
+	buf = (const uint8_t *)in;
 	u = 0;
 	acc = 0;
 	acc_len = 0;
@@ -235,7 +235,7 @@ Zf(trim_i8_encode)(
 	if (out_len > max_out_len) {
 		return 0;
 	}
-	buf = out;
+	buf = (uint8_t *)out;
 	acc = 0;
 	acc_len = 0;
 	mask = ((uint32_t)1 << bits) - 1;
@@ -270,7 +270,7 @@ Zf(trim_i8_decode)(
 	if (in_len > max_in_len) {
 		return 0;
 	}
-	buf = in;
+	buf = (const uint8_t *)in;
 	u = 0;
 	acc = 0;
 	acc_len = 0;
@@ -315,7 +315,7 @@ Zf(comp_encode)(
 	unsigned acc_len;
 
 	n = (size_t)1 << logn;
-	buf = out;
+	buf = (uint8_t *)out;
 
 	/*
 	 * Make sure that all values are within the -2047..+2047 range.
@@ -412,7 +412,7 @@ Zf(comp_decode)(
 	unsigned acc_len;
 
 	n = (size_t)1 << logn;
-	buf = in;
+	buf = (const uint8_t *)in;
 	acc = 0;
 	acc_len = 0;
 	v = 0;

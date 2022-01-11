@@ -2460,8 +2460,8 @@ align_fpr(void *base, void *data)
 	uint8_t *cb, *cd;
 	size_t k, km;
 
-	cb = base;
-	cd = data;
+	cb = (uint8_t *)base;
+	cd = (uint8_t *)data;
 	k = (size_t)(cd - cb);
 	km = k % sizeof(fpr);
 	if (km) {
@@ -2480,8 +2480,8 @@ align_u32(void *base, void *data)
 	uint8_t *cb, *cd;
 	size_t k, km;
 
-	cb = base;
-	cd = data;
+	cb = (uint8_t *)base;
+	cd = (uint8_t *)data;
 	k = (size_t)(cd - cb);
 	km = k % sizeof(uint32_t);
 	if (km) {

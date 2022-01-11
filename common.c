@@ -54,7 +54,7 @@ Zf(hash_to_point_vartime)(
 		uint8_t buf[2];
 		uint32_t w;
 
-		inner_shake256_extract(sc, (void *)buf, sizeof buf);
+		inner_shake256_extract(sc, buf, sizeof buf);
 		w = ((unsigned)buf[0] << 8) | (unsigned)buf[1];
 		if (w < 61445) {
 			while (w >= 12289) {
