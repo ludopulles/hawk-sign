@@ -89,9 +89,10 @@ static const struct {
  */
 void
 lilipu_keygen(inner_shake256_context *rng,
-	int8_t *f, int8_t *g, int8_t *F, int8_t *G, // secret key (basis)
-	fpr *q00, fpr *q10, fpr *q11, // public key (quadratic form)
-	unsigned logn, uint8_t *tmp, fpr isigma_kg);
+	int8_t *restrict f, int8_t *restrict g, // secret key
+	int8_t *restrict F, int8_t *restrict G, // secret key
+	fpr *restrict q00, fpr *restrict q10, fpr *restrict q11, // public key
+	unsigned logn, uint8_t *restrict tmp, fpr isigma_kg);
 
 // =============================================================================
 // | Signature generation                                                      |
@@ -106,9 +107,10 @@ lilipu_keygen(inner_shake256_context *rng,
  * tmp[] must have room for at least nine polynomials.
  */
 void
-lilipu_sign(int16_t *sig, inner_shake256_context *rng,
+lilipu_sign(int16_t *restrict sig, inner_shake256_context *rng,
 	const int8_t *restrict f, const int8_t *restrict g,
-	const uint16_t *hm, unsigned logn, fpr isigma_sig, uint8_t *restrict tmp);
+	const uint16_t *restrict hm, unsigned logn, fpr isigma_sig,
+	uint8_t *restrict tmp);
 
 // =============================================================================
 // | Signature validation                                                      |
@@ -129,6 +131,7 @@ lilipu_sign(int16_t *sig, inner_shake256_context *rng,
  * tmp must have size at least 32 * 1024 bytes
  */
 int
-lilipu_verify(const uint16_t *hm, int16_t *s0, const int16_t *s1,
-	const fpr *q00, const fpr *q10, const fpr *q11,
-	unsigned logn, const fpr verif_bound, fpr *tmp);
+lilipu_verify(const uint16_t *restrict hm,
+	int16_t *restrict s0, const int16_t *restrict s1,
+	const fpr *restrict q00, const fpr *restrict q10, const fpr *restrict q11,
+	unsigned logn, const fpr verif_bound, fpr *restrict tmp);
