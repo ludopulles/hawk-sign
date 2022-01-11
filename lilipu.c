@@ -18,7 +18,7 @@
 // #include "nist.c"
 #include "rng.c"
 #include "shake.c"
-#include "sign.c"
+// #include "sign.c"
 #include "lilipu_keygen.c"
 // #include "vrfy.c"
 
@@ -61,94 +61,19 @@ void to_sage16(const char *varname, const int16_t *f, unsigned logn) {
 }
 
 // =============================================================================
-// | TODO: make this into an actually NIST-compatible function like `nist.c`   |
-// =============================================================================
-int
-crypto_lilipu_sign(unsigned char *sm, unsigned long long *smlen,
-	const unsigned char *m, unsigned long long mlen,
-	const int8_t *restrict f, const int8_t *restrict g, fpr isigma_sig)
-{
-	TEMPALLOC union {
-		uint8_t b[28 * 1024];
-		uint64_t dummy_u64;
-		fpr dummy_fpr;
-	} tmp;
-	TEMPALLOC union {
-		int16_t sig[1024];
-		uint16_t hm[1024];
-	} r;
-	TEMPALLOC unsigned char seed[48], nonce[NONCELEN];
-	TEMPALLOC unsigned char esig[CRYPTO_BYTES - 2 - sizeof nonce];
-	TEMPALLOC inner_shake256_context sc;
-	size_t sig_len;
-
-	/*
-	 * Create a random nonce (40 bytes).
-	 */
-	randombytes(nonce, sizeof nonce);
-
-	/*
-	 * Hash message nonce + message into a vector.
-	 */
-	inner_shake256_init(&sc);
-	inner_shake256_inject(&sc, nonce, sizeof nonce);
-	inner_shake256_inject(&sc, m, mlen);
-	inner_shake256_flip(&sc);
-	Zf(hash_to_point_vartime)(&sc, (uint16_t *)r.hm, 10);
-
-	/*
-	 * Initialize a RNG.
-	 */
-	randombytes(seed, sizeof seed);
-	inner_shake256_init(&sc);
-	inner_shake256_inject(&sc, seed, sizeof seed);
-	inner_shake256_flip(&sc);
-
-
-	/*
-	 * Compute the signature.
-	 */
-	lilipu_sign(r.sig, &sc, f, g, r.hm, 10, isigma_sig, tmp.b);
-
-
-	/*
-	 * Encode the signature and bundle it with the message. Format is:
-	 *   signature length     2 bytes, big-endian
-	 *   nonce                40 bytes
-	 *   message              mlen bytes
-	 *   signature            slen bytes
-	 */
-	esig[0] = 0x20 + 10;
-	sig_len = Zf(comp_encode)(esig + 1, (sizeof esig) - 1, r.sig, 10);
-	if (sig_len == 0) {
-		return -1;
-	}
-	sig_len ++;
-	memmove(sm + 2 + sizeof nonce, m, mlen);
-	sm[0] = (unsigned char)(sig_len >> 8);
-	sm[1] = (unsigned char)sig_len;
-	memcpy(sm + 2, nonce, sizeof nonce);
-	memcpy(sm + 2 + (sizeof nonce) + mlen, esig, sig_len);
-	*smlen = 2 + (sizeof nonce) + mlen + sig_len;
-	return 0;
-}
-
-// =============================================================================
 // | TESTING CODE                                                              |
 // =============================================================================
 const size_t logn = 9, n = MKN(logn);
 
 void benchmark_lilipu(fpr isigma_kg, fpr isigma_sig) {
 	TEMPALLOC union {
-		// uint8_t b[42 * 1024];
-		uint8_t b[100 * 1024];
+		uint8_t b[28 * 512];
 		uint64_t dummy_u64;
 		fpr dummy_fpr;
 	} tmp;
-	TEMPALLOC int8_t f[1024], g[1024], F[1024], G[1024];
-	TEMPALLOC fpr q00[1024], q10[1024], q11[1024];
-	TEMPALLOC uint16_t h[1024];
-	TEMPALLOC int16_t sig[1024];
+	TEMPALLOC int8_t f[512], g[512], F[512], G[512], h[512];
+	TEMPALLOC fpr q00[512], q10[512], q11[512];
+	TEMPALLOC int16_t sig[512];
 	TEMPALLOC unsigned char seed[48];
 	TEMPALLOC inner_shake256_context sc;
 
@@ -179,7 +104,7 @@ void benchmark_lilipu(fpr isigma_kg, fpr isigma_sig) {
 		randombytes((unsigned char *)h, sizeof h);
 
 		// Compute the signature.
-		lilipu_sign(sig, &sc, f, g, h, logn, isigma_sig, tmp.b);
+		lilipu_sign(&sc, sig, f, g, h, logn, isigma_sig, tmp.b);
 	}
 
 	gettimeofday(&t1, NULL);
@@ -235,6 +160,13 @@ void benchmark_falcon() {
 
 		// Compute the signature.
 		falcon_inner_sign_dyn(r.sig, &sc, f, g, F, G, r.hm, logn, tmp2.b);
+
+		if (rep == 25) {
+			for (size_t u = 0; u < n; u++) {
+				printf("%d,", r.sig[u]);
+			}
+			printf("\n");
+		}
 	}
 
 	gettimeofday(&t1, NULL);
@@ -248,10 +180,9 @@ void test_lilipu_valid_signature(fpr isigma_kg, fpr isigma_sig, fpr verif_bound)
 		uint64_t dummy_u64;
 		fpr dummy_fpr;
 	} tmp;
-	TEMPALLOC int8_t f[1024], g[1024], F[1024], G[1024];
+	TEMPALLOC int8_t f[1024], g[1024], F[1024], G[1024], h[1024];
 	TEMPALLOC fpr q00[1024], q10[1024], q11[1024];
 	TEMPALLOC int16_t sig[1024], s0[1024];
-	TEMPALLOC uint16_t h[1024];
 	TEMPALLOC unsigned char seed[48];
 	TEMPALLOC inner_shake256_context sc;
 
@@ -270,14 +201,14 @@ void test_lilipu_valid_signature(fpr isigma_kg, fpr isigma_sig, fpr verif_bound)
 		// to_sage16("h", (int16_t *)h, logn);
 
 		// Compute the signature.
-		lilipu_sign(sig, &sc, f, g, h, logn, isigma_sig, tmp.b);
+		lilipu_sign(&sc, sig, f, g, h, logn, isigma_sig, tmp.b);
 		// to_sage16("s1", sig, logn);
 
-		assert(lilipu_verify(h, s0, sig, q00, q10, q11, logn, verif_bound, (fpr *)tmp.b));
+		assert(lilipu_verify(h, s0, sig, q00, q10, q11, logn, verif_bound, tmp.b));
 		// randombytes((unsigned char *)sig, sizeof sig);
 		for (size_t u = 0; u < n; u ++)
 			sig[u] = 0;
-		assert(!lilipu_verify(h, s0, sig, q00, q10, q11, logn, verif_bound, (fpr *)tmp.b));
+		assert(!lilipu_verify(h, s0, sig, q00, q10, q11, logn, verif_bound, tmp.b));
 	}
 
 	printf("Valid signatures were signed.\n");
@@ -287,13 +218,13 @@ void test_lilipu_valid_signature(fpr isigma_kg, fpr isigma_sig, fpr verif_bound)
 
 // try to find a forgery, put answer in s1
 int try_forge(int16_t *s0, int16_t *s1, const fpr *q00, const fpr *q10, const fpr *q11,
-	const uint16_t *hm, const fpr verif_bound, fpr *tmp)
+	const int8_t *hm, const fpr verif_bound, uint8_t *tmp)
 {
 	size_t u;
 	int16_t s0p[1024], s1p[1024];
 	fpr *t0, *t1, *t2, *t3, trace;
 
-	t0 = tmp;
+	t0 = (fpr *)tmp;
 	t1 = t0 + n;
 	t2 = t1 + n;
 	t3 = t2 + n;
@@ -383,10 +314,9 @@ void test_forge_signature(fpr isigma_kg, fpr isigma_sig, fpr verif_bound) {
 		uint64_t dummy_u64;
 		fpr dummy_fpr;
 	} tmp;
-	TEMPALLOC int8_t f[1024], g[1024], F[1024], G[1024];
+	TEMPALLOC int8_t f[1024], g[1024], F[1024], G[1024], h[1024];
 	TEMPALLOC fpr q00[1024], q10[1024], q11[1024];
 	TEMPALLOC int16_t sig[1024], s0[1024];
-	TEMPALLOC uint16_t h[1024];
 	TEMPALLOC unsigned char seed[48];
 	TEMPALLOC inner_shake256_context sc;
 	int res;
@@ -405,23 +335,23 @@ void test_forge_signature(fpr isigma_kg, fpr isigma_sig, fpr verif_bound) {
 	randombytes((unsigned char *)h, sizeof h);
 	// to_sage16("h", (int16_t *)h, logn);
 
-	lilipu_sign(sig, &sc, f, g, h, logn, isigma_sig, tmp.b);
+	lilipu_sign(&sc, sig, f, g, h, logn, isigma_sig, tmp.b);
 	printf("s1 = ");
 	for (size_t u = 0; u < n; u++) printf("%d,", sig[u]);
 	printf("\n");
 	// to_sage16("s1", sig, logn);
 
 	// try to forge a signature for 'h', and put result in s0
-	res = try_forge(s0, sig, q00, q10, q11, h, verif_bound, (fpr *)tmp.b);
+	res = try_forge(s0, sig, q00, q10, q11, h, verif_bound, tmp.b);
 	assert(res);
 
-	assert(!lilipu_verify(h, s0, sig, q00, q10, q11, logn, verif_bound, (fpr *)tmp.b));
+	assert(!lilipu_verify(h, s0, sig, q00, q10, q11, logn, verif_bound, tmp.b));
 	printf("No forgery found.\n");
 }
 
 void testmod2() {
-	int8_t f[1024], fg[1024], check[1024];
-	uint16_t g[1024], tmp[2*1024];
+	int8_t f[1024], g[1024], fg[1024], check[1024];
+	uint16_t tmp[2*1024];
 
 	for (size_t rep = 0; rep < 10; rep ++) {
 		for (size_t u = 0; u < n; u ++)

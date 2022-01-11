@@ -1,5 +1,4 @@
 #include <stdint.h>
-#include <stdio.h> // fprintf, printf
 
 #include "lilipu_keygen.h"
 
@@ -842,7 +841,6 @@ lilipu_solve_NTRU(unsigned logn, int8_t *F, int8_t *G,
 	n = MKN(logn);
 
 	if (!lilipu_solve_NTRU_deepest(logn, f, g, tmp)) {
-		fprintf(stderr, "lilipu_solve_NTRU_deepest64 failed\n");
 		return 0;
 	}
 
@@ -850,14 +848,12 @@ lilipu_solve_NTRU(unsigned logn, int8_t *F, int8_t *G,
 	if (logn <= 2) {
 		while (depth -- > 0) {
 			if (!lilipu_solve_NTRU_intermediate(logn, f, g, depth, tmp)) {
-				fprintf(stderr, "lilipu_solve_NTRU_intermediate(%zu) failed\n", depth);
 				return 0;
 			}
 		}
 	} else {
 		while (depth -- > 2) {
 			if (!lilipu_solve_NTRU_intermediate(logn, f, g, depth, tmp)) {
-				fprintf(stderr, "lilipu_solve_NTRU_intermediate(%zu) failed\n", depth);
 				return 0;
 			}
 		}
@@ -867,12 +863,10 @@ lilipu_solve_NTRU(unsigned logn, int8_t *F, int8_t *G,
 		 * and therefore, LILIPU_MAX_BL_* and MAX_BL_* are equal.
 		 */
 		if (!solve_NTRU_binary_depth1(logn, f, g, tmp)) {
-			fprintf(stderr, "solve_NTRU_binary_depth1 failed\n");
 			return 0;
 		}
 
 		if (!solve_NTRU_binary_depth0(logn, f, g, tmp)) {
-			fprintf(stderr, "solve_NTRU_binary_depth0 failed\n");
 			return 0;
 		}
 	}
@@ -884,7 +878,6 @@ lilipu_solve_NTRU(unsigned logn, int8_t *F, int8_t *G,
 	if (!poly_big_to_small(F, tmp, lim, logn)
 		|| !poly_big_to_small(G, tmp + n, lim, logn))
 	{
-		fprintf(stderr, "poly_big_to_small failed\n");
 		return 0;
 	}
 
@@ -925,7 +918,6 @@ lilipu_solve_NTRU(unsigned logn, int8_t *F, int8_t *G,
 		z = modp_sub(modp_montymul(ft[u], Gt[u], p, p0i),
 			modp_montymul(gt[u], Ft[u], p, p0i), p);
 		if (z != r) {
-			fprintf(stderr, "fG - gF != 1\n");
 			return 0;
 		}
 	}
@@ -968,7 +960,7 @@ lilipu_keygen(inner_shake256_context *rng,
 	 * NTRU equation solver requires it).
 	 */
 	for (;;) {
-		fpr *qxx, *rt1, *rt2, *rt3, *rt4;
+		fpr *rt1, *rt2;
 		int lim;
 
 		// Normal sampling. We use a fast PRNG seeded from our SHAKE context ('rng').
@@ -976,7 +968,7 @@ lilipu_keygen(inner_shake256_context *rng,
 		samplerZ samp;
 		void *samp_ctx;
 		spc.sigma_min = fpr_sigma_min[logn];
-		falcon_inner_prng_init(&spc.p, rng);
+		Zf(prng_init)(&spc.p, rng);
 		samp = Zf(sampler);
 		samp_ctx = &spc;
 
@@ -993,45 +985,34 @@ lilipu_keygen(inner_shake256_context *rng,
 		// Solve the NTRU equation to get F and G.
 		lim = (1 << (Zf(max_FG_bits)[logn] - 1)) - 1;
 		if (!lilipu_solve_NTRU(logn, F, G, f, g, lim, (uint32_t *)tmp)) {
-			fprintf(stderr, "keygen failed, reattempt.\n");
 			continue;
 		}
 
-		// TODO: use less memory by first calculating q10 and storing
-		//       f, g, F, G halfway in the q's.
 		// Calculate q00, q10, q11 (in FFT representation) using
 		// Q = B * adj(B^{T})
-		qxx = (fpr *)tmp;
-		rt1 = qxx + n;
+		rt1 = (fpr *)tmp;
 		rt2 = rt1 + n;
-		rt3 = rt2 + n;
-		rt4 = rt3 + n;
-		poly_small_to_fp(rt1, f, logn);
-		poly_small_to_fp(rt2, g, logn);
-		poly_small_to_fp(rt3, F, logn);
-		poly_small_to_fp(rt4, G, logn);
-		Zf(FFT)(rt1, logn);
-		Zf(FFT)(rt2, logn);
-		Zf(FFT)(rt3, logn);
-		Zf(FFT)(rt4, logn);
+		poly_small_to_fp(q00, f, logn);
+		poly_small_to_fp(rt1, g, logn);
+		poly_small_to_fp(q11, F, logn);
+		poly_small_to_fp(rt2, G, logn);
+		Zf(FFT)(q00, logn); // f
+		Zf(FFT)(rt1, logn); // g
+		Zf(FFT)(q11, logn); // F
+		Zf(FFT)(rt2, logn); // G
 
-		memcpy(q00, rt1, n * sizeof *rt1);
-		Zf(poly_mulselfadj_fft)(q00, logn);
-		memcpy(qxx, rt2, n * sizeof *rt2);
-		Zf(poly_mulselfadj_fft)(qxx, logn);
-		Zf(poly_add)(q00, qxx, logn); // q00 = f*bar(f) + g*bar(g)
+		// q10 = F*adj(f) + G*adj(g)
+		Zf(poly_add_muladj_fft)(q10, q11, rt2, q00, rt1, logn);
 
-		memcpy(q10, rt3, n * sizeof *rt3);
-		Zf(poly_muladj_fft)(q10, rt1, logn);
-		memcpy(qxx, rt4, n * sizeof *rt4);
-		Zf(poly_muladj_fft)(qxx, rt2, logn);
-		Zf(poly_add)(q10, qxx, logn); // q10 = F*bar(f) + G*bar(g)
+		// q00 = f*adj(f) + g*adj(g)
+		Zf(poly_mulselfadj_fft)(q00, logn); // f*adj(f)
+		Zf(poly_mulselfadj_fft)(rt1, logn); // g*adj(g)
+		Zf(poly_add)(q00, rt1, logn);
 
-		memcpy(q11, rt3, n * sizeof *rt3);
-		Zf(poly_mulselfadj_fft)(q11, logn);
-		memcpy(qxx, rt4, n * sizeof *rt4);
-		Zf(poly_mulselfadj_fft)(qxx, logn);
-		Zf(poly_add)(q11, qxx, logn); // q11 = F*bar(F) + G*bar(G)
+		// q11 = F*bar(F) + G*bar(G)
+		Zf(poly_mulselfadj_fft)(q11, logn); // F*adj(F)
+		Zf(poly_mulselfadj_fft)(rt2, logn); // G*adj(G)
+		Zf(poly_add)(q11, rt2, logn);
 
 		/*
 		 * Key pair is generated.
@@ -1047,7 +1028,7 @@ lilipu_keygen(inner_shake256_context *rng,
  */
 static void
 lilipu_inner_mulmod2(int8_t *restrict ab, const int8_t *restrict a,
-		const uint16_t *restrict b, unsigned logn, uint16_t *tmp)
+		const int8_t *restrict b, unsigned logn, uint16_t *tmp)
 {
 	size_t n, u;
 
@@ -1057,13 +1038,12 @@ lilipu_inner_mulmod2(int8_t *restrict ab, const int8_t *restrict a,
 		memset(ab, (int8_t)0, n);
 		for (u = 0; u < n; u ++)
 			for (v = 0; v < n; v ++)
-				ab[modp_add(u, v, n)] ^= a[u] & (int8_t)b[v];
+				ab[modp_add(u, v, n)] ^= a[u] & b[v];
 		for (u = 0; u < n; u ++)
 			ab[u] &= 1;
 	} else {
 		uint16_t *at, *bt;
 
-		n = MKN(logn);
 		at = tmp;
 		bt = at + n;
 
@@ -1081,7 +1061,7 @@ lilipu_inner_mulmod2(int8_t *restrict ab, const int8_t *restrict a,
 		mq_poly_montymul_ntt(at, bt, logn);
 		mq_iNTT(at, logn);
 
-		// Reduce the output to {0,1} where (Q-x) for 0 < x < Q/2 is cast to x%2.
+		// Reduce output to {0,1} where (Q-x) for 0 < x < Q/2 is cast to x%2.
 		for (u = 0; u < n; u ++) {
 			ab[u] = (at[u] ^ -(((Q >> 1) - (uint32_t)at[u]) >> 31)) & 1;
 		}
@@ -1090,17 +1070,15 @@ lilipu_inner_mulmod2(int8_t *restrict ab, const int8_t *restrict a,
 
 /*
  * Compute a signature: the signature contains two vectors, s0 and s1.
- * The s0 vector is not returned. The squared norm of (s0,s1) is
- * computed, and if it is short enough, then s1 is returned into the
- * s1[] buffer, and 1 is returned; otherwise, s1[] is untouched and 0 is
- * returned; the caller should then try again.
+ * The s0 vector is not returned.
  *
- * tmp[] must have room for at least 28 * 2^logn bytes
+ * tmp must have room for at least 28 * 2^logn bytes
  */
 static int
-lilipu_inner_do_sign(samplerZ samp, void *samp_ctx, int16_t *s1,
+lilipu_inner_do_sign(void *samp_ctx, int16_t *restrict s1,
 	const int8_t *restrict f, const int8_t *restrict g,
-	const uint16_t *hm, unsigned logn, fpr isigma_sig, uint8_t *restrict tmp)
+	const int8_t *restrict hm, unsigned logn, const fpr isigma_sig,
+	uint8_t *restrict tmp)
 {
 	size_t n, u;
 	int8_t *x0, *x1;
@@ -1124,10 +1102,12 @@ lilipu_inner_do_sign(samplerZ samp, void *samp_ctx, int16_t *s1,
 	 * Perform Gaussian smoothing to not reveal information on the secret basis.
 	 */
 	for (u = 0; u < n; u ++) {
-		x0[u] = 2*samp(samp_ctx, fpr_half(fpr_of(x0[u])), isigma_sig) - (x0[u]);
+		x0[u] = 2*Zf(sampler)(samp_ctx, fpr_half(fpr_of(x0[u])),
+			isigma_sig) - (x0[u]);
 	}
 	for (u = 0; u < n; u ++) {
-		x1[u] = 2*samp(samp_ctx, fpr_half(fpr_of(x1[u])), isigma_sig) - (x1[u]);
+		x1[u] = 2*Zf(sampler)(samp_ctx, fpr_half(fpr_of(x1[u])),
+			isigma_sig) - (x1[u]);
 	}
 
 	/*
@@ -1136,35 +1116,28 @@ lilipu_inner_do_sign(samplerZ samp, void *samp_ctx, int16_t *s1,
 	 */
 	smallints_to_fpr(t0, f, logn);
 	smallints_to_fpr(t1, x1, logn);
-	falcon_inner_FFT(t0, logn);
-	falcon_inner_FFT(t1, logn);
-	falcon_inner_poly_mul_fft(t0, t1, logn);
+	Zf(FFT)(t0, logn);
+	Zf(FFT)(t1, logn);
+	Zf(poly_mul_fft)(t0, t1, logn);
 	smallints_to_fpr(t1, g, logn);
 	smallints_to_fpr(t2, x0, logn);
-	falcon_inner_FFT(t1, logn);
-	falcon_inner_FFT(t2, logn);
-	falcon_inner_poly_mul_fft(t1, t2, logn);
-	falcon_inner_poly_sub(t0, t1, logn); // s1 = x1 f - x0 g.
+	Zf(FFT)(t1, logn);
+	Zf(FFT)(t2, logn);
+	Zf(poly_mul_fft)(t1, t2, logn);
+	Zf(poly_sub)(t0, t1, logn); // s1 = x1 f - x0 g.
 
-	/*
-	 * Extract the signature from t0
-	 */
+	Zf(iFFT)(t0, logn);
+	for (u = 0; u < n; u ++) {
+		s1[u] = (int16_t)fpr_rint(t0[u]);
+	}
 
 	/*
 	 * TODO: check if this signature actually works...
 	 * With "normal" degrees (e.g. 512 or 1024), it is very
 	 * improbable that the computed vector is not short enough;
 	 * however, it may happen in practice for the very reduced
-	 * versions (e.g. degree 16 or below). In that case, the caller
-	 * will loop, and we must not write anything into s1[] because
-	 * s1[] may overlap with the hashed message hm[] and we need
-	 * hm[] for the next iteration.
+	 * versions (e.g. degree 16 or below).
 	 */
-	falcon_inner_iFFT(t0, logn);
-	for (u = 0; u < n; u ++) {
-		s1[u] = (int16_t)fpr_rint(t0[u]);
-	}
-
 	return 1;
 }
 
@@ -1172,42 +1145,146 @@ lilipu_inner_do_sign(samplerZ samp, void *samp_ctx, int16_t *s1,
 // | Signature generation                                                      |
 // =============================================================================
 void
-lilipu_sign(int16_t *restrict sig, inner_shake256_context *rng,
+lilipu_sign(inner_shake256_context *rng, int16_t *restrict sig,
 	const int8_t *restrict f, const int8_t *restrict g,
-	const uint16_t *restrict hm, unsigned logn, fpr isigma_sig,
+	const int8_t *restrict hm, unsigned logn, fpr isigma_sig,
 	uint8_t *restrict tmp)
 {
-	for (;;) {
+	sampler_context spc;
+	spc.sigma_min = fpr_sigma_min[logn];
+	do {
 		/*
-		 * Signature produces short vectors s0 and s1. The
-		 * signature is acceptable only if the aggregate vector
-		 * s0,s1 is short; we must use the same bound as the
-		 * verifier.
+		 * Signature produces short vectors s0 and s1. The signature is
+		 * acceptable only if Tr((s0,s1) Q (s0,s1)^H) is short.
 		 *
-		 * If the signature is acceptable, then we return only s1
-		 * (the verifier recomputes s0 from s1, the hashed message,
-		 * and the public key).
+		 * If the signature is acceptable, we return only s1. A value for s0
+		 * can be found with Babai's Nearest Plane Algorithm that gives a short
+		 * trace as above.
+		 *
+		 * We use a fast PRNG seeded from SHAKE context for gaussian sampling.
 		 */
-		sampler_context spc;
-		samplerZ samp;
-		void *samp_ctx;
+		Zf(prng_init)(&spc.p, rng);
+	} while (!lilipu_inner_do_sign((void *)&spc, sig, f, g, hm, logn, isigma_sig, tmp));
+}
 
-		/*
-		 * Normal sampling. We use a fast PRNG seeded from our
-		 * SHAKE context ('rng').
-		 */
-		spc.sigma_min = fpr_sigma_min[logn];
-		falcon_inner_prng_init(&spc.p, rng);
-		samp = Zf(sampler);
-		samp_ctx = &spc;
+/*
+ * Compute a signature: the signature contains two vectors, s0 and s1.
+ *
+ * tmp must have room for at least 42 * 2^logn bytes
+ */
+static int
+lilipu_inner_do_complete_sign(void *samp_ctx,
+	int16_t *restrict s0, int16_t *restrict s1,
+	const int8_t *restrict f, const int8_t *restrict g,
+	const int8_t *restrict F, const int8_t *restrict G,
+	const int8_t *restrict hm, unsigned logn, fpr isigma_sig,
+	uint8_t *restrict tmp)
+{
+	size_t n, u;
+	int8_t *x0, *x1;
+	fpr *t0, *t1, *t2, *t3, *t4;
 
-		/*
-		 * Do the actual signature.
-		 */
-		if (lilipu_inner_do_sign(samp, samp_ctx, sig, f, g, hm, logn,
-				isigma_sig, tmp))
-			break;
+	n = MKN(logn);
+	x0 = (int8_t *)tmp;
+	x1 = x0 + n;
+	t0 = align_fpr(tmp, x1 + n);
+	t1 = t0 + n;
+	t2 = t1 + n;
+	t3 = t2 + n;
+	t4 = t3 + n;
+
+	/*
+	 * Set the target vector to [hm, 0] * B (hm is the hashed message).
+	 */
+	lilipu_inner_mulmod2(x0, f, hm, logn, (uint16_t *)t0);
+	lilipu_inner_mulmod2(x1, g, hm, logn, (uint16_t *)t0);
+
+	/*
+	 * Apply sampling; result is written over (x0,x1).
+	 * Perform Gaussian smoothing to not reveal information on the secret basis.
+	 */
+	for (u = 0; u < n; u ++) {
+		x0[u] = 2*Zf(sampler)(samp_ctx, fpr_half(fpr_of(x0[u])),
+			isigma_sig) - (x0[u]);
 	}
+	for (u = 0; u < n; u ++) {
+		x1[u] = 2*Zf(sampler)(samp_ctx, fpr_half(fpr_of(x1[u])),
+			isigma_sig) - (x1[u]);
+	}
+
+	/*
+	 * Get the signature corresponding to that tiny vector, i.e.
+	 * s = x * B^{-1}. Thus s0 = x0 G - x1 F and s1 = -x0 g + x1 f.
+	 */
+
+	smallints_to_fpr(t0, G, logn);
+	smallints_to_fpr(t1, f, logn);
+	smallints_to_fpr(t2, x0, logn);
+	smallints_to_fpr(t3, x1, logn);
+	Zf(FFT)(t0, logn);
+	Zf(FFT)(t1, logn);
+	Zf(FFT)(t2, logn);
+	Zf(FFT)(t3, logn);
+
+	Zf(poly_mul_fft)(t0, t2, logn); // t0 = x0 G
+	Zf(poly_mul_fft)(t1, t3, logn); // t1 = x1 f
+
+	smallints_to_fpr(t4, F, logn);
+	Zf(FFT)(t4, logn);
+	Zf(poly_mul_fft)(t3, t4, logn);
+	Zf(poly_sub)(t0, t3, logn); // t0 = x0 G - x1 F
+
+
+	smallints_to_fpr(t4, g, logn);
+	Zf(FFT)(t4, logn);
+	Zf(poly_mul_fft)(t2, t4, logn);
+	Zf(poly_sub)(t1, t2, logn); // t1 = x1 f - x0 g
+
+	/*
+	 * Extract the signature from t0, t1
+	 */
+	Zf(iFFT)(t0, logn);
+	Zf(iFFT)(t1, logn);
+	for (u = 0; u < n; u ++) {
+		s0[u] = (int16_t)fpr_rint(t0[u]);
+	}
+	for (u = 0; u < n; u ++) {
+		s1[u] = (int16_t)fpr_rint(t1[u]);
+	}
+
+	/*
+	 * TODO: check if this signature actually works...
+	 */
+	return 1;
+}
+
+// =============================================================================
+// | Signature generation                                                      |
+// =============================================================================
+void
+lilipu_complete_sign(inner_shake256_context *rng,
+	int16_t *restrict s0, int16_t *restrict s1,
+	const int8_t *restrict f, const int8_t *restrict g,
+	const int8_t *restrict F, const int8_t *restrict G,
+	const int8_t *restrict hm, unsigned logn, fpr isigma_sig,
+	uint8_t *restrict tmp)
+{
+	sampler_context spc;
+	spc.sigma_min = fpr_sigma_min[logn];
+	do {
+		/*
+		 * Signature produces short vectors s0 and s1. The signature is
+		 * acceptable only if Tr((s0,s1) Q (s0,s1)^H) is short.
+		 *
+		 * If the signature is acceptable, we return only s1. A value for s0
+		 * can be found with Babai's Nearest Plane Algorithm that gives a short
+		 * trace as above.
+		 *
+		 * We use a fast PRNG seeded from SHAKE context for gaussian sampling.
+		 */
+		Zf(prng_init)(&spc.p, rng);
+	} while (!lilipu_inner_do_complete_sign((void *)&spc,
+			s0, s1, f, g, F, G, hm, logn, isigma_sig, tmp));
 }
 
 
@@ -1246,16 +1323,16 @@ lilipu_inner_poly_add_autoadj_fft(fpr *a, fpr *b, unsigned logn)
 // | FUNCTIONS FOR SIGNATURE VERIFICATION                                      |
 // =============================================================================
 int
-lilipu_verify(const uint16_t *restrict hm,
+lilipu_verify(const int8_t *restrict hm,
 	int16_t *restrict s0, const int16_t *restrict s1,
 	const fpr *restrict q00, const fpr *restrict q10, const fpr *restrict q11,
-	unsigned logn, const fpr verif_bound, fpr *restrict tmp)
+	unsigned logn, const fpr verif_bound, uint8_t *restrict tmp)
 {
 	size_t u, n;
 	fpr *t0, *t1, *t2, *t3, trace;
 
 	n = MKN(logn);
-	t0 = tmp;
+	t0 = (fpr *)tmp;
 	t1 = t0 + n;
 	t2 = t1 + n;
 	t3 = t2 + n;
@@ -1265,7 +1342,6 @@ lilipu_verify(const uint16_t *restrict hm,
 		if (s1[u] & 1) return 0;
 	}
 
-	// Reduce s1 elements modulo q ([0..q-1] range).
 	for (u = 0; u < n; u ++) {
 		t0[u] = fpr_of(s1[u]);
 	}
@@ -1274,18 +1350,18 @@ lilipu_verify(const uint16_t *restrict hm,
 	}
 
 	// Compute s0 = h%2 + 2 round(-q10 s1 / (2 q00))
-	falcon_inner_FFT(t0, logn);
-	falcon_inner_FFT(t2, logn);
+	Zf(FFT)(t0, logn);
+	Zf(FFT)(t2, logn);
 	// copy s1 for later.
 	memcpy(t1, t0, n * sizeof *t0);
 
-	// falcon_inner_poly_mulconst(t0, fpr_onehalf, logn);
-	falcon_inner_poly_neg(t0, logn);
-	falcon_inner_poly_mul_fft(t0, q10, logn); // -q10 s1
+	// Zf(poly_mulconst)(t0, fpr_onehalf, logn);
+	Zf(poly_neg)(t0, logn);
+	Zf(poly_mul_fft)(t0, q10, logn); // -q10 s1
 	// Note: q00 is self adjoint
-	falcon_inner_poly_div_autoadj_fft(t0, q00, logn); // -s1 q10/q00
-	falcon_inner_poly_sub(t0, t2, logn); // -s1 q10/q00 - h%2
-	falcon_inner_iFFT(t0, logn);
+	Zf(poly_div_autoadj_fft)(t0, q00, logn); // -s1 q10/q00
+	Zf(poly_sub)(t0, t2, logn); // -s1 q10/q00 - h%2
+	Zf(iFFT)(t0, logn);
 
 	for (u = 0; u < n; u ++) {
 		s0[u] = (hm[u] & 1) + fpr_rint(fpr_half(t0[u]))*2;
@@ -1295,19 +1371,19 @@ lilipu_verify(const uint16_t *restrict hm,
 	for (u = 0; u < n; u ++) {
 		t0[u] = fpr_of(s0[u]);
 	}
-	falcon_inner_FFT(t0, logn);
+	Zf(FFT)(t0, logn);
 
 	// Currently in memory: s0, s1, s1, s0 (in FFT representation)
 	memcpy(t2, t1, n * sizeof *t0);
 	memcpy(t3, t0, n * sizeof *t0);
 
 	// Compute s0 q00 s0* + s0 q01 s1* + s1 q10 s0* + s1 q11 s1*
-	falcon_inner_poly_mulselfadj_fft(t2, logn);
-	falcon_inner_poly_mulselfadj_fft(t3, logn);
-	falcon_inner_poly_mul_autoadj_fft(t2, q11, logn); // t2 = s1 q11 s1*
-	falcon_inner_poly_mul_autoadj_fft(t3, q00, logn); // t3 = s0 q00 s0*
-	falcon_inner_poly_muladj_fft(t1, t0, logn); // t1 = s1 s0*
-	falcon_inner_poly_mul_fft(t1, q10, logn); // t1 = s1 q10 s0*
+	Zf(poly_mulselfadj_fft)(t2, logn);
+	Zf(poly_mulselfadj_fft)(t3, logn);
+	Zf(poly_mul_autoadj_fft)(t2, q11, logn); // t2 = s1 q11 s1*
+	Zf(poly_mul_autoadj_fft)(t3, q00, logn); // t3 = s0 q00 s0*
+	Zf(poly_muladj_fft)(t1, t0, logn); // t1 = s1 s0*
+	Zf(poly_mul_fft)(t1, q10, logn); // t1 = s1 q10 s0*
 
 	lilipu_inner_poly_addselfadj_fft(t1, logn); // t1 = s1 q10 s0* + s0 q01 s1*
 	lilipu_inner_poly_add_autoadj_fft(t1, t2, logn);
@@ -1323,11 +1399,77 @@ lilipu_verify(const uint16_t *restrict hm,
 	// TODO: this can be optimized in the verif_bound, cancelling with 2 in (2d).
 	trace = fpr_double(trace);
 
-	// falcon_inner_iFFT(t1, logn);
-	// printf("t1[0] = %.8f\n", t1[0]);
-	// printf("value for v: %.8f <=> %.8f\n", v.v, verif_bound.v);
 	/*
 	 * Signature is valid if and only if `v` is short enough and s1 == 0 (mod 2).
+	 */
+	return fpr_lt(trace, verif_bound);
+}
+
+
+// Verifies a signature given by (s0, s1) instead of only s1, so it does not
+// have to reconstruct s0.
+int
+lilipu_complete_verify(const int8_t *restrict hm,
+	const int16_t *restrict s0, const int16_t *restrict s1,
+	const fpr *restrict q00, const fpr *restrict q10, const fpr *restrict q11,
+	unsigned logn, const fpr verif_bound, uint8_t *restrict tmp)
+{
+	size_t u, n;
+	fpr *t0, *t1, *t2, *t3, trace;
+
+	n = MKN(logn);
+	t0 = (fpr *)tmp;
+	t1 = t0 + n;
+	t2 = t1 + n;
+	t3 = t2 + n;
+
+	// if (s0,s1) is a valid signature,
+	// then s0 == hm (mod 2) and s1 == 0 (mod 2)
+	for (u = 0; u < n; u ++) {
+		if ((s0[u] ^ hm[u]) & 1) return 0;
+	}
+	for (u = 0; u < n; u ++) {
+		if (s1[u] & 1) return 0;
+	}
+
+	for (u = 0; u < n; u ++) {
+		t0[u] = fpr_of(s0[u]);
+	}
+	for (u = 0; u < n; u ++) {
+		t1[u] = fpr_of(s1[u]);
+	}
+
+	Zf(FFT)(t0, logn);
+	Zf(FFT)(t1, logn);
+
+	// Currently in memory: s0, s1, s1, s0 (in FFT representation)
+	memcpy(t2, t1, n * sizeof *t0);
+	memcpy(t3, t0, n * sizeof *t0);
+
+	// Compute s0 q00 s0* + s0 q01 s1* + s1 q10 s0* + s1 q11 s1*
+	Zf(poly_mulselfadj_fft)(t2, logn);
+	Zf(poly_mulselfadj_fft)(t3, logn);
+	Zf(poly_mul_autoadj_fft)(t2, q11, logn); // t2 = s1 q11 s1*
+	Zf(poly_mul_autoadj_fft)(t3, q00, logn); // t3 = s0 q00 s0*
+	Zf(poly_muladj_fft)(t1, t0, logn); // t1 = s1 s0*
+	Zf(poly_mul_fft)(t1, q10, logn); // t1 = s1 q10 s0*
+
+	lilipu_inner_poly_addselfadj_fft(t1, logn); // t1 = s1 q10 s0* + s0 q01 s1*
+	lilipu_inner_poly_add_autoadj_fft(t1, t2, logn);
+	lilipu_inner_poly_add_autoadj_fft(t1, t3, logn);
+
+	trace = fpr_zero;
+	for (u = 0; u < n/2; u ++) {
+		trace = fpr_add(trace, t1[u]);
+	}
+
+	// note: only n/2 embeddings are stored,
+	// the others are simply the conjugate embeddings.
+	trace = fpr_double(trace);
+
+	/*
+	 * Signature is valid if and only if
+	 * `v` is short enough, s0 == hm (mod 2) and s1 == 0 (mod 2).
 	 */
 	return fpr_lt(trace, verif_bound);
 }

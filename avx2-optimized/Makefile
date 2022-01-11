@@ -16,18 +16,15 @@ LIBS =
 
 OBJ1 = build/codec.o build/common.o build/fft.o build/fpr.o build/keygen.o build/nist.o build/rng.o build/shake.o build/sign.o build/vrfy.o
 
-OBJ2 = build/PQCgenKAT_sign.o build/katrng.o
-
 HEAD1 = api.h fpr.h inner.h
-HEAD2 = api.h ../../../KAT/generator/katrng.h
 
-all: build build/kat1024avx2
+all: build
 
 build:
 	-mkdir build
 
 clean:
-	-rm -f build/kat1024avx2 $(OBJ1) $(OBJ2)
+	-rm $(OBJ1)
 
 
 a:
@@ -36,8 +33,8 @@ a:
 b:
 	$(CC) -g -Wall -Wshadow -fsanitize=address,undefined -mavx2 -o b.out lilipu.c
 
-build/kat1024avx2: $(OBJ1) $(OBJ2)
-	$(LD) $(LDFLAGS) -o build/kat1024avx2 $(OBJ1) $(OBJ2) $(LIBS)
+cpp:
+	g++ $(CFLAGS) -o a.out main.cpp
 
 build/codec.o: codec.c $(HEAD1)
 	$(CC) $(CFLAGS) -c -o build/codec.o codec.c
@@ -68,9 +65,3 @@ build/sign.o: sign.c $(HEAD1)
 
 build/vrfy.o: vrfy.c $(HEAD1)
 	$(CC) $(CFLAGS) -c -o build/vrfy.o vrfy.c
-
-build/PQCgenKAT_sign.o: ../../../KAT/generator/PQCgenKAT_sign.c $(HEAD2)
-	$(CC) $(CFLAGS) -I . -DALGNAME=falcon1024avx2 -c -o build/PQCgenKAT_sign.o ../../../KAT/generator/PQCgenKAT_sign.c
-
-build/katrng.o: ../../../KAT/generator/katrng.c $(HEAD2)
-	$(CC) $(CFLAGS) -I . -c -o build/katrng.o ../../../KAT/generator/katrng.c
