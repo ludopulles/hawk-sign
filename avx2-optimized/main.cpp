@@ -75,13 +75,15 @@ void measure_signatures(fpr isigma_kg, fpr isigma_sig, fpr verif_bound) {
 	unsigned char seed[48];
 	inner_shake256_context sc;
 
-	const int n_repetitions = 500;
+	const int n_repetitions = 1000;
 
 	// Initialize a RNG.
 	randombytes(seed, sizeof seed);
 	inner_shake256_init(&sc);
 	inner_shake256_inject(&sc, seed, sizeof seed);
 	inner_shake256_flip(&sc);
+
+	int histogram[10000] = {};
 
 	for (int rep = 0; rep < n_repetitions; rep++) {
 		// Generate key pair.
@@ -93,22 +95,13 @@ void measure_signatures(fpr isigma_kg, fpr isigma_sig, fpr verif_bound) {
 		// Compute the signature.
 		lilipu_complete_sign(&sc, s0, s1, f, g, F, G, h, logn, isigma_sig, b);
 
-		int sum0 = 0, sum1 = 0;
-		for (size_t u = 0; u < n; u++) {
-			// printf("%d,", s0[u]);
-			sum0 += s0[u];
-		}
-		// printf("\n");
-		for (size_t u = 0; u < n; u++) {
-			// printf("%d,", s1[u]);
-			sum1 += s1[u];
-		}
-		// printf("\n");
-		printf("(%d,%d) ", sum0, sum1);
+		for (size_t u = 0; u < n; u++)
+			histogram[5000 + s0[u]]++;
 
 		if (!lilipu_verify(h, s0, s1, q00, q10, q11, logn, verif_bound, b)) {
 			fprintf(stderr, "Invalid signature generated!\n");
 		} else {
+			// for (size_t u = 0; u < n; u++) s1[u] &= (-2);
 			if (!lilipu_verify(h, reconstructed_s0, s1, q00, q10, q11, logn, verif_bound, b)) {
 				fprintf(stderr, "Babai was not succesful!\n");
 			} else {
@@ -121,6 +114,15 @@ void measure_signatures(fpr isigma_kg, fpr isigma_sig, fpr verif_bound) {
 		}
 	}
 	printf("All signatures were verified\n");
+
+	for (int i = 0; i < 10000; i++) {
+		int freq = histogram[i];
+		if (freq != 0) {
+			// printf("\t%d: \t%d\n", i, freq);
+			printf("(%d,%d),", i - 5000, freq);
+		}
+	}
+
 }
 
 int8_t valid_sigma(fpr sigma_sig) {

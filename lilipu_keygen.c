@@ -1129,6 +1129,8 @@ lilipu_inner_do_sign(void *samp_ctx, int16_t *restrict s1,
 	Zf(iFFT)(t0, logn);
 	for (u = 0; u < n; u ++) {
 		s1[u] = (int16_t)fpr_rint(t0[u]);
+		if (s1[u] & 1) return 0;
+		s1[u] /= 2;
 	}
 
 	/*
@@ -1247,9 +1249,13 @@ lilipu_inner_do_complete_sign(void *samp_ctx,
 	Zf(iFFT)(t1, logn);
 	for (u = 0; u < n; u ++) {
 		s0[u] = (int16_t)fpr_rint(t0[u]);
+		if ((s0[u] ^ hm[u]) & 1) return 0;
+		s0[u] = (s0[u] - (hm[u] & 1)) / 2;
 	}
 	for (u = 0; u < n; u ++) {
 		s1[u] = (int16_t)fpr_rint(t1[u]);
+		if (s1[u] & 1) return 0;
+		s1[u] /= 2;
 	}
 
 	/*
@@ -1337,13 +1343,9 @@ lilipu_verify(const int8_t *restrict hm,
 	t2 = t1 + n;
 	t3 = t2 + n;
 
-	// if s1 is a valid signature, then s1 == 0 (mod 2)
+	// multiply s1 by 2
 	for (u = 0; u < n; u ++) {
-		if (s1[u] & 1) return 0;
-	}
-
-	for (u = 0; u < n; u ++) {
-		t0[u] = fpr_of(s1[u]);
+		t0[u] = fpr_of(2 * s1[u]);
 	}
 	for (u = 0; u < n; u ++) {
 		t2[u] = fpr_of(hm[u] & 1);
@@ -1364,7 +1366,7 @@ lilipu_verify(const int8_t *restrict hm,
 	Zf(iFFT)(t0, logn);
 
 	for (u = 0; u < n; u ++) {
-		s0[u] = (hm[u] & 1) + fpr_rint(fpr_half(t0[u]))*2;
+		s0[u] = (hm[u] & 1) + 2 * fpr_rint(fpr_half(t0[u]));
 	}
 
 	// Currently in memory: s0, s1 (in FFT representation)
@@ -1400,7 +1402,7 @@ lilipu_verify(const int8_t *restrict hm,
 	trace = fpr_double(trace);
 
 	/*
-	 * Signature is valid if and only if `v` is short enough and s1 == 0 (mod 2).
+	 * Signature is valid if and only if `v` is short enough.
 	 */
 	return fpr_lt(trace, verif_bound);
 }
@@ -1423,20 +1425,11 @@ lilipu_complete_verify(const int8_t *restrict hm,
 	t2 = t1 + n;
 	t3 = t2 + n;
 
-	// if (s0,s1) is a valid signature,
-	// then s0 == hm (mod 2) and s1 == 0 (mod 2)
 	for (u = 0; u < n; u ++) {
-		if ((s0[u] ^ hm[u]) & 1) return 0;
+		t0[u] = fpr_of(2 * s0[u] + hm[u]);
 	}
 	for (u = 0; u < n; u ++) {
-		if (s1[u] & 1) return 0;
-	}
-
-	for (u = 0; u < n; u ++) {
-		t0[u] = fpr_of(s0[u]);
-	}
-	for (u = 0; u < n; u ++) {
-		t1[u] = fpr_of(s1[u]);
+		t1[u] = fpr_of(2 * s1[u]);
 	}
 
 	Zf(FFT)(t0, logn);
@@ -1469,7 +1462,7 @@ lilipu_complete_verify(const int8_t *restrict hm,
 
 	/*
 	 * Signature is valid if and only if
-	 * `v` is short enough, s0 == hm (mod 2) and s1 == 0 (mod 2).
+	 * `v` is short enough
 	 */
 	return fpr_lt(trace, verif_bound);
 }
