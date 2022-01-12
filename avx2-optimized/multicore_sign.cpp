@@ -5,6 +5,11 @@
 #include <stdlib.h>
 #include <time.h>
 
+#include <vector>
+// C++ parallelization:
+#include <atomic>
+#include <thread>
+
 // x86_64 specific:
 #include<sys/time.h>
 
@@ -36,45 +41,22 @@ long long time_diff(const struct timeval *begin, const struct timeval *end) {
 // =============================================================================
 constexpr size_t logn = 9, n = MKN(logn);
 
-void measure_keygen(fpr isigma_kg) {
-	uint8_t b[28 * n]; // 14 kB temporary memory, 17.5 kB total
-	int8_t f[n], g[n], F[n], G[n];
-	fpr q00[n], q10[n], q11[n];
-	unsigned char seed[48];
-	inner_shake256_context sc;
+struct WorkerResult {
+	int num_signed;
+	int num_invalid;
+	int num_babai_fail;
+	int num_sig_differ;
 
-	struct timeval t0, t1;
-	const int n_repetitions = 10000;
+	WorkerResult() =default;
+};
 
-	// Initialize a RNG.
-	randombytes(seed, sizeof seed);
-	inner_shake256_init(&sc);
-	inner_shake256_inject(&sc, seed, sizeof seed);
-	inner_shake256_flip(&sc);
-
-	gettimeofday(&t0, NULL);
-
-	for (int i = 0; i < n_repetitions; i++) {
-		// Generate key pair.
-		lilipu_keygen(&sc, f, g, F, G, q00, q10, q11, logn, b, isigma_kg);
-	}
-
-	gettimeofday(&t1, NULL);
-	double kg_duration = (double)time_diff(&t0, &t1) / n_repetitions; // (in us)
-	double kg_ps = 1000000.0 / kg_duration;
-	printf("Lilipu keygen/s = %.1f\n", kg_ps);
-	printf("Average time (ms): %.3f\n", kg_duration / 1000.0);
-	// printf("# of fails: %d (%.2f%%)\n", solve_NTRU_fails, 100.0 * solve_NTRU_fails / n_repetitions);
-}
-
-void measure_signatures(fpr isigma_kg, fpr isigma_sig, fpr verif_bound) {
+WorkerResult measure_signatures(fpr isigma_kg, fpr isigma_sig, fpr verif_bound) {
 	uint8_t b[42 << logn];
 	int8_t f[n], g[n], F[n], G[n], h[n];
 	int16_t s0[n], reconstructed_s0[n], s1[n];
 	fpr q00[n], q10[n], q11[n];
 	unsigned char seed[48];
 	inner_shake256_context sc;
-
 	const int n_repetitions = 1000;
 
 	// Initialize a RNG.
@@ -83,7 +65,8 @@ void measure_signatures(fpr isigma_kg, fpr isigma_sig, fpr verif_bound) {
 	inner_shake256_inject(&sc, seed, sizeof seed);
 	inner_shake256_flip(&sc);
 
-	int histogram[10000] = {};
+	WorkerResult result;
+	result.num_signed = n_repetitions;
 
 	for (int rep = 0; rep < n_repetitions; rep++) {
 		// Generate key pair.
@@ -95,35 +78,39 @@ void measure_signatures(fpr isigma_kg, fpr isigma_sig, fpr verif_bound) {
 		// Compute the signature.
 		lilipu_complete_sign(&sc, s0, s1, f, g, F, G, h, logn, isigma_sig, b);
 
-		for (size_t u = 0; u < n; u++)
-			histogram[5000 + s1[u]]++;
-
 		if (!lilipu_verify(h, s0, s1, q00, q10, q11, logn, verif_bound, b)) {
-			fprintf(stderr, "Invalid signature generated!\n");
+			result.num_invalid++;
+		} else if (!lilipu_verify(h, reconstructed_s0, s1, q00, q10, q11, logn, verif_bound, b)) {
+			result.num_babai_fail++;
 		} else {
-			// for (size_t u = 0; u < n; u++) s1[u] &= (-2);
-			if (!lilipu_verify(h, reconstructed_s0, s1, q00, q10, q11, logn, verif_bound, b)) {
-				fprintf(stderr, "Babai was not succesful!\n");
-			} else {
-				int s0_eq = 1;
-				for (size_t u = 0; u < n; u++)
-					s0_eq &= (s0[u] == reconstructed_s0[u]);
-				if (!s0_eq)
-					fprintf(stderr, "Reconstructed s0 was different\n");
-			}
+			int s0_eq = 1;
+			for (size_t u = 0; u < n; u++)
+				s0_eq &= (s0[u] == reconstructed_s0[u]);
+			if (!s0_eq)
+				result.num_sig_differ++;
 		}
 	}
-	printf("All signatures were verified\n");
-
-	for (int i = 0; i < 10000; i++) {
-		int freq = histogram[i];
-		if (freq != 0) {
-			// printf("\t%d: \t%d\n", i, freq);
-			printf("(%d,%d),", i - 5000, freq);
-		}
-	}
-
+	return result;
 }
+
+std::atomic<int> tot_signed = 0, tot_invalid = 0, tot_babai_fail = 0, tot_sig_differ = 0;
+
+void work() {
+	const fpr sigma_kg  = fpr_div(fpr_of(1425), fpr_of(1000));
+	const fpr sigma_sig = fpr_div(fpr_of(1292), fpr_of(1000));
+	// verif_margin = 1 + √(64 * ln(2) / 1024)   (see scheme.sage)
+	const fpr verif_margin = fpr_add(fpr_one, fpr_sqrt(fpr_mul(fpr_log2, fpr_div(fpr_of(64), fpr_of(n)))));
+	const fpr verif_bound = fpr_mul(fpr_sqr(fpr_mul(verif_margin, fpr_double(sigma_sig))), fpr_double(fpr_sqr(fpr_of(n))));
+	fpr isigma_kg = fpr_inv(sigma_kg), isigma_sig = fpr_inv(sigma_sig);
+
+	WorkerResult result = measure_signatures(isigma_kg, isigma_sig, verif_bound);
+
+	tot_signed += result.num_signed;
+	tot_invalid += result.num_invalid;
+	tot_babai_fail += result.num_babai_fail;
+	tot_sig_differ += result.num_sig_differ;;
+}
+
 
 int8_t valid_sigma(fpr sigma_sig) {
 	return !fpr_lt(sigma_sig, fpr_sigma_min[logn])
@@ -136,11 +123,10 @@ int main() {
 	const fpr sigma_kg  = fpr_div(fpr_of(1425), fpr_of(1000));
 	const fpr sigma_sig = fpr_div(fpr_of(1292), fpr_of(1000));
 	// verif_margin = 1 + √(64 * ln(2) / 1024)   (see scheme.sage)
-	const fpr verif_margin = fpr_add(fpr_one, fpr_sqrt(fpr_mul(fpr_log2, fpr_div(fpr_of(2), fpr_of(n)))));
-	// verif_bound = (verif_margin * 2 * sigma_sig)^2 * (2*d) * d
-	// Here, the vector (x0, x1) \in Z^{2d} is sampled from a Discrete Gaussian with sigma equal to 2*sigma_sig
-	// and lattice coset (h%2) + 2Z^{2d}, so it has a SQUARED norm of around ~(2sigma_sig)^2 * 2d.
-	// Using trace(s Q s^H) = trace(x x^H) = ||x||^2 [K:\QQ] = ||x||^2 d, we arrive at the verif_bound.
+	const fpr verif_margin = fpr_add(fpr_one, fpr_sqrt(fpr_mul(fpr_log2, fpr_div(fpr_of( 8), fpr_of(n)))));
+	// verif_bound = (verif_margin 2 \sigma_sig)^2 (2 n^2)
+	// Note 2n * n, where 2n comes from the rank of lattice R^2 over ZZ,
+	// and n comes from the ratio between coefficient embedding and canonical embedding.
 	const fpr verif_bound = fpr_mul(fpr_sqr(fpr_mul(verif_margin, fpr_double(sigma_sig))), fpr_double(fpr_sqr(fpr_of(n))));
 
 #ifdef __AVX2__
@@ -152,9 +138,21 @@ int main() {
 	printf("Seed: %u\n", seed);
 	srand(seed);
 	assert(valid_sigma(sigma_kg) && valid_sigma(sigma_sig));
-	fpr isigma_kg = fpr_inv(sigma_kg), isigma_sig = fpr_inv(sigma_sig);
 
-	// measure_keygen(isigma_kg);
-	measure_signatures(isigma_kg, isigma_sig, verif_bound);
+	int nthreads = 4;
+	std::vector<std::thread*> pool(nthreads);
+	for (int i = 0; i < nthreads; i++) {
+		pool[i] = new std::thread(work);
+	}
+
+	for (int i = 0; i < nthreads; i++) {
+		pool[i]->join();
+	}
+
+	printf("# Signatures signed:      %d\n", static_cast<int>(tot_signed));
+	printf("# Signatures invalid:     %d\n", static_cast<int>(tot_invalid));
+	printf("# Babai roundings failed: %d\n", static_cast<int>(tot_babai_fail));
+	printf("# Babai != original s0:   %d\n", static_cast<int>(tot_sig_differ));
+
 	return 0;
 }
