@@ -1,5 +1,5 @@
 /*
- * Falcon signature generation.
+ * Hawk signature generation.
  *
  * ==========================(LICENSE BEGIN)============================
  *
@@ -31,150 +31,588 @@
 
 #include "inner.h"
 
-/* =================================================================== */
-
+/* ===================================================================== */
 /*
- * Compute degree N from logarithm 'logn'.
- */
-#define MKN(logn)   ((size_t)1 << (logn))
-
-/* =================================================================== */
-/*
- * Binary case:
- *   N = 2^logn
- *   phi = X^N+1
+ * Constants for NTT.
+ *
+ *   n = 2^logn  (2 <= n <= 1024)
+ *   phi = X^n + 1
+ *   q = 12289
+ *   q0i = -1/q mod 2^16
+ *   R = 2^16 mod q
+ *   R2 = 2^32 mod q
  */
 
+#define Q     12289
+#define Q0I   12287
+#define R      4091
+#define R2    10952
+
 /*
- * Get the size of the LDL tree for an input with polynomials of size
- * 2^logn. The size is expressed in the number of elements.
+ * Table for NTT, binary case:
+ *   GMb[x] = R*(g^rev(x)) mod q
+ * where g = 7 (it is a 2048-th primitive root of 1 modulo q)
+ * and rev() is the bit-reversal function over 10 bits.
  */
-static inline unsigned
-ffLDL_treesize(unsigned logn)
+static const uint16_t GMb[] = {
+	 4091,  7888, 11060, 11208,  6960,  4342,  6275,  9759,
+	 1591,  6399,  9477,  5266,   586,  5825,  7538,  9710,
+	 1134,  6407,  1711,   965,  7099,  7674,  3743,  6442,
+	10414,  8100,  1885,  1688,  1364, 10329, 10164,  9180,
+	12210,  6240,   997,   117,  4783,  4407,  1549,  7072,
+	 2829,  6458,  4431,  8877,  7144,  2564,  5664,  4042,
+	12189,   432, 10751,  1237,  7610,  1534,  3983,  7863,
+	 2181,  6308,  8720,  6570,  4843,  1690,    14,  3872,
+	 5569,  9368, 12163,  2019,  7543,  2315,  4673,  7340,
+	 1553,  1156,  8401, 11389,  1020,  2967, 10772,  7045,
+	 3316, 11236,  5285, 11578, 10637, 10086,  9493,  6180,
+	 9277,  6130,  3323,   883, 10469,   489,  1502,  2851,
+	11061,  9729,  2742, 12241,  4970, 10481, 10078,  1195,
+	  730,  1762,  3854,  2030,  5892, 10922,  9020,  5274,
+	 9179,  3604,  3782, 10206,  3180,  3467,  4668,  2446,
+	 7613,  9386,   834,  7703,  6836,  3403,  5351, 12276,
+	 3580,  1739, 10820,  9787, 10209,  4070, 12250,  8525,
+	10401,  2749,  7338, 10574,  6040,   943,  9330,  1477,
+	 6865,  9668,  3585,  6633, 12145,  4063,  3684,  7680,
+	 8188,  6902,  3533,  9807,  6090,   727, 10099,  7003,
+	 6945,  1949,  9731, 10559,  6057,   378,  7871,  8763,
+	 8901,  9229,  8846,  4551,  9589, 11664,  7630,  8821,
+	 5680,  4956,  6251,  8388, 10156,  8723,  2341,  3159,
+	 1467,  5460,  8553,  7783,  2649,  2320,  9036,  6188,
+	  737,  3698,  4699,  5753,  9046,  3687,    16,   914,
+	 5186, 10531,  4552,  1964,  3509,  8436,  7516,  5381,
+	10733,  3281,  7037,  1060,  2895,  7156,  8887,  5357,
+	 6409,  8197,  2962,  6375,  5064,  6634,  5625,   278,
+	  932, 10229,  8927,  7642,   351,  9298,   237,  5858,
+	 7692,  3146, 12126,  7586,  2053, 11285,  3802,  5204,
+	 4602,  1748, 11300,   340,  3711,  4614,   300, 10993,
+	 5070, 10049, 11616, 12247,  7421, 10707,  5746,  5654,
+	 3835,  5553,  1224,  8476,  9237,  3845,   250, 11209,
+	 4225,  6326,  9680, 12254,  4136,  2778,   692,  8808,
+	 6410,  6718, 10105, 10418,  3759,  7356, 11361,  8433,
+	 6437,  3652,  6342,  8978,  5391,  2272,  6476,  7416,
+	 8418, 10824, 11986,  5733,   876,  7030,  2167,  2436,
+	 3442,  9217,  8206,  4858,  5964,  2746,  7178,  1434,
+	 7389,  8879, 10661, 11457,  4220,  1432, 10832,  4328,
+	 8557,  1867,  9454,  2416,  3816,  9076,   686,  5393,
+	 2523,  4339,  6115,   619,   937,  2834,  7775,  3279,
+	 2363,  7488,  6112,  5056,   824, 10204, 11690,  1113,
+	 2727,  9848,   896,  2028,  5075,  2654, 10464,  7884,
+	12169,  5434,  3070,  6400,  9132, 11672, 12153,  4520,
+	 1273,  9739, 11468,  9937, 10039,  9720,  2262,  9399,
+	11192,   315,  4511,  1158,  6061,  6751, 11865,   357,
+	 7367,  4550,   983,  8534,  8352, 10126,  7530,  9253,
+	 4367,  5221,  3999,  8777,  3161,  6990,  4130, 11652,
+	 3374, 11477,  1753,   292,  8681,  2806, 10378, 12188,
+	 5800, 11811,  3181,  1988,  1024,  9340,  2477, 10928,
+	 4582,  6750,  3619,  5503,  5233,  2463,  8470,  7650,
+	 7964,  6395,  1071,  1272,  3474, 11045,  3291, 11344,
+	 8502,  9478,  9837,  1253,  1857,  6233,  4720, 11561,
+	 6034,  9817,  3339,  1797,  2879,  6242,  5200,  2114,
+	 7962,  9353, 11363,  5475,  6084,  9601,  4108,  7323,
+	10438,  9471,  1271,   408,  6911,  3079,   360,  8276,
+	11535,  9156,  9049, 11539,   850,  8617,   784,  7919,
+	 8334, 12170,  1846, 10213, 12184,  7827, 11903,  5600,
+	 9779,  1012,   721,  2784,  6676,  6552,  5348,  4424,
+	 6816,  8405,  9959,  5150,  2356,  5552,  5267,  1333,
+	 8801,  9661,  7308,  5788,  4910,   909, 11613,  4395,
+	 8238,  6686,  4302,  3044,  2285, 12249,  1963,  9216,
+	 4296, 11918,   695,  4371,  9793,  4884,  2411, 10230,
+	 2650,   841,  3890, 10231,  7248,  8505, 11196,  6688,
+	 4059,  6060,  3686,  4722, 11853,  5816,  7058,  6868,
+	11137,  7926,  4894, 12284,  4102,  3908,  3610,  6525,
+	 7938,  7982, 11977,  6755,   537,  4562,  1623,  8227,
+	11453,  7544,   906, 11816,  9548, 10858,  9703,  2815,
+	11736,  6813,  6979,   819,  8903,  6271, 10843,   348,
+	 7514,  8339,  6439,   694,   852,  5659,  2781,  3716,
+	11589,  3024,  1523,  8659,  4114, 10738,  3303,  5885,
+	 2978,  7289, 11884,  9123,  9323, 11830,    98,  2526,
+	 2116,  4131, 11407,  1844,  3645,  3916,  8133,  2224,
+	10871,  8092,  9651,  5989,  7140,  8480,  1670,   159,
+	10923,  4918,   128,  7312,   725,  9157,  5006,  6393,
+	 3494,  6043, 10972,  6181, 11838,  3423, 10514,  7668,
+	 3693,  6658,  6905, 11953, 10212, 11922,  9101,  8365,
+	 5110,    45,  2400,  1921,  4377,  2720,  1695,    51,
+	 2808,   650,  1896,  9997,  9971, 11980,  8098,  4833,
+	 4135,  4257,  5838,  4765, 10985, 11532,   590, 12198,
+	  482, 12173,  2006,  7064, 10018,  3912, 12016, 10519,
+	11362,  6954,  2210,   284,  5413,  6601,  3865, 10339,
+	11188,  6231,   517,  9564, 11281,  3863,  1210,  4604,
+	 8160, 11447,   153,  7204,  5763,  5089,  9248, 12154,
+	11748,  1354,  6672,   179,  5532,  2646,  5941, 12185,
+	  862,  3158,   477,  7279,  5678,  7914,  4254,   302,
+	 2893, 10114,  6890,  9560,  9647, 11905,  4098,  9824,
+	10269,  1353, 10715,  5325,  6254,  3951,  1807,  6449,
+	 5159,  1308,  8315,  3404,  1877,  1231,   112,  6398,
+	11724, 12272,  7286,  1459, 12274,  9896,  3456,   800,
+	 1397, 10678,   103,  7420,  7976,   936,   764,   632,
+	 7996,  8223,  8445,  7758, 10870,  9571,  2508,  1946,
+	 6524, 10158,  1044,  4338,  2457,  3641,  1659,  4139,
+	 4688,  9733, 11148,  3946,  2082,  5261,  2036, 11850,
+	 7636, 12236,  5366,  2380,  1399,  7720,  2100,  3217,
+	10912,  8898,  7578, 11995,  2791,  1215,  3355,  2711,
+	 2267,  2004,  8568, 10176,  3214,  2337,  1750,  4729,
+	 4997,  7415,  6315, 12044,  4374,  7157,  4844,   211,
+	 8003, 10159,  9290, 11481,  1735,  2336,  5793,  9875,
+	 8192,   986,  7527,  1401,   870,  3615,  8465,  2756,
+	 9770,  2034, 10168,  3264,  6132,    54,  2880,  4763,
+	11805,  3074,  8286,  9428,  4881,  6933,  1090, 10038,
+	 2567,   708,   893,  6465,  4962, 10024,  2090,  5718,
+	10743,   780,  4733,  4623,  2134,  2087,  4802,   884,
+	 5372,  5795,  5938,  4333,  6559,  7549,  5269, 10664,
+	 4252,  3260,  5917, 10814,  5768,  9983,  8096,  7791,
+	 6800,  7491,  6272,  1907, 10947,  6289, 11803,  6032,
+	11449,  1171,  9201,  7933,  2479,  7970, 11337,  7062,
+	 8911,  6728,  6542,  8114,  8828,  6595,  3545,  4348,
+	 4610,  2205,  6999,  8106,  5560, 10390,  9321,  2499,
+	 2413,  7272,  6881, 10582,  9308,  9437,  3554,  3326,
+	 5991, 11969,  3415, 12283,  9838, 12063,  4332,  7830,
+	11329,  6605, 12271,  2044, 11611,  7353, 11201, 11582,
+	 3733,  8943,  9978,  1627,  7168,  3935,  5050,  2762,
+	 7496, 10383,   755,  1654, 12053,  4952, 10134,  4394,
+	 6592,  7898,  7497,  8904, 12029,  3581, 10748,  5674,
+	10358,  4901,  7414,  8771,   710,  6764,  8462,  7193,
+	 5371,  7274, 11084,   290,  7864,  6827, 11822,  2509,
+	 6578,  4026,  5807,  1458,  5721,  5762,  4178,  2105,
+	11621,  4852,  8897,  2856, 11510,  9264,  2520,  8776,
+	 7011,  2647,  1898,  7039,  5950, 11163,  5488,  6277,
+	 9182, 11456,   633, 10046, 11554,  5633,  9587,  2333,
+	 7008,  7084,  5047,  7199,  9865,  8997,   569,  6390,
+	10845,  9679,  8268, 11472,  4203,  1997,     2,  9331,
+	  162,  6182,  2000,  3649,  9792,  6363,  7557,  6187,
+	 8510,  9935,  5536,  9019,  3706, 12009,  1452,  3067,
+	 5494,  9692,  4865,  6019,  7106,  9610,  4588, 10165,
+	 6261,  5887,  2652, 10172,  1580, 10379,  4638,  9949
+};
+
+/*
+ * Table for inverse NTT, binary case:
+ *   iGMb[x] = R*((1/g)^rev(x)) mod q
+ * Since g = 7, 1/g = 8778 mod 12289.
+ */
+static const uint16_t iGMb[] = {
+	 4091,  4401,  1081,  1229,  2530,  6014,  7947,  5329,
+	 2579,  4751,  6464, 11703,  7023,  2812,  5890, 10698,
+	 3109,  2125,  1960, 10925, 10601, 10404,  4189,  1875,
+	 5847,  8546,  4615,  5190, 11324, 10578,  5882, 11155,
+	 8417, 12275, 10599,  7446,  5719,  3569,  5981, 10108,
+	 4426,  8306, 10755,  4679, 11052,  1538, 11857,   100,
+	 8247,  6625,  9725,  5145,  3412,  7858,  5831,  9460,
+	 5217, 10740,  7882,  7506, 12172, 11292,  6049,    79,
+	   13,  6938,  8886,  5453,  4586, 11455,  2903,  4676,
+	 9843,  7621,  8822,  9109,  2083,  8507,  8685,  3110,
+	 7015,  3269,  1367,  6397, 10259,  8435, 10527, 11559,
+	11094,  2211,  1808,  7319,    48,  9547,  2560,  1228,
+	 9438, 10787, 11800,  1820, 11406,  8966,  6159,  3012,
+	 6109,  2796,  2203,  1652,   711,  7004,  1053,  8973,
+	 5244,  1517,  9322, 11269,   900,  3888, 11133, 10736,
+	 4949,  7616,  9974,  4746, 10270,   126,  2921,  6720,
+	 6635,  6543,  1582,  4868,    42,   673,  2240,  7219,
+	 1296, 11989,  7675,  8578, 11949,   989, 10541,  7687,
+	 7085,  8487,  1004, 10236,  4703,   163,  9143,  4597,
+	 6431, 12052,  2991, 11938,  4647,  3362,  2060, 11357,
+	12011,  6664,  5655,  7225,  5914,  9327,  4092,  5880,
+	 6932,  3402,  5133,  9394, 11229,  5252,  9008,  1556,
+	 6908,  4773,  3853,  8780, 10325,  7737,  1758,  7103,
+	11375, 12273,  8602,  3243,  6536,  7590,  8591, 11552,
+	 6101,  3253,  9969,  9640,  4506,  3736,  6829, 10822,
+	 9130,  9948,  3566,  2133,  3901,  6038,  7333,  6609,
+	 3468,  4659,   625,  2700,  7738,  3443,  3060,  3388,
+	 3526,  4418, 11911,  6232,  1730,  2558, 10340,  5344,
+	 5286,  2190, 11562,  6199,  2482,  8756,  5387,  4101,
+	 4609,  8605,  8226,   144,  5656,  8704,  2621,  5424,
+	10812,  2959, 11346,  6249,  1715,  4951,  9540,  1888,
+	 3764,    39,  8219,  2080,  2502,  1469, 10550,  8709,
+	 5601,  1093,  3784,  5041,  2058,  8399, 11448,  9639,
+	 2059,  9878,  7405,  2496,  7918, 11594,   371,  7993,
+	 3073, 10326,    40, 10004,  9245,  7987,  5603,  4051,
+	 7894,   676, 11380,  7379,  6501,  4981,  2628,  3488,
+	10956,  7022,  6737,  9933,  7139,  2330,  3884,  5473,
+	 7865,  6941,  5737,  5613,  9505, 11568, 11277,  2510,
+	 6689,   386,  4462,   105,  2076, 10443,   119,  3955,
+	 4370, 11505,  3672, 11439,   750,  3240,  3133,   754,
+	 4013, 11929,  9210,  5378, 11881, 11018,  2818,  1851,
+	 4966,  8181,  2688,  6205,  6814,   926,  2936,  4327,
+	10175,  7089,  6047,  9410, 10492,  8950,  2472,  6255,
+	  728,  7569,  6056, 10432, 11036,  2452,  2811,  3787,
+	  945,  8998,  1244,  8815, 11017, 11218,  5894,  4325,
+	 4639,  3819,  9826,  7056,  6786,  8670,  5539,  7707,
+	 1361,  9812,  2949, 11265, 10301,  9108,   478,  6489,
+	  101,  1911,  9483,  3608, 11997, 10536,   812,  8915,
+	  637,  8159,  5299,  9128,  3512,  8290,  7068,  7922,
+	 3036,  4759,  2163,  3937,  3755, 11306,  7739,  4922,
+	11932,   424,  5538,  6228, 11131,  7778, 11974,  1097,
+	 2890, 10027,  2569,  2250,  2352,   821,  2550, 11016,
+	 7769,   136,   617,  3157,  5889,  9219,  6855,   120,
+	 4405,  1825,  9635,  7214, 10261, 11393,  2441,  9562,
+	11176,   599,  2085, 11465,  7233,  6177,  4801,  9926,
+	 9010,  4514,  9455, 11352, 11670,  6174,  7950,  9766,
+	 6896, 11603,  3213,  8473,  9873,  2835, 10422,  3732,
+	 7961,  1457, 10857,  8069,   832,  1628,  3410,  4900,
+	10855,  5111,  9543,  6325,  7431,  4083,  3072,  8847,
+	 9853, 10122,  5259, 11413,  6556,   303,  1465,  3871,
+	 4873,  5813, 10017,  6898,  3311,  5947,  8637,  5852,
+	 3856,   928,  4933,  8530,  1871,  2184,  5571,  5879,
+	 3481, 11597,  9511,  8153,    35,  2609,  5963,  8064,
+	 1080, 12039,  8444,  3052,  3813, 11065,  6736,  8454,
+	 2340,  7651,  1910, 10709,  2117,  9637,  6402,  6028,
+	 2124,  7701,  2679,  5183,  6270,  7424,  2597,  6795,
+	 9222, 10837,   280,  8583,  3270,  6753,  2354,  3779,
+	 6102,  4732,  5926,  2497,  8640, 10289,  6107, 12127,
+	 2958, 12287, 10292,  8086,   817,  4021,  2610,  1444,
+	 5899, 11720,  3292,  2424,  5090,  7242,  5205,  5281,
+	 9956,  2702,  6656,   735,  2243, 11656,   833,  3107,
+	 6012,  6801,  1126,  6339,  5250, 10391,  9642,  5278,
+	 3513,  9769,  3025,   779,  9433,  3392,  7437,   668,
+	10184,  8111,  6527,  6568, 10831,  6482,  8263,  5711,
+	 9780,   467,  5462,  4425, 11999,  1205,  5015,  6918,
+	 5096,  3827,  5525, 11579,  3518,  4875,  7388,  1931,
+	 6615,  1541,  8708,   260,  3385,  4792,  4391,  5697,
+	 7895,  2155,  7337,   236, 10635, 11534,  1906,  4793,
+	 9527,  7239,  8354,  5121, 10662,  2311,  3346,  8556,
+	  707,  1088,  4936,   678, 10245,    18,  5684,   960,
+	 4459,  7957,   226,  2451,     6,  8874,   320,  6298,
+	 8963,  8735,  2852,  2981,  1707,  5408,  5017,  9876,
+	 9790,  2968,  1899,  6729,  4183,  5290, 10084,  7679,
+	 7941,  8744,  5694,  3461,  4175,  5747,  5561,  3378,
+	 5227,   952,  4319,  9810,  4356,  3088, 11118,   840,
+	 6257,   486,  6000,  1342, 10382,  6017,  4798,  5489,
+	 4498,  4193,  2306,  6521,  1475,  6372,  9029,  8037,
+	 1625,  7020,  4740,  5730,  7956,  6351,  6494,  6917,
+	11405,  7487, 10202, 10155,  7666,  7556, 11509,  1546,
+	 6571, 10199,  2265,  7327,  5824, 11396, 11581,  9722,
+	 2251, 11199,  5356,  7408,  2861,  4003,  9215,   484,
+	 7526,  9409, 12235,  6157,  9025,  2121, 10255,  2519,
+	 9533,  3824,  8674, 11419, 10888,  4762, 11303,  4097,
+	 2414,  6496,  9953, 10554,   808,  2999,  2130,  4286,
+	12078,  7445,  5132,  7915,   245,  5974,  4874,  7292,
+	 7560, 10539,  9952,  9075,  2113,  3721, 10285, 10022,
+	 9578,  8934, 11074,  9498,   294,  4711,  3391,  1377,
+	 9072, 10189,  4569, 10890,  9909,  6923,    53,  4653,
+	  439, 10253,  7028, 10207,  8343,  1141,  2556,  7601,
+	 8150, 10630,  8648,  9832,  7951, 11245,  2131,  5765,
+	10343,  9781,  2718,  1419,  4531,  3844,  4066,  4293,
+	11657, 11525, 11353,  4313,  4869, 12186,  1611, 10892,
+	11489,  8833,  2393,    15, 10830,  5003,    17,   565,
+	 5891, 12177, 11058, 10412,  8885,  3974, 10981,  7130,
+	 5840, 10482,  8338,  6035,  6964,  1574, 10936,  2020,
+	 2465,  8191,   384,  2642,  2729,  5399,  2175,  9396,
+	11987,  8035,  4375,  6611,  5010, 11812,  9131, 11427,
+	  104,  6348,  9643,  6757, 12110,  5617, 10935,   541,
+	  135,  3041,  7200,  6526,  5085, 12136,   842,  4129,
+	 7685, 11079,  8426,  1008,  2725, 11772,  6058,  1101,
+	 1950,  8424,  5688,  6876, 12005, 10079,  5335,   927,
+	 1770,   273,  8377,  2271,  5225, 10283,   116, 11807,
+	   91, 11699,   757,  1304,  7524,  6451,  8032,  8154,
+	 7456,  4191,   309,  2318,  2292, 10393, 11639,  9481,
+	12238, 10594,  9569,  7912, 10368,  9889, 12244,  7179,
+	 3924,  3188,   367,  2077,   336,  5384,  5631,  8596,
+	 4621,  1775,  8866,   451,  6108,  1317,  6246,  8795,
+	 5896,  7283,  3132, 11564,  4977, 12161,  7371,  1366,
+	12130, 10619,  3809,  5149,  6300,  2638,  4197,  1418,
+	10065,  4156,  8373,  8644, 10445,   882,  8158, 10173,
+	 9763, 12191,   459,  2966,  3166,   405,  5000,  9311,
+	 6404,  8986,  1551,  8175,  3630, 10766,  9265,   700,
+	 8573,  9508,  6630, 11437, 11595,  5850,  3950,  4775,
+	11941,  1446,  6018,  3386, 11470,  5310,  5476,   553,
+	 9474,  2586,  1431,  2741,   473, 11383,  4745,   836,
+	 4062, 10666,  7727, 11752,  5534,   312,  4307,  4351,
+	 5764,  8679,  8381,  8187,     5,  7395,  4363,  1152,
+	 5421,  5231,  6473,   436,  7567,  8603,  6229,  8230
+};
+
+/*
+ * Reduce a small signed integer modulo q. The source integer MUST
+ * be between -q/2 and +q/2.
+ */
+static inline uint32_t
+mq_conv_small(int x)
 {
 	/*
-	 * For logn = 0 (polynomials are constant), the "tree" is a
-	 * single element. Otherwise, the tree node has size 2^logn, and
-	 * has two child trees for size logn-1 each. Thus, treesize s()
-	 * must fulfill these two relations:
+	 * If x < 0, the cast to uint32_t will set the high bit to 1.
+	 */
+	uint32_t y;
+
+	y = (uint32_t)x;
+	y += Q & -(y >> 31);
+	return y;
+}
+
+/*
+ * Addition modulo q. Operands must be in the 0..q-1 range.
+ */
+static inline uint32_t
+mq_add(uint32_t x, uint32_t y)
+{
+	/*
+	 * We compute x + y - q. If the result is negative, then the
+	 * high bit will be set, and 'd >> 31' will be equal to 1;
+	 * thus '-(d >> 31)' will be an all-one pattern. Otherwise,
+	 * it will be an all-zero pattern. In other words, this
+	 * implements a conditional addition of q.
+	 */
+	uint32_t d;
+
+	d = x + y - Q;
+	d += Q & -(d >> 31);
+	return d;
+}
+
+/*
+ * Subtraction modulo q. Operands must be in the 0..q-1 range.
+ */
+static inline uint32_t
+mq_sub(uint32_t x, uint32_t y)
+{
+	/*
+	 * As in mq_add(), we use a conditional addition to ensure the
+	 * result is in the 0..q-1 range.
+	 */
+	uint32_t d;
+
+	d = x - y;
+	d += Q & -(d >> 31);
+	return d;
+}
+
+/*
+ * Division by 2 modulo q. Operand must be in the 0..q-1 range.
+ */
+static inline uint32_t
+mq_rshift1(uint32_t x)
+{
+	x += Q & -(x & 1);
+	return (x >> 1);
+}
+
+/*
+ * Montgomery multiplication modulo q. If we set R = 2^16 mod q, then
+ * this function computes: x * y / R mod q
+ * Operands must be in the 0..q-1 range.
+ */
+static inline uint32_t
+mq_montymul(uint32_t x, uint32_t y)
+{
+	uint32_t z, w;
+
+	/*
+	 * We compute x*y + k*q with a value of k chosen so that the 16
+	 * low bits of the result are 0. We can then shift the value.
+	 * After the shift, result may still be larger than q, but it
+	 * will be lower than 2*q, so a conditional subtraction works.
+	 */
+
+	z = x * y;
+	w = ((z * Q0I) & 0xFFFF) * Q;
+
+	/*
+	 * When adding z and w, the result will have its low 16 bits
+	 * equal to 0. Since x, y and z are lower than q, the sum will
+	 * be no more than (2^15 - 1) * q + (q - 1)^2, which will
+	 * fit on 29 bits.
+	 */
+	z = (z + w) >> 16;
+
+	/*
+	 * After the shift, analysis shows that the value will be less
+	 * than 2q. We do a subtraction then conditional subtraction to
+	 * ensure the result is in the expected range.
+	 */
+	z -= Q;
+	z += Q & -(z >> 31);
+	return z;
+}
+
+/*
+ * Montgomery squaring (computes (x^2)/R).
+ */
+static inline uint32_t
+mq_montysqr(uint32_t x)
+{
+	return mq_montymul(x, x);
+}
+
+/*
+ * Divide x by y modulo q = 12289.
+ */
+static inline uint32_t
+mq_div_12289(uint32_t x, uint32_t y)
+{
+	/*
+	 * We invert y by computing y^(q-2) mod q.
 	 *
-	 *   s(0) = 1
-	 *   s(logn) = (2^logn) + 2*s(logn-1)
+	 * We use the following addition chain for exponent e = 12287:
+	 *
+	 *   e0 = 1
+	 *   e1 = 2 * e0 = 2
+	 *   e2 = e1 + e0 = 3
+	 *   e3 = e2 + e1 = 5
+	 *   e4 = 2 * e3 = 10
+	 *   e5 = 2 * e4 = 20
+	 *   e6 = 2 * e5 = 40
+	 *   e7 = 2 * e6 = 80
+	 *   e8 = 2 * e7 = 160
+	 *   e9 = e8 + e2 = 163
+	 *   e10 = e9 + e8 = 323
+	 *   e11 = 2 * e10 = 646
+	 *   e12 = 2 * e11 = 1292
+	 *   e13 = e12 + e9 = 1455
+	 *   e14 = 2 * e13 = 2910
+	 *   e15 = 2 * e14 = 5820
+	 *   e16 = e15 + e10 = 6143
+	 *   e17 = 2 * e16 = 12286
+	 *   e18 = e17 + e0 = 12287
+	 *
+	 * Additions on exponents are converted to Montgomery
+	 * multiplications. We define all intermediate results as so
+	 * many local variables, and let the C compiler work out which
+	 * must be kept around.
 	 */
-	return (logn + 1) << logn;
+	uint32_t y0, y1, y2, y3, y4, y5, y6, y7, y8, y9;
+	uint32_t y10, y11, y12, y13, y14, y15, y16, y17, y18;
+
+	y0 = mq_montymul(y, R2);
+	y1 = mq_montysqr(y0);
+	y2 = mq_montymul(y1, y0);
+	y3 = mq_montymul(y2, y1);
+	y4 = mq_montysqr(y3);
+	y5 = mq_montysqr(y4);
+	y6 = mq_montysqr(y5);
+	y7 = mq_montysqr(y6);
+	y8 = mq_montysqr(y7);
+	y9 = mq_montymul(y8, y2);
+	y10 = mq_montymul(y9, y8);
+	y11 = mq_montysqr(y10);
+	y12 = mq_montysqr(y11);
+	y13 = mq_montymul(y12, y9);
+	y14 = mq_montysqr(y13);
+	y15 = mq_montysqr(y14);
+	y16 = mq_montymul(y15, y10);
+	y17 = mq_montysqr(y16);
+	y18 = mq_montymul(y17, y0);
+
+	/*
+	 * Final multiplication with x, which is not in Montgomery
+	 * representation, computes the correct division result.
+	 */
+	return mq_montymul(y18, x);
 }
 
 /*
- * Inner function for ffLDL_fft(). It expects the matrix to be both
- * auto-adjoint and quasicyclic; also, it uses the source operands
- * as modifiable temporaries.
- *
- * tmp[] must have room for at least one polynomial.
+ * Compute NTT on a ring element.
  */
 static void
-ffLDL_fft_inner(fpr *restrict tree,
-	fpr *restrict g0, fpr *restrict g1, unsigned logn, fpr *restrict tmp)
+mq_NTT(uint16_t *a, unsigned logn)
 {
-	size_t n, hn;
+	size_t n, t, m;
 
-	n = MKN(logn);
-	if (n == 1) {
-		tree[0] = g0[0];
-		return;
+	n = (size_t)1 << logn;
+	t = n;
+	for (m = 1; m < n; m <<= 1) {
+		size_t ht, i, j1;
+
+		ht = t >> 1;
+		for (i = 0, j1 = 0; i < m; i ++, j1 += t) {
+			size_t j, j2;
+			uint32_t s;
+
+			s = GMb[m + i];
+			j2 = j1 + ht;
+			for (j = j1; j < j2; j ++) {
+				uint32_t u, v;
+
+				u = a[j];
+				v = mq_montymul(a[j + ht], s);
+				a[j] = (uint16_t)mq_add(u, v);
+				a[j + ht] = (uint16_t)mq_sub(u, v);
+			}
+		}
+		t = ht;
 	}
-	hn = n >> 1;
-
-	/*
-	 * The LDL decomposition yields L (which is written in the tree)
-	 * and the diagonal of D. Since d00 = g0, we just write d11
-	 * into tmp.
-	 */
-	Zf(poly_LDLmv_fft)(tmp, tree, g0, g1, g0, logn);
-
-	/*
-	 * Split d00 (currently in g0) and d11 (currently in tmp). We
-	 * reuse g0 and g1 as temporary storage spaces:
-	 *   d00 splits into g1, g1+hn
-	 *   d11 splits into g0, g0+hn
-	 */
-	Zf(poly_split_fft)(g1, g1 + hn, g0, logn);
-	Zf(poly_split_fft)(g0, g0 + hn, tmp, logn);
-
-	/*
-	 * Each split result is the first row of a new auto-adjoint
-	 * quasicyclic matrix for the next recursive step.
-	 */
-	ffLDL_fft_inner(tree + n,
-		g1, g1 + hn, logn - 1, tmp);
-	ffLDL_fft_inner(tree + n + ffLDL_treesize(logn - 1),
-		g0, g0 + hn, logn - 1, tmp);
 }
 
 /*
- * Compute the ffLDL tree of an auto-adjoint matrix G. The matrix
- * is provided as three polynomials (FFT representation).
- *
- * The "tree" array is filled with the computed tree, of size
- * (logn+1)*(2^logn) elements (see ffLDL_treesize()).
- *
- * Input arrays MUST NOT overlap, except possibly the three unmodified
- * arrays g00, g01 and g11. tmp[] should have room for at least three
- * polynomials of 2^logn elements each.
+ * Compute the inverse NTT on a ring element, binary case.
  */
 static void
-ffLDL_fft(fpr *restrict tree, const fpr *restrict g00,
-	const fpr *restrict g01, const fpr *restrict g11,
-	unsigned logn, fpr *restrict tmp)
+mq_iNTT(uint16_t *a, unsigned logn)
 {
-	size_t n, hn;
-	fpr *d00, *d11;
+	size_t n, t, m;
+	uint32_t ni;
 
-	n = MKN(logn);
-	if (n == 1) {
-		tree[0] = g00[0];
-		return;
+	n = (size_t)1 << logn;
+	t = 1;
+	m = n;
+	while (m > 1) {
+		size_t hm, dt, i, j1;
+
+		hm = m >> 1;
+		dt = t << 1;
+		for (i = 0, j1 = 0; i < hm; i ++, j1 += dt) {
+			size_t j, j2;
+			uint32_t s;
+
+			j2 = j1 + t;
+			s = iGMb[hm + i];
+			for (j = j1; j < j2; j ++) {
+				uint32_t u, v, w;
+
+				u = a[j];
+				v = a[j + t];
+				a[j] = (uint16_t)mq_add(u, v);
+				w = mq_sub(u, v);
+				a[j + t] = (uint16_t)
+					mq_montymul(w, s);
+			}
+		}
+		t = dt;
+		m = hm;
 	}
-	hn = n >> 1;
-	d00 = tmp;
-	d11 = tmp + n;
-	tmp += n << 1;
 
-	memcpy(d00, g00, n * sizeof *g00);
-	Zf(poly_LDLmv_fft)(d11, tree, g00, g01, g11, logn);
-
-	Zf(poly_split_fft)(tmp, tmp + hn, d00, logn);
-	Zf(poly_split_fft)(d00, d00 + hn, d11, logn);
-	memcpy(d11, tmp, n * sizeof *tmp);
-	ffLDL_fft_inner(tree + n,
-		d11, d11 + hn, logn - 1, tmp);
-	ffLDL_fft_inner(tree + n + ffLDL_treesize(logn - 1),
-		d00, d00 + hn, logn - 1, tmp);
+	/*
+	 * To complete the inverse NTT, we must now divide all values by
+	 * n (the vector size). We thus need the inverse of n, i.e. we
+	 * need to divide 1 by 2 logn times. But we also want it in
+	 * Montgomery representation, i.e. we also want to multiply it
+	 * by R = 2^16. In the common case, this should be a simple right
+	 * shift. The loop below is generic and works also in corner cases;
+	 * its computation time is negligible.
+	 */
+	ni = R;
+	for (m = n; m > 1; m >>= 1) {
+		ni = mq_rshift1(ni);
+	}
+	for (m = 0; m < n; m ++) {
+		a[m] = (uint16_t)mq_montymul(a[m], ni);
+	}
 }
 
 /*
- * Normalize an ffLDL tree: each leaf of value x is replaced with
- * sigma / sqrt(x).
+ * Convert a polynomial (mod q) to Montgomery representation.
  */
 static void
-ffLDL_binary_normalize(fpr *tree, unsigned orig_logn, unsigned logn)
+mq_poly_tomonty(uint16_t *f, unsigned logn)
 {
-	/*
-	 * TODO: make an iterative version.
-	 */
-	size_t n;
+	size_t u, n;
 
-	n = MKN(logn);
-	if (n == 1) {
-		/*
-		 * We actually store in the tree leaf the inverse of
-		 * the value mandated by the specification: this
-		 * saves a division both here and in the sampler.
-		 */
-		tree[0] = fpr_mul(fpr_sqrt(tree[0]), fpr_inv_sigma[orig_logn]);
-	} else {
-		ffLDL_binary_normalize(tree + n, orig_logn, logn - 1);
-		ffLDL_binary_normalize(tree + n + ffLDL_treesize(logn - 1),
-			orig_logn, logn - 1);
+	n = (size_t)1 << logn;
+	for (u = 0; u < n; u ++) {
+		f[u] = (uint16_t)mq_montymul(f[u], R2);
+	}
+}
+
+/*
+ * Multiply two polynomials together (NTT representation, and using
+ * a Montgomery multiplication). Result f*g is written over f.
+ */
+static void
+mq_poly_montymul_ntt(uint16_t *f, const uint16_t *g, unsigned logn)
+{
+	size_t u, n;
+
+	n = (size_t)1 << logn;
+	for (u = 0; u < n; u ++) {
+		f[u] = (uint16_t)mq_montymul(f[u], g[u]);
 	}
 }
 
@@ -196,1075 +634,274 @@ smallints_to_fpr(fpr *r, const int8_t *t, unsigned logn)
 }
 
 /*
- * The expanded private key contains:
- *  - The B0 matrix (four elements)
- *  - The ffLDL tree
+ * Calculate (f*g) mod (2, phi) and store the result (mod 2) in fg.
+ * tmp must be of size at least 2n.
  */
-
-static inline size_t
-skoff_b00(unsigned logn)
+static void
+Zf(mulmod2)(int8_t *restrict ab, const int8_t *restrict a,
+		const int8_t *restrict b, unsigned logn, uint16_t *tmp)
 {
-	(void)logn;
-	return 0;
+	size_t n, u;
+
+	n = MKN(logn);
+	if (logn < 5) {
+		size_t v;
+		memset(ab, (int8_t)0, n);
+		for (u = 0; u < n; u ++) {
+			for (v = 0; u+v < n; v ++) {
+				ab[u + v] ^= a[u] & b[v] & 1;
+			}
+			for (v = n - u; v < n; v ++) {
+				ab[u + v - n] ^= a[u] & b[v] & 1;
+			}
+		}
+	} else {
+		uint16_t *at, *bt;
+
+		at = tmp;
+		bt = at + n;
+
+		for (u = 0; u < n; u ++) {
+			at[u] = (uint16_t)a[u] & 1;
+		}
+		for (u = 0; u < n; u ++) {
+			bt[u] = (uint16_t)b[u] & 1;
+		}
+
+		// Use NTT with q = 12289 from vrfy.c
+		mq_NTT(at, logn);
+		mq_NTT(bt, logn);
+		mq_poly_tomonty(bt, logn);
+		mq_poly_montymul_ntt(at, bt, logn);
+		mq_iNTT(at, logn);
+
+		// Reduce output to {0,1} where (Q-x) for 0 < x < Q/2 is cast to x%2.
+		for (u = 0; u < n; u ++) {
+			ab[u] = (at[u] ^ -(((Q >> 1) - (uint32_t)at[u]) >> 31)) & 1;
+		}
+	}
 }
 
-static inline size_t
-skoff_b01(unsigned logn)
+/*
+ * Compute a signature: the signature contains two vectors, s0 and s1.
+ * The s0 vector is not returned.
+ *
+ * tmp must have room for at least 28 * 2^logn bytes
+ */
+static int
+Zf(inner_do_sign)(void *samp_ctx, int16_t *restrict s1,
+	const int8_t *restrict f, const int8_t *restrict g,
+	const int8_t *restrict hm, unsigned logn, const fpr isigma_sig,
+	uint8_t *restrict tmp)
 {
-	return MKN(logn);
+	size_t n, u;
+	int8_t *x0, *x1;
+	fpr *t0, *t1, *t2;
+
+	n = MKN(logn);
+	t0 = (fpr *)tmp;
+	t1 = t0 + n;
+	t2 = t1 + n;
+	x0 = (int8_t *)(t2 + n);
+	x1 = x0 + n;
+
+	/*
+	 * Set the target vector to [hm, 0] * B (hm is the hashed message).
+	 */
+	Zf(mulmod2)(x0, f, hm, logn, (uint16_t *)t0);
+	Zf(mulmod2)(x1, g, hm, logn, (uint16_t *)t0);
+
+	/*
+	 * Apply sampling; result is written over (x0,x1).
+	 * Perform Gaussian smoothing to not reveal information on the secret basis.
+	 */
+	for (u = 0; u < n; u ++) {
+		x0[u] = 2*Zf(sampler)(samp_ctx, fpr_half(fpr_of(x0[u])),
+			isigma_sig) - (x0[u]);
+	}
+	for (u = 0; u < n; u ++) {
+		x1[u] = 2*Zf(sampler)(samp_ctx, fpr_half(fpr_of(x1[u])),
+			isigma_sig) - (x1[u]);
+	}
+
+	/*
+	 * Get the signature corresponding to that tiny vector, i.e.
+	 * s = x * B^{-1}. Thus s0 = x0 G - x1 F and s1 = -x0 g + x1 f.
+	 */
+	smallints_to_fpr(t0, f, logn);
+	smallints_to_fpr(t1, x1, logn);
+	Zf(FFT)(t0, logn);
+	Zf(FFT)(t1, logn);
+	Zf(poly_mul_fft)(t0, t1, logn);
+	smallints_to_fpr(t1, g, logn);
+	smallints_to_fpr(t2, x0, logn);
+	Zf(FFT)(t1, logn);
+	Zf(FFT)(t2, logn);
+	Zf(poly_mul_fft)(t1, t2, logn);
+	Zf(poly_sub)(t0, t1, logn); // s1 = x1 f - x0 g.
+
+	Zf(iFFT)(t0, logn);
+	for (u = 0; u < n; u ++) {
+		s1[u] = (int16_t)fpr_rint(t0[u]);
+		if (s1[u] & 1) return 0;
+		s1[u] /= 2;
+	}
+
+	/*
+	 * TODO: check if this signature actually works...
+	 * With "normal" degrees (e.g. 512 or 1024), it is very
+	 * improbable that the computed vector is not short enough;
+	 * however, it may happen in practice for the very reduced
+	 * versions (e.g. degree 16 or below).
+	 */
+	return 1;
 }
 
-static inline size_t
-skoff_b10(unsigned logn)
+/*
+ * Compute a signature: the signature contains two vectors, s0 and s1.
+ *
+ * tmp must have room for at least 42 * 2^logn bytes
+ */
+static int
+Zf(inner_do_complete_sign)(void *samp_ctx,
+	int16_t *restrict s0, int16_t *restrict s1,
+	const int8_t *restrict f, const int8_t *restrict g,
+	const int8_t *restrict F, const int8_t *restrict G,
+	const int8_t *restrict hm, unsigned logn, fpr isigma_sig,
+	uint8_t *restrict tmp)
 {
-	return 2 * MKN(logn);
+	size_t n, u;
+	int8_t *x0, *x1;
+	fpr *t0, *t1, *t2, *t3, *t4;
+
+	n = MKN(logn);
+	t0 = (fpr *)tmp;
+	t1 = t0 + n;
+	t2 = t1 + n;
+	t3 = t2 + n;
+	t4 = t3 + n;
+	x0 = (int8_t *)(t4 + n);
+	x1 = x0 + n;
+
+	/*
+	 * Set the target vector to [hm, 0] * B (hm is the hashed message).
+	 */
+	Zf(mulmod2)(x0, f, hm, logn, (uint16_t *)t0);
+	Zf(mulmod2)(x1, g, hm, logn, (uint16_t *)t0);
+
+	/*
+	 * Apply sampling; result is written over (x0,x1).
+	 * Perform Gaussian smoothing to not reveal information on the secret basis.
+	 */
+	for (u = 0; u < n; u ++) {
+		x0[u] = 2*Zf(sampler)(samp_ctx, fpr_half(fpr_of(x0[u])),
+			isigma_sig) - (x0[u]);
+	}
+	for (u = 0; u < n; u ++) {
+		x1[u] = 2*Zf(sampler)(samp_ctx, fpr_half(fpr_of(x1[u])),
+			isigma_sig) - (x1[u]);
+	}
+
+	/*
+	 * Get the signature corresponding to that tiny vector, i.e.
+	 * s = x * B^{-1}. Thus s0 = x0 G - x1 F and s1 = -x0 g + x1 f.
+	 */
+
+	smallints_to_fpr(t0, G, logn);
+	smallints_to_fpr(t1, f, logn);
+	smallints_to_fpr(t2, x0, logn);
+	smallints_to_fpr(t3, x1, logn);
+	Zf(FFT)(t0, logn);
+	Zf(FFT)(t1, logn);
+	Zf(FFT)(t2, logn);
+	Zf(FFT)(t3, logn);
+
+	Zf(poly_mul_fft)(t0, t2, logn); // t0 = x0 G
+	Zf(poly_mul_fft)(t1, t3, logn); // t1 = x1 f
+
+	smallints_to_fpr(t4, F, logn);
+	Zf(FFT)(t4, logn);
+	Zf(poly_mul_fft)(t3, t4, logn);
+	Zf(poly_sub)(t0, t3, logn); // t0 = x0 G - x1 F
+
+
+	smallints_to_fpr(t4, g, logn);
+	Zf(FFT)(t4, logn);
+	Zf(poly_mul_fft)(t2, t4, logn);
+	Zf(poly_sub)(t1, t2, logn); // t1 = x1 f - x0 g
+
+	/*
+	 * Extract the signature from t0, t1
+	 */
+	Zf(iFFT)(t0, logn);
+	Zf(iFFT)(t1, logn);
+	for (u = 0; u < n; u ++) {
+		s0[u] = (int16_t)fpr_rint(t0[u]);
+		if ((s0[u] ^ hm[u]) & 1) return 0;
+		s0[u] = (s0[u] - (hm[u] & 1)) / 2;
+	}
+	for (u = 0; u < n; u ++) {
+		s1[u] = (int16_t)fpr_rint(t1[u]);
+		if (s1[u] & 1) return 0;
+		s1[u] /= 2;
+	}
+
+	/*
+	 * TODO: check if this signature actually works...
+	 */
+	return 1;
 }
 
-static inline size_t
-skoff_b11(unsigned logn)
-{
-	return 3 * MKN(logn);
-}
-
-static inline size_t
-skoff_tree(unsigned logn)
-{
-	return 4 * MKN(logn);
-}
+/* =================================================================== */
 
 /* see inner.h */
 void
-Zf(expand_privkey)(fpr *restrict expanded_key,
-	const int8_t *f, const int8_t *g,
-	const int8_t *F, const int8_t *G,
-	unsigned logn, uint8_t *restrict tmp)
-{
-	size_t n;
-	fpr *rf, *rg, *rF, *rG;
-	fpr *b00, *b01, *b10, *b11;
-	fpr *g00, *g01, *g11, *gxx;
-	fpr *tree;
-
-	n = MKN(logn);
-	b00 = expanded_key + skoff_b00(logn);
-	b01 = expanded_key + skoff_b01(logn);
-	b10 = expanded_key + skoff_b10(logn);
-	b11 = expanded_key + skoff_b11(logn);
-	tree = expanded_key + skoff_tree(logn);
-
-	/*
-	 * We load the private key elements directly into the B0 matrix,
-	 * since B0 = [[g, -f], [G, -F]].
-	 */
-	rf = b01;
-	rg = b00;
-	rF = b11;
-	rG = b10;
-
-	smallints_to_fpr(rf, f, logn);
-	smallints_to_fpr(rg, g, logn);
-	smallints_to_fpr(rF, F, logn);
-	smallints_to_fpr(rG, G, logn);
-
-	/*
-	 * Compute the FFT for the key elements, and negate f and F.
-	 */
-	Zf(FFT)(rf, logn);
-	Zf(FFT)(rg, logn);
-	Zf(FFT)(rF, logn);
-	Zf(FFT)(rG, logn);
-	Zf(poly_neg)(rf, logn);
-	Zf(poly_neg)(rF, logn);
-
-	/*
-	 * The Gram matrix is G = B·B*. Formulas are:
-	 *   g00 = b00*adj(b00) + b01*adj(b01)
-	 *   g01 = b00*adj(b10) + b01*adj(b11)
-	 *   g10 = b10*adj(b00) + b11*adj(b01)
-	 *   g11 = b10*adj(b10) + b11*adj(b11)
-	 *
-	 * For historical reasons, this implementation uses
-	 * g00, g01 and g11 (upper triangle).
-	 */
-	g00 = (fpr *)tmp;
-	g01 = g00 + n;
-	g11 = g01 + n;
-	gxx = g11 + n;
-
-	memcpy(g00, b00, n * sizeof *b00);
-	Zf(poly_mulselfadj_fft)(g00, logn);
-	memcpy(gxx, b01, n * sizeof *b01);
-	Zf(poly_mulselfadj_fft)(gxx, logn);
-	Zf(poly_add)(g00, gxx, logn);
-
-	memcpy(g01, b00, n * sizeof *b00);
-	Zf(poly_muladj_fft)(g01, b10, logn);
-	memcpy(gxx, b01, n * sizeof *b01);
-	Zf(poly_muladj_fft)(gxx, b11, logn);
-	Zf(poly_add)(g01, gxx, logn);
-
-	memcpy(g11, b10, n * sizeof *b10);
-	Zf(poly_mulselfadj_fft)(g11, logn);
-	memcpy(gxx, b11, n * sizeof *b11);
-	Zf(poly_mulselfadj_fft)(gxx, logn);
-	Zf(poly_add)(g11, gxx, logn);
-
-	/*
-	 * Compute the Falcon tree.
-	 */
-	ffLDL_fft(tree, g00, g01, g11, logn, gxx);
-
-	/*
-	 * Normalize tree.
-	 */
-	ffLDL_binary_normalize(tree, logn, logn);
-}
-
-typedef int (*samplerZ)(void *ctx, fpr mu, fpr sigma);
-
-/*
- * Perform Fast Fourier Sampling for target vector t. The Gram matrix
- * is provided (G = [[g00, g01], [adj(g01), g11]]). The sampled vector
- * is written over (t0,t1). The Gram matrix is modified as well. The
- * tmp[] buffer must have room for four polynomials.
- */
-static void
-ffSampling_fft_dyntree(samplerZ samp, void *samp_ctx,
-	fpr *restrict t0, fpr *restrict t1,
-	fpr *restrict g00, fpr *restrict g01, fpr *restrict g11,
-	unsigned orig_logn, unsigned logn, fpr *restrict tmp)
-{
-	size_t n, hn;
-	fpr *z0, *z1;
-
-	/*
-	 * Deepest level: the LDL tree leaf value is just g00 (the
-	 * array has length only 1 at this point); we normalize it
-	 * with regards to sigma, then use it for sampling.
-	 */
-	if (logn == 0) {
-		fpr leaf;
-
-		leaf = g00[0];
-		leaf = fpr_mul(fpr_sqrt(leaf), fpr_inv_sigma[orig_logn]);
-		t0[0] = fpr_of(samp(samp_ctx, t0[0], leaf));
-		t1[0] = fpr_of(samp(samp_ctx, t1[0], leaf));
-		return;
-	}
-
-	n = (size_t)1 << logn;
-	hn = n >> 1;
-
-	/*
-	 * Decompose G into LDL. We only need d00 (identical to g00),
-	 * d11, and l10; we do that in place.
-	 */
-	Zf(poly_LDL_fft)(g00, g01, g11, logn);
-
-	/*
-	 * Split d00 and d11 and expand them into half-size quasi-cyclic
-	 * Gram matrices. We also save l10 in tmp[].
-	 */
-	Zf(poly_split_fft)(tmp, tmp + hn, g00, logn);
-	memcpy(g00, tmp, n * sizeof *tmp);
-	Zf(poly_split_fft)(tmp, tmp + hn, g11, logn);
-	memcpy(g11, tmp, n * sizeof *tmp);
-	memcpy(tmp, g01, n * sizeof *g01);
-	memcpy(g01, g00, hn * sizeof *g00);
-	memcpy(g01 + hn, g11, hn * sizeof *g00);
-
-	/*
-	 * The half-size Gram matrices for the recursive LDL tree
-	 * building are now:
-	 *   - left sub-tree: g00, g00+hn, g01
-	 *   - right sub-tree: g11, g11+hn, g01+hn
-	 * l10 is in tmp[].
-	 */
-
-	/*
-	 * We split t1 and use the first recursive call on the two
-	 * halves, using the right sub-tree. The result is merged
-	 * back into tmp + 2*n.
-	 */
-	z1 = tmp + n;
-	Zf(poly_split_fft)(z1, z1 + hn, t1, logn);
-	ffSampling_fft_dyntree(samp, samp_ctx, z1, z1 + hn,
-		g11, g11 + hn, g01 + hn, orig_logn, logn - 1, z1 + n);
-	Zf(poly_merge_fft)(tmp + (n << 1), z1, z1 + hn, logn);
-
-	/*
-	 * Compute tb0 = t0 + (t1 - z1) * l10.
-	 * At that point, l10 is in tmp, t1 is unmodified, and z1 is
-	 * in tmp + (n << 1). The buffer in z1 is free.
-	 *
-	 * In the end, z1 is written over t1, and tb0 is in t0.
-	 */
-	memcpy(z1, t1, n * sizeof *t1);
-	Zf(poly_sub)(z1, tmp + (n << 1), logn);
-	memcpy(t1, tmp + (n << 1), n * sizeof *tmp);
-	Zf(poly_mul_fft)(tmp, z1, logn);
-	Zf(poly_add)(t0, tmp, logn);
-
-	/*
-	 * Second recursive invocation, on the split tb0 (currently in t0)
-	 * and the left sub-tree.
-	 */
-	z0 = tmp;
-	Zf(poly_split_fft)(z0, z0 + hn, t0, logn);
-	ffSampling_fft_dyntree(samp, samp_ctx, z0, z0 + hn,
-		g00, g00 + hn, g01, orig_logn, logn - 1, z0 + n);
-	Zf(poly_merge_fft)(t0, z0, z0 + hn, logn);
-}
-
-/*
- * Perform Fast Fourier Sampling for target vector t and LDL tree T.
- * tmp[] must have size for at least two polynomials of size 2^logn.
- */
-static void
-ffSampling_fft(samplerZ samp, void *samp_ctx,
-	fpr *restrict z0, fpr *restrict z1,
-	const fpr *restrict tree,
-	const fpr *restrict t0, const fpr *restrict t1, unsigned logn,
-	fpr *restrict tmp)
-{
-	size_t n, hn;
-	const fpr *tree0, *tree1;
-
-	/*
-	 * When logn == 2, we inline the last two recursion levels.
-	 */
-	if (logn == 2) {
-		fpr x0, x1, y0, y1, w0, w1, w2, w3, sigma;
-		fpr a_re, a_im, b_re, b_im, c_re, c_im;
-
-		tree0 = tree + 4;
-		tree1 = tree + 8;
-
-		/*
-		 * We split t1 into w*, then do the recursive invocation,
-		 * with output in w*. We finally merge back into z1.
-		 */
-		a_re = t1[0];
-		a_im = t1[2];
-		b_re = t1[1];
-		b_im = t1[3];
-		c_re = fpr_add(a_re, b_re);
-		c_im = fpr_add(a_im, b_im);
-		w0 = fpr_half(c_re);
-		w1 = fpr_half(c_im);
-		c_re = fpr_sub(a_re, b_re);
-		c_im = fpr_sub(a_im, b_im);
-		w2 = fpr_mul(fpr_add(c_re, c_im), fpr_invsqrt8);
-		w3 = fpr_mul(fpr_sub(c_im, c_re), fpr_invsqrt8);
-
-		x0 = w2;
-		x1 = w3;
-		sigma = tree1[3];
-		w2 = fpr_of(samp(samp_ctx, x0, sigma));
-		w3 = fpr_of(samp(samp_ctx, x1, sigma));
-		a_re = fpr_sub(x0, w2);
-		a_im = fpr_sub(x1, w3);
-		b_re = tree1[0];
-		b_im = tree1[1];
-		c_re = fpr_sub(fpr_mul(a_re, b_re), fpr_mul(a_im, b_im));
-		c_im = fpr_add(fpr_mul(a_re, b_im), fpr_mul(a_im, b_re));
-		x0 = fpr_add(c_re, w0);
-		x1 = fpr_add(c_im, w1);
-		sigma = tree1[2];
-		w0 = fpr_of(samp(samp_ctx, x0, sigma));
-		w1 = fpr_of(samp(samp_ctx, x1, sigma));
-
-		a_re = w0;
-		a_im = w1;
-		b_re = w2;
-		b_im = w3;
-		c_re = fpr_mul(fpr_sub(b_re, b_im), fpr_invsqrt2);
-		c_im = fpr_mul(fpr_add(b_re, b_im), fpr_invsqrt2);
-		z1[0] = w0 = fpr_add(a_re, c_re);
-		z1[2] = w2 = fpr_add(a_im, c_im);
-		z1[1] = w1 = fpr_sub(a_re, c_re);
-		z1[3] = w3 = fpr_sub(a_im, c_im);
-
-		/*
-		 * Compute tb0 = t0 + (t1 - z1) * L. Value tb0 ends up in w*.
-		 */
-		w0 = fpr_sub(t1[0], w0);
-		w1 = fpr_sub(t1[1], w1);
-		w2 = fpr_sub(t1[2], w2);
-		w3 = fpr_sub(t1[3], w3);
-
-		a_re = w0;
-		a_im = w2;
-		b_re = tree[0];
-		b_im = tree[2];
-		w0 = fpr_sub(fpr_mul(a_re, b_re), fpr_mul(a_im, b_im));
-		w2 = fpr_add(fpr_mul(a_re, b_im), fpr_mul(a_im, b_re));
-		a_re = w1;
-		a_im = w3;
-		b_re = tree[1];
-		b_im = tree[3];
-		w1 = fpr_sub(fpr_mul(a_re, b_re), fpr_mul(a_im, b_im));
-		w3 = fpr_add(fpr_mul(a_re, b_im), fpr_mul(a_im, b_re));
-
-		w0 = fpr_add(w0, t0[0]);
-		w1 = fpr_add(w1, t0[1]);
-		w2 = fpr_add(w2, t0[2]);
-		w3 = fpr_add(w3, t0[3]);
-
-		/*
-		 * Second recursive invocation.
-		 */
-		a_re = w0;
-		a_im = w2;
-		b_re = w1;
-		b_im = w3;
-		c_re = fpr_add(a_re, b_re);
-		c_im = fpr_add(a_im, b_im);
-		w0 = fpr_half(c_re);
-		w1 = fpr_half(c_im);
-		c_re = fpr_sub(a_re, b_re);
-		c_im = fpr_sub(a_im, b_im);
-		w2 = fpr_mul(fpr_add(c_re, c_im), fpr_invsqrt8);
-		w3 = fpr_mul(fpr_sub(c_im, c_re), fpr_invsqrt8);
-
-		x0 = w2;
-		x1 = w3;
-		sigma = tree0[3];
-		w2 = y0 = fpr_of(samp(samp_ctx, x0, sigma));
-		w3 = y1 = fpr_of(samp(samp_ctx, x1, sigma));
-		a_re = fpr_sub(x0, y0);
-		a_im = fpr_sub(x1, y1);
-		b_re = tree0[0];
-		b_im = tree0[1];
-		c_re = fpr_sub(fpr_mul(a_re, b_re), fpr_mul(a_im, b_im));
-		c_im = fpr_add(fpr_mul(a_re, b_im), fpr_mul(a_im, b_re));
-		x0 = fpr_add(c_re, w0);
-		x1 = fpr_add(c_im, w1);
-		sigma = tree0[2];
-		w0 = fpr_of(samp(samp_ctx, x0, sigma));
-		w1 = fpr_of(samp(samp_ctx, x1, sigma));
-
-		a_re = w0;
-		a_im = w1;
-		b_re = w2;
-		b_im = w3;
-		c_re = fpr_mul(fpr_sub(b_re, b_im), fpr_invsqrt2);
-		c_im = fpr_mul(fpr_add(b_re, b_im), fpr_invsqrt2);
-		z0[0] = fpr_add(a_re, c_re);
-		z0[2] = fpr_add(a_im, c_im);
-		z0[1] = fpr_sub(a_re, c_re);
-		z0[3] = fpr_sub(a_im, c_im);
-
-		return;
-	}
-
-	/*
-	 * Case logn == 1 is reachable only when using Falcon-2 (the
-	 * smallest size for which Falcon is mathematically defined, but
-	 * of course way too insecure to be of any use).
-	 */
-	if (logn == 1) {
-		fpr x0, x1, y0, y1, sigma;
-		fpr a_re, a_im, b_re, b_im, c_re, c_im;
-
-		x0 = t1[0];
-		x1 = t1[1];
-		sigma = tree[3];
-		z1[0] = y0 = fpr_of(samp(samp_ctx, x0, sigma));
-		z1[1] = y1 = fpr_of(samp(samp_ctx, x1, sigma));
-		a_re = fpr_sub(x0, y0);
-		a_im = fpr_sub(x1, y1);
-		b_re = tree[0];
-		b_im = tree[1];
-		c_re = fpr_sub(fpr_mul(a_re, b_re), fpr_mul(a_im, b_im));
-		c_im = fpr_add(fpr_mul(a_re, b_im), fpr_mul(a_im, b_re));
-		x0 = fpr_add(c_re, t0[0]);
-		x1 = fpr_add(c_im, t0[1]);
-		sigma = tree[2];
-		z0[0] = fpr_of(samp(samp_ctx, x0, sigma));
-		z0[1] = fpr_of(samp(samp_ctx, x1, sigma));
-
-		return;
-	}
-
-	/*
-	 * Normal end of recursion is for logn == 0. Since the last
-	 * steps of the recursions were inlined in the blocks above
-	 * (when logn == 1 or 2), this case is not reachable, and is
-	 * retained here only for documentation purposes.
-
-	if (logn == 0) {
-		fpr x0, x1, sigma;
-
-		x0 = t0[0];
-		x1 = t1[0];
-		sigma = tree[0];
-		z0[0] = fpr_of(samp(samp_ctx, x0, sigma));
-		z1[0] = fpr_of(samp(samp_ctx, x1, sigma));
-		return;
-	}
-
-	 */
-
-	/*
-	 * General recursive case (logn >= 3).
-	 */
-
-	n = (size_t)1 << logn;
-	hn = n >> 1;
-	tree0 = tree + n;
-	tree1 = tree + n + ffLDL_treesize(logn - 1);
-
-	/*
-	 * We split t1 into z1 (reused as temporary storage), then do
-	 * the recursive invocation, with output in tmp. We finally
-	 * merge back into z1.
-	 */
-	Zf(poly_split_fft)(z1, z1 + hn, t1, logn);
-	ffSampling_fft(samp, samp_ctx, tmp, tmp + hn,
-		tree1, z1, z1 + hn, logn - 1, tmp + n);
-	Zf(poly_merge_fft)(z1, tmp, tmp + hn, logn);
-
-	/*
-	 * Compute tb0 = t0 + (t1 - z1) * L. Value tb0 ends up in tmp[].
-	 */
-	memcpy(tmp, t1, n * sizeof *t1);
-	Zf(poly_sub)(tmp, z1, logn);
-	Zf(poly_mul_fft)(tmp, tree, logn);
-	Zf(poly_add)(tmp, t0, logn);
-
-	/*
-	 * Second recursive invocation.
-	 */
-	Zf(poly_split_fft)(z0, z0 + hn, tmp, logn);
-	ffSampling_fft(samp, samp_ctx, tmp, tmp + hn,
-		tree0, z0, z0 + hn, logn - 1, tmp + n);
-	Zf(poly_merge_fft)(z0, tmp, tmp + hn, logn);
-}
-
-/*
- * Compute a signature: the signature contains two vectors, s1 and s2.
- * The s1 vector is not returned. The squared norm of (s1,s2) is
- * computed, and if it is short enough, then s2 is returned into the
- * s2[] buffer, and 1 is returned; otherwise, s2[] is untouched and 0 is
- * returned; the caller should then try again. This function uses an
- * expanded key.
- *
- * tmp[] must have room for at least six polynomials.
- */
-static int
-do_sign_tree(samplerZ samp, void *samp_ctx, int16_t *s2,
-	const fpr *restrict expanded_key,
-	const uint16_t *hm,
-	unsigned logn, fpr *restrict tmp)
-{
-	size_t n, u;
-	fpr *t0, *t1, *tx, *ty;
-	const fpr *b00, *b01, *b10, *b11, *tree;
-	fpr ni;
-	uint32_t sqn, ng;
-	int16_t *s1tmp, *s2tmp;
-
-	n = MKN(logn);
-	t0 = tmp;
-	t1 = t0 + n;
-	b00 = expanded_key + skoff_b00(logn);
-	b01 = expanded_key + skoff_b01(logn);
-	b10 = expanded_key + skoff_b10(logn);
-	b11 = expanded_key + skoff_b11(logn);
-	tree = expanded_key + skoff_tree(logn);
-
-	/*
-	 * Set the target vector to [hm, 0] (hm is the hashed message).
-	 */
-	for (u = 0; u < n; u ++) {
-		t0[u] = fpr_of(hm[u]);
-		/* This is implicit.
-		t1[u] = fpr_zero;
-		*/
-	}
-
-	/*
-	 * Apply the lattice basis to obtain the real target
-	 * vector (after normalization with regards to modulus).
-	 */
-	Zf(FFT)(t0, logn);
-	ni = fpr_inverse_of_q;
-	memcpy(t1, t0, n * sizeof *t0);
-	Zf(poly_mul_fft)(t1, b01, logn);
-	Zf(poly_mulconst)(t1, fpr_neg(ni), logn);
-	Zf(poly_mul_fft)(t0, b11, logn);
-	Zf(poly_mulconst)(t0, ni, logn);
-
-	tx = t1 + n;
-	ty = tx + n;
-
-	/*
-	 * Apply sampling. Output is written back in [tx, ty].
-	 */
-	ffSampling_fft(samp, samp_ctx, tx, ty, tree, t0, t1, logn, ty + n);
-
-	/*
-	 * Get the lattice point corresponding to that tiny vector.
-	 */
-	memcpy(t0, tx, n * sizeof *tx);
-	memcpy(t1, ty, n * sizeof *ty);
-	Zf(poly_mul_fft)(tx, b00, logn);
-	Zf(poly_mul_fft)(ty, b10, logn);
-	Zf(poly_add)(tx, ty, logn);
-	memcpy(ty, t0, n * sizeof *t0);
-	Zf(poly_mul_fft)(ty, b01, logn);
-
-	memcpy(t0, tx, n * sizeof *tx);
-	Zf(poly_mul_fft)(t1, b11, logn);
-	Zf(poly_add)(t1, ty, logn);
-
-	Zf(iFFT)(t0, logn);
-	Zf(iFFT)(t1, logn);
-
-	/*
-	 * Compute the signature.
-	 */
-	s1tmp = (int16_t *)tx;
-	sqn = 0;
-	ng = 0;
-	for (u = 0; u < n; u ++) {
-		int32_t z;
-
-		z = (int32_t)hm[u] - (int32_t)fpr_rint(t0[u]);
-		sqn += (uint32_t)(z * z);
-		ng |= sqn;
-		s1tmp[u] = (int16_t)z;
-	}
-	sqn |= -(ng >> 31);
-
-	/*
-	 * With "normal" degrees (e.g. 512 or 1024), it is very
-	 * improbable that the computed vector is not short enough;
-	 * however, it may happen in practice for the very reduced
-	 * versions (e.g. degree 16 or below). In that case, the caller
-	 * will loop, and we must not write anything into s2[] because
-	 * s2[] may overlap with the hashed message hm[] and we need
-	 * hm[] for the next iteration.
-	 */
-	s2tmp = (int16_t *)tmp;
-	for (u = 0; u < n; u ++) {
-		s2tmp[u] = (int16_t)-fpr_rint(t1[u]);
-	}
-	if (Zf(is_short_half)(sqn, s2tmp, logn)) {
-		memcpy(s2, s2tmp, n * sizeof *s2);
-		memcpy(tmp, s1tmp, n * sizeof *s1tmp);
-		return 1;
-	}
-	return 0;
-}
-
-/*
- * Compute a signature: the signature contains two vectors, s1 and s2.
- * The s1 vector is not returned. The squared norm of (s1,s2) is
- * computed, and if it is short enough, then s2 is returned into the
- * s2[] buffer, and 1 is returned; otherwise, s2[] is untouched and 0 is
- * returned; the caller should then try again.
- *
- * tmp[] must have room for at least nine polynomials.
- */
-static int
-do_sign_dyn(samplerZ samp, void *samp_ctx, int16_t *s2,
+Zf(sign)(inner_shake256_context *rng, int16_t *restrict sig,
 	const int8_t *restrict f, const int8_t *restrict g,
-	const int8_t *restrict F, const int8_t *restrict G,
-	const uint16_t *hm, unsigned logn, fpr *restrict tmp)
+	const int8_t *restrict hm, unsigned logn, fpr isigma_sig,
+	uint8_t *restrict tmp)
 {
-	size_t n, u;
-	fpr *t0, *t1, *tx, *ty;
-	fpr *b00, *b01, *b10, *b11, *g00, *g01, *g11;
-	fpr ni;
-	uint32_t sqn, ng;
-	int16_t *s1tmp, *s2tmp;
-
-	n = MKN(logn);
-
-	/*
-	 * Lattice basis is B = [[g, -f], [G, -F]]. We convert it to FFT.
-	 */
-	b00 = tmp;
-	b01 = b00 + n;
-	b10 = b01 + n;
-	b11 = b10 + n;
-	smallints_to_fpr(b01, f, logn);
-	smallints_to_fpr(b00, g, logn);
-	smallints_to_fpr(b11, F, logn);
-	smallints_to_fpr(b10, G, logn);
-	Zf(FFT)(b01, logn);
-	Zf(FFT)(b00, logn);
-	Zf(FFT)(b11, logn);
-	Zf(FFT)(b10, logn);
-	Zf(poly_neg)(b01, logn);
-	Zf(poly_neg)(b11, logn);
-
-	/*
-	 * Compute the Gram matrix G = B·B*. Formulas are:
-	 *   g00 = b00*adj(b00) + b01*adj(b01)
-	 *   g01 = b00*adj(b10) + b01*adj(b11)
-	 *   g10 = b10*adj(b00) + b11*adj(b01)
-	 *   g11 = b10*adj(b10) + b11*adj(b11)
-	 *
-	 * For historical reasons, this implementation uses
-	 * g00, g01 and g11 (upper triangle). g10 is not kept
-	 * since it is equal to adj(g01).
-	 *
-	 * We _replace_ the matrix B with the Gram matrix, but we
-	 * must keep b01 and b11 for computing the target vector.
-	 */
-	t0 = b11 + n;
-	t1 = t0 + n;
-
-	memcpy(t0, b01, n * sizeof *b01);
-	Zf(poly_mulselfadj_fft)(t0, logn);    // t0 <- b01*adj(b01)
-
-	memcpy(t1, b00, n * sizeof *b00);
-	Zf(poly_muladj_fft)(t1, b10, logn);   // t1 <- b00*adj(b10)
-	Zf(poly_mulselfadj_fft)(b00, logn);   // b00 <- b00*adj(b00)
-	Zf(poly_add)(b00, t0, logn);      // b00 <- g00
-	memcpy(t0, b01, n * sizeof *b01);
-	Zf(poly_muladj_fft)(b01, b11, logn);  // b01 <- b01*adj(b11)
-	Zf(poly_add)(b01, t1, logn);      // b01 <- g01
-
-	Zf(poly_mulselfadj_fft)(b10, logn);   // b10 <- b10*adj(b10)
-	memcpy(t1, b11, n * sizeof *b11);
-	Zf(poly_mulselfadj_fft)(t1, logn);    // t1 <- b11*adj(b11)
-	Zf(poly_add)(b10, t1, logn);      // b10 <- g11
-
-	/*
-	 * We rename variables to make things clearer. The three elements
-	 * of the Gram matrix uses the first 3*n slots of tmp[], followed
-	 * by b11 and b01 (in that order).
-	 */
-	g00 = b00;
-	g01 = b01;
-	g11 = b10;
-	b01 = t0;
-	t0 = b01 + n;
-	t1 = t0 + n;
-
-	/*
-	 * Memory layout at that point:
-	 *   g00 g01 g11 b11 b01 t0 t1
-	 */
-
-	/*
-	 * Set the target vector to [hm, 0] (hm is the hashed message).
-	 */
-	for (u = 0; u < n; u ++) {
-		t0[u] = fpr_of(hm[u]);
-		/* This is implicit.
-		t1[u] = fpr_zero;
-		*/
-	}
-
-	/*
-	 * Apply the lattice basis to obtain the real target
-	 * vector (after normalization with regards to modulus).
-	 */
-	Zf(FFT)(t0, logn);
-	ni = fpr_inverse_of_q;
-	memcpy(t1, t0, n * sizeof *t0);
-	Zf(poly_mul_fft)(t1, b01, logn);
-	Zf(poly_mulconst)(t1, fpr_neg(ni), logn);
-	Zf(poly_mul_fft)(t0, b11, logn);
-	Zf(poly_mulconst)(t0, ni, logn);
-
-	/*
-	 * b01 and b11 can be discarded, so we move back (t0,t1).
-	 * Memory layout is now:
-	 *      g00 g01 g11 t0 t1
-	 */
-	memcpy(b11, t0, n * 2 * sizeof *t0);
-	t0 = g11 + n;
-	t1 = t0 + n;
-
-	/*
-	 * Apply sampling; result is written over (t0,t1).
-	 */
-	ffSampling_fft_dyntree(samp, samp_ctx,
-		t0, t1, g00, g01, g11, logn, logn, t1 + n);
-
-	/*
-	 * We arrange the layout back to:
-	 *     b00 b01 b10 b11 t0 t1
-	 *
-	 * We did not conserve the matrix basis, so we must recompute
-	 * it now.
-	 */
-	b00 = tmp;
-	b01 = b00 + n;
-	b10 = b01 + n;
-	b11 = b10 + n;
-	memmove(b11 + n, t0, n * 2 * sizeof *t0);
-	t0 = b11 + n;
-	t1 = t0 + n;
-	smallints_to_fpr(b01, f, logn);
-	smallints_to_fpr(b00, g, logn);
-	smallints_to_fpr(b11, F, logn);
-	smallints_to_fpr(b10, G, logn);
-	Zf(FFT)(b01, logn);
-	Zf(FFT)(b00, logn);
-	Zf(FFT)(b11, logn);
-	Zf(FFT)(b10, logn);
-	Zf(poly_neg)(b01, logn);
-	Zf(poly_neg)(b11, logn);
-	tx = t1 + n;
-	ty = tx + n;
-
-	/*
-	 * Get the lattice point corresponding to that tiny vector.
-	 */
-	memcpy(tx, t0, n * sizeof *t0);
-	memcpy(ty, t1, n * sizeof *t1);
-	Zf(poly_mul_fft)(tx, b00, logn);
-	Zf(poly_mul_fft)(ty, b10, logn);
-	Zf(poly_add)(tx, ty, logn);
-	memcpy(ty, t0, n * sizeof *t0);
-	Zf(poly_mul_fft)(ty, b01, logn);
-
-	memcpy(t0, tx, n * sizeof *tx);
-	Zf(poly_mul_fft)(t1, b11, logn);
-	Zf(poly_add)(t1, ty, logn);
-	Zf(iFFT)(t0, logn);
-	Zf(iFFT)(t1, logn);
-
-	s1tmp = (int16_t *)tx;
-	sqn = 0;
-	ng = 0;
-	for (u = 0; u < n; u ++) {
-		int32_t z;
-
-		z = (int32_t)hm[u] - (int32_t)fpr_rint(t0[u]);
-		sqn += (uint32_t)(z * z);
-		ng |= sqn;
-		s1tmp[u] = (int16_t)z;
-	}
-	sqn |= -(ng >> 31);
-
-	/*
-	 * With "normal" degrees (e.g. 512 or 1024), it is very
-	 * improbable that the computed vector is not short enough;
-	 * however, it may happen in practice for the very reduced
-	 * versions (e.g. degree 16 or below). In that case, the caller
-	 * will loop, and we must not write anything into s2[] because
-	 * s2[] may overlap with the hashed message hm[] and we need
-	 * hm[] for the next iteration.
-	 */
-	s2tmp = (int16_t *)tmp;
-	for (u = 0; u < n; u ++) {
-		s2tmp[u] = (int16_t)-fpr_rint(t1[u]);
-	}
-	if (Zf(is_short_half)(sqn, s2tmp, logn)) {
-		memcpy(s2, s2tmp, n * sizeof *s2);
-		memcpy(tmp, s1tmp, n * sizeof *s1tmp);
-		return 1;
-	}
-	return 0;
-}
-
-/*
- * Sample an integer value along a half-gaussian distribution centered
- * on zero and standard deviation 1.8205, with a precision of 72 bits.
- */
-int
-Zf(gaussian0_sampler)(prng *p)
-{
-
-	static const uint32_t dist[] = {
-		10745844u,  3068844u,  3741698u,
-		 5559083u,  1580863u,  8248194u,
-		 2260429u, 13669192u,  2736639u,
-		  708981u,  4421575u, 10046180u,
-		  169348u,  7122675u,  4136815u,
-		   30538u, 13063405u,  7650655u,
-		    4132u, 14505003u,  7826148u,
-		     417u, 16768101u, 11363290u,
-		      31u,  8444042u,  8086568u,
-		       1u, 12844466u,   265321u,
-		       0u,  1232676u, 13644283u,
-		       0u,    38047u,  9111839u,
-		       0u,      870u,  6138264u,
-		       0u,       14u, 12545723u,
-		       0u,        0u,  3104126u,
-		       0u,        0u,    28824u,
-		       0u,        0u,      198u,
-		       0u,        0u,        1u
-	};
-
-	uint32_t v0, v1, v2, hi;
-	uint64_t lo;
-	size_t u;
-	int z;
-
-	/*
-	 * Get a random 72-bit value, into three 24-bit limbs v0..v2.
-	 */
-	lo = prng_get_u64(p);
-	hi = prng_get_u8(p);
-	v0 = (uint32_t)lo & 0xFFFFFF;
-	v1 = (uint32_t)(lo >> 24) & 0xFFFFFF;
-	v2 = (uint32_t)(lo >> 48) | (hi << 16);
-
-	/*
-	 * Sampled value is z, such that v0..v2 is lower than the first
-	 * z elements of the table.
-	 */
-	z = 0;
-	for (u = 0; u < (sizeof dist) / sizeof(dist[0]); u += 3) {
-		uint32_t w0, w1, w2, cc;
-
-		w0 = dist[u + 2];
-		w1 = dist[u + 1];
-		w2 = dist[u + 0];
-		cc = (v0 - w0) >> 31;
-		cc = (v1 - w1 - cc) >> 31;
-		cc = (v2 - w2 - cc) >> 31;
-		z += (int)cc;
-	}
-	return z;
-
-}
-
-/*
- * Sample a bit with probability exp(-x) for some x >= 0.
- */
-static int
-BerExp(prng *p, fpr x, fpr ccs)
-{
-	int s, i;
-	fpr r;
-	uint32_t sw, w;
-	uint64_t z;
-
-	/*
-	 * Reduce x modulo log(2): x = s*log(2) + r, with s an integer,
-	 * and 0 <= r < log(2). Since x >= 0, we can use fpr_trunc().
-	 */
-	s = (int)fpr_trunc(fpr_mul(x, fpr_inv_log2));
-	r = fpr_sub(x, fpr_mul(fpr_of(s), fpr_log2));
-
-	/*
-	 * It may happen (quite rarely) that s >= 64; if sigma = 1.2
-	 * (the minimum value for sigma), r = 0 and b = 1, then we get
-	 * s >= 64 if the half-Gaussian produced a z >= 13, which happens
-	 * with probability about 0.000000000230383991, which is
-	 * approximatively equal to 2^(-32). In any case, if s >= 64,
-	 * then BerExp will be non-zero with probability less than
-	 * 2^(-64), so we can simply saturate s at 63.
-	 */
-	sw = (uint32_t)s;
-	sw ^= (sw ^ 63) & -((63 - sw) >> 31);
-	s = (int)sw;
-
-	/*
-	 * Compute exp(-r); we know that 0 <= r < log(2) at this point, so
-	 * we can use fpr_expm_p63(), which yields a result scaled to 2^63.
-	 * We scale it up to 2^64, then right-shift it by s bits because
-	 * we really want exp(-x) = 2^(-s)*exp(-r).
-	 *
-	 * The "-1" operation makes sure that the value fits on 64 bits
-	 * (i.e. if r = 0, we may get 2^64, and we prefer 2^64-1 in that
-	 * case). The bias is negligible since fpr_expm_p63() only computes
-	 * with 51 bits of precision or so.
-	 */
-	z = ((fpr_expm_p63(r, ccs) << 1) - 1) >> s;
-
-	/*
-	 * Sample a bit with probability exp(-x). Since x = s*log(2) + r,
-	 * exp(-x) = 2^-s * exp(-r), we compare lazily exp(-x) with the
-	 * PRNG output to limit its consumption, the sign of the difference
-	 * yields the expected result.
-	 */
-	i = 64;
+	sampler_context spc;
+	spc.sigma_min = fpr_sigma_min[logn];
 	do {
-		i -= 8;
-		w = prng_get_u8(p) - ((uint32_t)(z >> i) & 0xFF);
-	} while (!w && i > 0);
-	return (int)(w >> 31);
-}
-
-/*
- * The sampler produces a random integer that follows a discrete Gaussian
- * distribution, centered on mu, and with standard deviation sigma. The
- * provided parameter isigma is equal to 1/sigma.
- *
- * The value of sigma MUST lie between 1 and 2 (i.e. isigma lies between
- * 0.5 and 1); in Falcon, sigma should always be between 1.2 and 1.9.
- */
-int
-Zf(sampler)(void *ctx, fpr mu, fpr isigma)
-{
-	sampler_context *spc;
-	int s;
-	fpr r, dss, ccs;
-
-	spc = (sampler_context *)ctx;
-
-	/*
-	 * Center is mu. We compute mu = s + r where s is an integer
-	 * and 0 <= r < 1.
-	 */
-	s = (int)fpr_floor(mu);
-	r = fpr_sub(mu, fpr_of(s));
-
-	/*
-	 * dss = 1/(2*sigma^2) = 0.5*(isigma^2).
-	 */
-	dss = fpr_half(fpr_sqr(isigma));
-
-	/*
-	 * ccs = sigma_min / sigma = sigma_min * isigma.
-	 */
-	ccs = fpr_mul(isigma, spc->sigma_min);
-
-	/*
-	 * We now need to sample on center r.
-	 */
-	for (;;) {
-		int z0, z, b;
-		fpr x;
-
 		/*
-		 * Sample z for a Gaussian distribution. Then get a
-		 * random bit b to turn the sampling into a bimodal
-		 * distribution: if b = 1, we use z+1, otherwise we
-		 * use -z. We thus have two situations:
+		 * Signature produces short vectors s0 and s1. The signature is
+		 * acceptable only if Tr((s0,s1) Q (s0,s1)^H) is short.
 		 *
-		 *  - b = 1: z >= 1 and sampled against a Gaussian
-		 *    centered on 1.
-		 *  - b = 0: z <= 0 and sampled against a Gaussian
-		 *    centered on 0.
-		 */
-		z0 = Zf(gaussian0_sampler)(&spc->p);
-		b = (int)prng_get_u8(&spc->p) & 1;
-		z = b + ((b << 1) - 1) * z0;
-
-		/*
-		 * Rejection sampling. We want a Gaussian centered on r;
-		 * but we sampled against a Gaussian centered on b (0 or
-		 * 1). But we know that z is always in the range where
-		 * our sampling distribution is greater than the Gaussian
-		 * distribution, so rejection works.
+		 * If the signature is acceptable, we return only s1. A value for s0
+		 * can be found with Babai's Nearest Plane Algorithm that gives a short
+		 * trace as above.
 		 *
-		 * We got z with distribution:
-		 *    G(z) = exp(-((z-b)^2)/(2*sigma0^2))
-		 * We target distribution:
-		 *    S(z) = exp(-((z-r)^2)/(2*sigma^2))
-		 * Rejection sampling works by keeping the value z with
-		 * probability S(z)/G(z), and starting again otherwise.
-		 * This requires S(z) <= G(z), which is the case here.
-		 * Thus, we simply need to keep our z with probability:
-		 *    P = exp(-x)
-		 * where:
-		 *    x = ((z-r)^2)/(2*sigma^2) - ((z-b)^2)/(2*sigma0^2)
-		 *
-		 * Here, we scale up the Bernouilli distribution, which
-		 * makes rejection more probable, but makes rejection
-		 * rate sufficiently decorrelated from the Gaussian
-		 * center and standard deviation that the whole sampler
-		 * can be said to be constant-time.
+		 * We use a fast PRNG seeded from SHAKE context for gaussian sampling.
 		 */
-		x = fpr_mul(fpr_sqr(fpr_sub(fpr_of(z), r)), dss);
-		x = fpr_sub(x, fpr_mul(fpr_of(z0 * z0), fpr_inv_2sqrsigma0));
-		if (BerExp(&spc->p, x, ccs)) {
-			/*
-			 * Rejection sampling was centered on r, but the
-			 * actual center is mu = s + r.
-			 */
-			return s + z;
-		}
-	}
-}
-
-/* see inner.h */
-void
-Zf(sign_tree)(int16_t *sig, inner_shake256_context *rng,
-	const fpr *restrict expanded_key,
-	const uint16_t *hm, unsigned logn, uint8_t *tmp)
-{
-	fpr *ftmp;
-
-	ftmp = (fpr *)tmp;
-	for (;;) {
-		/*
-		 * Signature produces short vectors s1 and s2. The
-		 * signature is acceptable only if the aggregate vector
-		 * s1,s2 is short; we must use the same bound as the
-		 * verifier.
-		 *
-		 * If the signature is acceptable, then we return only s2
-		 * (the verifier recomputes s1 from s2, the hashed message,
-		 * and the public key).
-		 */
-		sampler_context spc;
-		samplerZ samp;
-		void *samp_ctx;
-
-		/*
-		 * Normal sampling. We use a fast PRNG seeded from our
-		 * SHAKE context ('rng').
-		 */
-		spc.sigma_min = fpr_sigma_min[logn];
 		Zf(prng_init)(&spc.p, rng);
-		samp = Zf(sampler);
-		samp_ctx = &spc;
-
-		/*
-		 * Do the actual signature.
-		 */
-		if (do_sign_tree(samp, samp_ctx, sig,
-			expanded_key, hm, logn, ftmp))
-		{
-			break;
-		}
-	}
+	} while (!Zf(inner_do_sign)((void *)&spc, sig, f, g, hm, logn, isigma_sig, tmp));
 }
 
 /* see inner.h */
 void
-Zf(sign_dyn)(int16_t *sig, inner_shake256_context *rng,
+Zf(complete_sign)(inner_shake256_context *rng,
+	int16_t *restrict s0, int16_t *restrict s1,
 	const int8_t *restrict f, const int8_t *restrict g,
 	const int8_t *restrict F, const int8_t *restrict G,
-	const uint16_t *hm, unsigned logn, uint8_t *tmp)
+	const int8_t *restrict hm, unsigned logn, fpr isigma_sig,
+	uint8_t *restrict tmp)
 {
-	fpr *ftmp;
-
-	ftmp = (fpr *)tmp;
-	for (;;) {
+	sampler_context spc;
+	spc.sigma_min = fpr_sigma_min[logn];
+	do {
 		/*
-		 * Signature produces short vectors s1 and s2. The
-		 * signature is acceptable only if the aggregate vector
-		 * s1,s2 is short; we must use the same bound as the
-		 * verifier.
+		 * Signature produces short vectors s0 and s1. The signature is
+		 * acceptable only if Tr((s0,s1) Q (s0,s1)^H) is short.
 		 *
-		 * If the signature is acceptable, then we return only s2
-		 * (the verifier recomputes s1 from s2, the hashed message,
-		 * and the public key).
+		 * If the signature is acceptable, we return only s1. A value for s0
+		 * can be found with Babai's Nearest Plane Algorithm that gives a short
+		 * trace as above.
+		 *
+		 * We use a fast PRNG seeded from SHAKE context for gaussian sampling.
 		 */
-		sampler_context spc;
-		samplerZ samp;
-		void *samp_ctx;
-
-		/*
-		 * Normal sampling. We use a fast PRNG seeded from our
-		 * SHAKE context ('rng').
-		 */
-		spc.sigma_min = fpr_sigma_min[logn];
 		Zf(prng_init)(&spc.p, rng);
-		samp = Zf(sampler);
-		samp_ctx = &spc;
-
-		/*
-		 * Do the actual signature.
-		 */
-		if (do_sign_dyn(samp, samp_ctx, sig,
-			f, g, F, G, hm, logn, ftmp))
-		{
-			break;
-		}
-	}
+	} while (!Zf(inner_do_complete_sign)((void *)&spc,
+			s0, s1, f, g, F, G, hm, logn, isigma_sig, tmp));
 }
+

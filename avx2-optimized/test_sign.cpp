@@ -13,18 +13,13 @@
 // x86_64 specific:
 #include<sys/time.h>
 
-// Let C-code work with the C++ compiler:
-#ifndef restrict
-#define restrict   __restrict
-#endif
+extern "C" {
+	#ifndef restrict
+		#define restrict
+	#endif
 
-#include "codec.c"
-#include "common.c"
-#include "fft.c"
-#include "fpr.c"
-#include "rng.c"
-#include "shake.c"
-#include "lilipu_keygen.c"
+	#include "inner.h"
+}
 
 // Simple randomness generator:
 void randombytes(unsigned char *x, unsigned long long xlen) {
@@ -70,21 +65,21 @@ WorkerResult measure_signatures(fpr isigma_kg, fpr isigma_sig, fpr verif_bound) 
 
 	for (int rep = 0; rep < n_repetitions; rep++) {
 		// Generate key pair.
-		lilipu_keygen(&sc, f, g, F, G, q00, q10, q11, logn, b, isigma_kg);
+		Zf(keygen)(&sc, f, g, F, G, q00, q10, q11, logn, b, isigma_kg);
 
 		// make a signature of a random message...
 		randombytes((unsigned char *)h, sizeof h);
 
 		// Compute the signature.
-		lilipu_complete_sign(&sc, s0, s1, f, g, F, G, h, logn, isigma_sig, b);
+		Zf(complete_sign)(&sc, s0, s1, f, g, F, G, h, logn, isigma_sig, b);
 
-		if (!lilipu_complete_verify(h, s0, s1, q00, q10, q11, logn, verif_bound, b))
+		if (!Zf(complete_verify)(h, s0, s1, q00, q10, q11, logn, verif_bound, b))
 			result.num_invalid++;
 
-		if (!lilipu_verify(h, reconstructed_s0, s1, q00, q10, q11, logn, verif_bound, b))
+		if (!Zf(verify)(h, reconstructed_s0, s1, q00, q10, q11, logn, verif_bound, b))
 			result.num_babai_fail++;
 		else
-			assert(lilipu_complete_verify(h, reconstructed_s0, s1, q00, q10, q11, logn, verif_bound, b));
+			assert(Zf(complete_verify)(h, reconstructed_s0, s1, q00, q10, q11, logn, verif_bound, b));
 
 		for (size_t u = 0; u < n; u++) {
 			if (s0[u] != reconstructed_s0[u]) {

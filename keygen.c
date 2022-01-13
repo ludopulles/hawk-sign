@@ -31,8 +31,6 @@
 
 #include "inner.h"
 
-#define MKN(logn)   ((size_t)1 << (logn))
-
 /* ==================================================================== */
 /*
  * Modular arithmetics.
@@ -2205,162 +2203,7 @@ poly_sub_scaled_ntt(uint32_t *restrict F, size_t Flen, size_t Fstride,
 
 /* ==================================================================== */
 
-
-#define RNG_CONTEXT   inner_shake256_context
-
 /*
- * Get a random 8-byte integer from a SHAKE-based RNG. This function
- * ensures consistent interpretation of the SHAKE output so that
- * the same values will be obtained over different platforms, in case
- * a known seed is used.
- */
-static inline uint64_t
-get_rng_u64(inner_shake256_context *rng)
-{
-	/*
-	 * We enforce little-endian representation.
-	 */
-
-	uint8_t tmp[8];
-
-	inner_shake256_extract(rng, tmp, sizeof tmp);
-	return (uint64_t)tmp[0]
-		| ((uint64_t)tmp[1] << 8)
-		| ((uint64_t)tmp[2] << 16)
-		| ((uint64_t)tmp[3] << 24)
-		| ((uint64_t)tmp[4] << 32)
-		| ((uint64_t)tmp[5] << 40)
-		| ((uint64_t)tmp[6] << 48)
-		| ((uint64_t)tmp[7] << 56);
-}
-
-
-/*
- * Table below incarnates a discrete Gaussian distribution:
- *    D(x) = exp(-(x^2)/(2*sigma^2))
- * where sigma = 1.17*sqrt(q/(2*N)), q = 12289, and N = 1024.
- * Element 0 of the table is P(x = 0).
- * For k > 0, element k is P(x >= k+1 | x > 0).
- * Probabilities are scaled up by 2^63.
- */
-static const uint64_t gauss_1024_12289[] = {
-	 1283868770400643928u,  6416574995475331444u,  4078260278032692663u,
-	 2353523259288686585u,  1227179971273316331u,   575931623374121527u,
-	  242543240509105209u,    91437049221049666u,    30799446349977173u,
-	    9255276791179340u,     2478152334826140u,      590642893610164u,
-	     125206034929641u,       23590435911403u,        3948334035941u,
-	        586753615614u,          77391054539u,           9056793210u,
-	           940121950u,             86539696u,              7062824u,
-	              510971u,                32764u,                 1862u,
-	                  94u,                    4u,                    0u
-};
-
-/*
- * Generate a random value with a Gaussian distribution centered on 0.
- * The RNG must be ready for extraction (already flipped).
- *
- * Distribution has standard deviation 1.17*sqrt(q/(2*N)). The
- * precomputed table is for N = 1024. Since the sum of two independent
- * values of standard deviation sigma has standard deviation
- * sigma*sqrt(2), then we can just generate more values and add them
- * together for lower dimensions.
- */
-static int
-mkgauss(RNG_CONTEXT *rng, unsigned logn)
-{
-	unsigned u, g;
-	int val;
-
-	g = 1U << (10 - logn);
-	val = 0;
-	for (u = 0; u < g; u ++) {
-		/*
-		 * Each iteration generates one value with the
-		 * Gaussian distribution for N = 1024.
-		 *
-		 * We use two random 64-bit values. First value
-		 * decides on whether the generated value is 0, and,
-		 * if not, the sign of the value. Second random 64-bit
-		 * word is used to generate the non-zero value.
-		 *
-		 * For constant-time code we have to read the complete
-		 * table. This has negligible cost, compared with the
-		 * remainder of the keygen process (solving the NTRU
-		 * equation).
-		 */
-		uint64_t r;
-		uint32_t f, v, k, neg;
-
-		/*
-		 * First value:
-		 *  - flag 'neg' is randomly selected to be 0 or 1.
-		 *  - flag 'f' is set to 1 if the generated value is zero,
-		 *    or set to 0 otherwise.
-		 */
-		r = get_rng_u64(rng);
-		neg = (uint32_t)(r >> 63);
-		r &= ~((uint64_t)1 << 63);
-		f = (uint32_t)((r - gauss_1024_12289[0]) >> 63);
-
-		/*
-		 * We produce a new random 63-bit integer r, and go over
-		 * the array, starting at index 1. We store in v the
-		 * index of the first array element which is not greater
-		 * than r, unless the flag f was already 1.
-		 */
-		v = 0;
-		r = get_rng_u64(rng);
-		r &= ~((uint64_t)1 << 63);
-		for (k = 1; k < (sizeof gauss_1024_12289)
-			/ (sizeof gauss_1024_12289[0]); k ++)
-		{
-			uint32_t t;
-
-			t = (uint32_t)((r - gauss_1024_12289[k]) >> 63) ^ 1;
-			v |= k & -(t & (f ^ 1));
-			f |= t;
-		}
-
-		/*
-		 * We apply the sign ('neg' flag). If the value is zero,
-		 * the sign has no effect.
-		 */
-		v = (v ^ -neg) + neg;
-
-		/*
-		 * Generated value is added to val.
-		 */
-		val += *(int32_t *)&v;
-	}
-	return val;
-}
-
-/*
- * The MAX_BL_SMALL[] and MAX_BL_LARGE[] contain the lengths, in 31-bit
- * words, of intermediate values in the computation:
- *
- *   MAX_BL_SMALL[depth]: length for the input f and g at that depth
- *   MAX_BL_LARGE[depth]: length for the unreduced F and G at that depth
- *
- * Rules:
- *
- *  - Within an array, values grow.
- *
- *  - The 'SMALL' array must have an entry for maximum depth, corresponding
- *    to the size of values used in the binary GCD. There is no such value
- *    for the 'LARGE' array (the binary GCD yields already reduced
- *    coefficients).
- *
- *  - MAX_BL_LARGE[depth] >= MAX_BL_SMALL[depth + 1].
- *
- *  - Values must be large enough to handle the common cases, with some
- *    margins.
- *
- *  - Values must not be "too large" either because we will convert some
- *    integers into floating-point values by considering the top 10 words,
- *    i.e. 310 bits; hence, for values of length more than 10 words, we
- *    should take care to have the length centered on the expected size.
- *
  * The following average lengths, in bits, have been measured on thousands
  * of random keys (fg = max length of the absolute value of coefficients
  * of f and g at that depth; FG = idem for the unreduced F and G; for the
@@ -2368,17 +2211,16 @@ mkgauss(RNG_CONTEXT *rng, unsigned logn)
  * for each value, the average and standard deviation are provided).
  *
  * Binary case:
- *    depth: 10    fg: 6307.52 (24.48)    FG: 6319.66 (24.51)
- *    depth:  9    fg: 3138.35 (12.25)    FG: 9403.29 (27.55)
- *    depth:  8    fg: 1576.87 ( 7.49)    FG: 4703.30 (14.77)
- *    depth:  7    fg:  794.17 ( 4.98)    FG: 2361.84 ( 9.31)
- *    depth:  6    fg:  400.67 ( 3.10)    FG: 1188.68 ( 6.04)
- *    depth:  5    fg:  202.22 ( 1.87)    FG:  599.81 ( 3.87)
- *    depth:  4    fg:  101.62 ( 1.02)    FG:  303.49 ( 2.38)
- *    depth:  3    fg:   50.37 ( 0.53)    FG:  153.65 ( 1.39)
- *    depth:  2    fg:   24.07 ( 0.25)    FG:   78.20 ( 0.73)
- *    depth:  1    fg:   10.99 ( 0.08)    FG:   39.82 ( 0.41)
- *    depth:  0    fg:    4.00 ( 0.00)    FG:   19.61 ( 0.49)
+ *    depth:  9    fg: 2369.72 (24.19)    FG:  2367.83 (24.18)
+ *    depth:  8    fg: 1184.95 (12.09)    FG:  3535.44 (32.19)
+ *    depth:  7    fg:  598.30 ( 7.09)    FG:  1772.94 (16.40)
+ *    depth:  6    fg:  302.97 ( 4.17)    FG:  893.58 (9.30)
+ *    depth:  5    fg:  153.62 ( 2.40)    FG:  451.73 (5.47)
+ *    depth:  4    fg:   77.63 ( 1.31)    FG:  228.97 (3.18)
+ *    depth:  3    fg:   38.68 ( 0.67)    FG:  116.22 (1.76)
+ *    depth:  2    fg:   18.62 ( 0.49)    FG:  58.89 (0.95)
+ *    depth:  1    fg:    8.05 ( 0.21)    FG:  29.77 (0.52)
+ *    depth:  0    fg:    3.00 ( 0.04)    FG:  15.00 (0.14)
  *
  * Integers are actually represented either in binary notation over
  * 31-bit words (signed, using two's complement), or in RNS, modulo
@@ -2389,14 +2231,20 @@ mkgauss(RNG_CONTEXT *rng, unsigned logn)
  * IMPORTANT: if these values are modified, then the temporary buffer
  * sizes (FALCON_KEYGEN_TEMP_*, in inner.h) must be recomputed
  * accordingly.
- */
+ *
+ * Note, to get the values in MAX_BL_SMALL and MAX_BL_LARGE,
+ * take ceil( (avg + 6 stddev) / 31 ) to arrive at the number of ints used to
+ * represent a number at a certain depth.
+*/
 
-static const size_t MAX_BL_SMALL[] = {
-	1, 1, 2, 2, 4, 7, 14, 27, 53, 106, 209
+static const size_t MAX_BL_SMALL[10] = {
+//  1, 1, 2, 2, 4, 7, 14, 27, 53, 106, 209 // (FALCON)
+	1, 1, 2, 2, 4, 6, 11, 21, 41,  82 //, ??
 };
 
-static const size_t MAX_BL_LARGE[] = {
-	2, 2, 5, 7, 12, 21, 40, 78, 157, 308
+static const size_t MAX_BL_LARGE[9] = {
+//	2, 2, 5, 7, 12, 21, 40, 78, 157, 308 // (FALCON)
+	2, 2, 3, 5, 8, 16, 31, 61, 121 //, ??
 };
 
 /*
@@ -2407,18 +2255,18 @@ static const size_t MAX_BL_LARGE[] = {
 static const struct {
 	int avg;
 	int std;
-} BITLENGTH[] = {
-	{    4,  0 },
-	{   11,  1 },
-	{   24,  1 },
-	{   50,  1 },
-	{  102,  1 },
-	{  202,  2 },
-	{  401,  4 },
-	{  794,  5 },
-	{ 1577,  8 },
-	{ 3138, 13 },
-	{ 6308, 25 }
+} BITLENGTH[10] = {
+	{ 4, 0 },
+	{ 9, 1 },
+	{ 19, 1 },
+	{ 39, 1 },
+	{ 78, 2 },
+	{ 154, 3 },
+	{ 303, 4 },
+	{ 599, 7 },
+	{ 1185, 12 },
+	{ 2370, 24 }
+	// , { ???, ??? }
 };
 
 /*
@@ -2426,29 +2274,6 @@ static const struct {
  * when reconstructing f and g.
  */
 #define DEPTH_INT_FG   4
-
-/*
- * Compute squared norm of a short vector. Returned value is saturated to
- * 2^32-1 if it is not lower than 2^31.
- */
-static uint32_t
-poly_small_sqnorm(const int8_t *f, unsigned logn)
-{
-	size_t n, u;
-	uint32_t s, ng;
-
-	n = MKN(logn);
-	s = 0;
-	ng = 0;
-	for (u = 0; u < n; u ++) {
-		int32_t z;
-
-		z = f[u];
-		s += (uint32_t)(z * z);
-		ng |= s;
-	}
-	return s | -(ng >> 31);
-}
 
 /*
  * Align (upwards) the provided 'data' pointer with regards to 'base'
@@ -2502,6 +2327,46 @@ poly_small_to_fp(fpr *x, const int8_t *f, unsigned logn)
 	for (u = 0; u < n; u ++) {
 		x[u] = fpr_of(f[u]);
 	}
+}
+
+// =============================================================================
+/*
+ * Generate a random polynomial with a Gaussian distribution. This function
+ * also makes sure that the resultant of the polynomial with phi is odd.
+ */
+static void
+poly_small_mkgauss(void *samp_ctx, int8_t *f, unsigned logn, fpr isigma_kg, int lim)
+{
+	size_t n, u;
+	int s;
+	unsigned mod2;
+
+	n = MKN(logn);
+	mod2 = 0;
+
+	for (u = n; u -- > 1; ) {
+		do {
+			s = Zf(sampler)(samp_ctx, fpr_zero, isigma_kg);
+			/*
+			 * We need the coefficient to fit within -127..+127;
+			 * realistically, this is always the case except for
+			 * the very low degrees (N = 2 or 4), for which there
+			 * is no real security anyway.
+			 */
+		} while (s <= -lim || s >= lim);
+		mod2 ^= (unsigned)(s & 1);
+		f[u] = (int8_t)s;
+	}
+
+	do {
+		s = Zf(sampler)(samp_ctx, fpr_zero, isigma_kg);
+		/*
+		 * We need the sum of all coefficients to be 1; otherwise,
+		 * the resultant of the polynomial with X^N+1 will be even,
+		 * and the binary GCD will fail.
+		 */
+	} while (s <= -lim || s >= lim || mod2 == (unsigned)(s & 1));
+	f[0] = (int8_t)s;
 }
 
 /*
@@ -2698,9 +2563,9 @@ make_fg(uint32_t *data, const int8_t *f, const int8_t *g,
 }
 
 /*
- * Solving the NTRU equation, deepest level: compute the resultants of
- * f and g with X^N+1, and use binary GCD. The F and G values are
- * returned in tmp[].
+ * Solving the NTRU equation for q = 1, deepest level: compute the resultants
+ * of f and g with X^N+1, and use binary GCD. The F and G values are returned
+ * in tmp[].
  *
  * Returned value: 1 on success, 0 on error.
  */
@@ -2709,7 +2574,7 @@ solve_NTRU_deepest(unsigned logn_top,
 	const int8_t *f, const int8_t *g, uint32_t *tmp)
 {
 	size_t len;
-	uint32_t *Fp, *Gp, *fp, *gp, *t1, q;
+	uint32_t *Fp, *Gp, *fp, *gp, *t1;
 	const small_prime *primes;
 
 	len = MAX_BL_SMALL[logn_top];
@@ -2738,34 +2603,9 @@ solve_NTRU_deepest(unsigned logn_top,
 	 * imply failure of the NTRU solving equation, and the (f,g)
 	 * values will be abandoned in that case.
 	 */
-	if (!zint_bezout(Gp, Fp, fp, gp, len, t1)) {
-		return 0;
-	}
-
-	/*
-	 * Multiply the two values by the target value q. Values must
-	 * fit in the destination arrays.
-	 * We can again test on the returned words: a non-zero output
-	 * of zint_mul_small() means that we exceeded our array
-	 * capacity, and that implies failure and rejection of (f,g).
-	 */
-	q = 12289;
-	if (zint_mul_small(Fp, len, q) != 0
-		|| zint_mul_small(Gp, len, q) != 0)
-	{
-		return 0;
-	}
-
-	return 1;
+	return zint_bezout(Gp, Fp, fp, gp, len, t1);
 }
 
-/*
- * Solving the NTRU equation, intermediate level. Upon entry, the F and G
- * from the previous level should be in the tmp[] array.
- * This function MAY be invoked for the top-level (in which case depth = 0).
- *
- * Returned value: 1 on success, 0 on error.
- */
 static int
 solve_NTRU_intermediate(unsigned logn_top,
 	const int8_t *f, const int8_t *g, unsigned depth, uint32_t *tmp)
@@ -2844,20 +2684,20 @@ solve_NTRU_intermediate(unsigned logn_top,
 	 * and store the values in Ft and Gt (only n/2 values in each).
 	 */
 	for (u = 0; u < llen; u ++) {
-		uint32_t p, p0i, R2, Rx;
+		uint32_t p, p0i, R2p, Rx;
 		size_t v;
 		uint32_t *xs, *ys, *xd, *yd;
 
 		p = primes[u].p;
 		p0i = modp_ninv31(p);
-		R2 = modp_R2(p, p0i);
-		Rx = modp_Rx((unsigned)dlen, p, p0i, R2);
+		R2p = modp_R2(p, p0i);
+		Rx = modp_Rx((unsigned)dlen, p, p0i, R2p);
 		for (v = 0, xs = Fd, ys = Gd, xd = Ft + u, yd = Gt + u;
 			v < hn;
 			v ++, xs += dlen, ys += dlen, xd += llen, yd += llen)
 		{
-			*xd = zint_mod_small_signed(xs, dlen, p, p0i, R2, Rx);
-			*yd = zint_mod_small_signed(ys, dlen, p, p0i, R2, Rx);
+			*xd = zint_mod_small_signed(xs, dlen, p, p0i, R2p, Rx);
+			*yd = zint_mod_small_signed(ys, dlen, p, p0i, R2p, Rx);
 		}
 	}
 
@@ -2869,7 +2709,7 @@ solve_NTRU_intermediate(unsigned logn_top,
 	 * Compute our F and G modulo sufficiently many small primes.
 	 */
 	for (u = 0; u < llen; u ++) {
-		uint32_t p, p0i, R2;
+		uint32_t p, p0i, R2p;
 		uint32_t *gm, *igm, *fx, *gx, *Fp, *Gp;
 		size_t v;
 
@@ -2878,7 +2718,7 @@ solve_NTRU_intermediate(unsigned logn_top,
 		 */
 		p = primes[u].p;
 		p0i = modp_ninv31(p);
-		R2 = modp_R2(p, p0i);
+		R2p = modp_R2(p, p0i);
 
 		/*
 		 * If we processed slen words, then f and g have been
@@ -2908,14 +2748,14 @@ solve_NTRU_intermediate(unsigned logn_top,
 		} else {
 			uint32_t Rx;
 
-			Rx = modp_Rx((unsigned)slen, p, p0i, R2);
+			Rx = modp_Rx((unsigned)slen, p, p0i, R2p);
 			for (v = 0, x = ft, y = gt;
 				v < n; v ++, x += slen, y += slen)
 			{
 				fx[v] = zint_mod_small_signed(x, slen,
-					p, p0i, R2, Rx);
+					p, p0i, R2p, Rx);
 				gx[v] = zint_mod_small_signed(y, slen,
-					p, p0i, R2, Rx);
+					p, p0i, R2p, Rx);
 			}
 			modp_NTT2(fx, gm, logn, p, p0i);
 			modp_NTT2(gx, gm, logn, p, p0i);
@@ -2977,8 +2817,8 @@ solve_NTRU_intermediate(unsigned logn_top,
 			ftB = fx[(v << 1) + 1];
 			gtA = gx[(v << 1) + 0];
 			gtB = gx[(v << 1) + 1];
-			mFp = modp_montymul(Fp[v], R2, p, p0i);
-			mGp = modp_montymul(Gp[v], R2, p, p0i);
+			mFp = modp_montymul(Fp[v], R2p, p, p0i);
+			mGp = modp_montymul(Gp[v], R2p, p, p0i);
 			x[0] = modp_montymul(gtB, mFp, p, p0i);
 			x[llen] = modp_montymul(gtA, mFp, p, p0i);
 			y[0] = modp_montymul(ftB, mGp, p, p0i);
@@ -3079,6 +2919,7 @@ solve_NTRU_intermediate(unsigned logn_top,
 	 * computed so that average maximum length will fall in the
 	 * middle or the upper half of these top 10 words.
 	 */
+
 	rlen = (slen > 10) ? 10 : slen;
 	poly_big_to_fp(rt3, ft + slen - rlen, rlen, slen, logn);
 	poly_big_to_fp(rt4, gt + slen - rlen, rlen, slen, logn);
@@ -3101,6 +2942,7 @@ solve_NTRU_intermediate(unsigned logn_top,
 	 * Compute 1/(f*adj(f)+g*adj(g)) in rt5. We also keep adj(f)
 	 * and adj(g) in rt3 and rt4, respectively.
 	 */
+
 	Zf(FFT)(rt3, logn);
 	Zf(FFT)(rt4, logn);
 	Zf(poly_invnorm2_fft)(rt5, rt3, rt4, logn);
@@ -3154,9 +2996,13 @@ solve_NTRU_intermediate(unsigned logn_top,
 		 * scaling if the current length is more than 10 words.
 		 */
 		rlen = (FGlen > 10) ? 10 : FGlen;
-		scale_FG = 31 * (int)(FGlen - rlen);
 		poly_big_to_fp(rt1, Ft + FGlen - rlen, rlen, llen, logn);
 		poly_big_to_fp(rt2, Gt + FGlen - rlen, rlen, llen, logn);
+
+		/*
+		 * Values in rt1 and rt2 are downscaled by 2^(scale_FG).
+		 */
+		scale_FG = 31 * (int)(FGlen - rlen);
 
 		/*
 		 * Compute (F*adj(f)+G*adj(g))/(f*adj(f)+g*adj(g)) in rt2.
@@ -3239,15 +3085,11 @@ solve_NTRU_intermediate(unsigned logn_top,
 		sch = (uint32_t)(scale_k / 31);
 		scl = (uint32_t)(scale_k % 31);
 		if (depth <= DEPTH_INT_FG) {
-			poly_sub_scaled_ntt(Ft, FGlen, llen, ft, slen, slen,
-				k, sch, scl, logn, t1);
-			poly_sub_scaled_ntt(Gt, FGlen, llen, gt, slen, slen,
-				k, sch, scl, logn, t1);
+			poly_sub_scaled_ntt(Ft, FGlen, llen, ft, slen, slen, k, sch, scl, logn, t1);
+			poly_sub_scaled_ntt(Gt, FGlen, llen, gt, slen, slen, k, sch, scl, logn, t1);
 		} else {
-			poly_sub_scaled(Ft, FGlen, llen, ft, slen, slen,
-				k, sch, scl, logn);
-			poly_sub_scaled(Gt, FGlen, llen, gt, slen, slen,
-				k, sch, scl, logn);
+			poly_sub_scaled(Ft, FGlen, llen, ft, slen, slen, k, sch, scl, logn);
+			poly_sub_scaled(Gt, FGlen, llen, gt, slen, slen, k, sch, scl, logn);
 		}
 
 		/*
@@ -3954,19 +3796,22 @@ solve_NTRU_binary_depth0(unsigned logn,
 	return 1;
 }
 
+
+/* ==================================================================== */
+
 /*
- * Solve the NTRU equation. Returned value is 1 on success, 0 on error.
- * G can be NULL, in which case that value is computed but not returned.
- * If any of the coefficients of F and G exceeds lim (in absolute value),
- * then 0 is returned.
+ * Solve the NTRU equation, but now for q = 1. Returned value is 1 on success,
+ * 0 on error.  G can be NULL, in which case that value is computed but not
+ * returned.  If any of the coefficients of F and G exceeds lim (in absolute
+ * value), then 0 is returned.
  */
 static int
 solve_NTRU(unsigned logn, int8_t *F, int8_t *G,
 	const int8_t *f, const int8_t *g, int lim, uint32_t *tmp)
 {
-	size_t n, u;
+	size_t n, u, depth;
 	uint32_t *ft, *gt, *Ft, *Gt, *gm;
-	uint32_t p, p0i, r;
+	uint32_t p, p0i, r, z;
 	const small_prime *primes;
 
 	n = MKN(logn);
@@ -3975,42 +3820,31 @@ solve_NTRU(unsigned logn, int8_t *F, int8_t *G,
 		return 0;
 	}
 
-	/*
-	 * For logn <= 2, we need to use solve_NTRU_intermediate()
-	 * directly, because coefficients are a bit too large and
-	 * do not fit the hypotheses in solve_NTRU_binary_depth0().
-	 */
+	depth = logn;
 	if (logn <= 2) {
-		unsigned depth;
-
-		depth = logn;
 		while (depth -- > 0) {
 			if (!solve_NTRU_intermediate(logn, f, g, depth, tmp)) {
 				return 0;
 			}
 		}
 	} else {
-		unsigned depth;
-
-		depth = logn;
 		while (depth -- > 2) {
 			if (!solve_NTRU_intermediate(logn, f, g, depth, tmp)) {
 				return 0;
 			}
 		}
+		/*
+		 * Note: we are not making a  version of these two functions.
+		 * We can do this since the numbers are <2^64 with overwhelming probability,
+		 * and therefore, MAX_BL_* and MAX_BL_* are equal.
+		 */
 		if (!solve_NTRU_binary_depth1(logn, f, g, tmp)) {
 			return 0;
 		}
+
 		if (!solve_NTRU_binary_depth0(logn, f, g, tmp)) {
 			return 0;
 		}
-	}
-
-	/*
-	 * If no buffer has been provided for G, use a temporary one.
-	 */
-	if (G == NULL) {
-		G = (int8_t *)(tmp + 2 * n);
 	}
 
 	/*
@@ -4024,9 +3858,9 @@ solve_NTRU(unsigned logn, int8_t *F, int8_t *G,
 	}
 
 	/*
-	 * Verify that the NTRU equation is fulfilled. Since all elements
-	 * have short lengths, verifying modulo a small prime p works, and
-	 * allows using the NTT.
+	 * Verify that the NTRU equation is fulfilled for q = 1. Since all elements
+	 * have short lengths, verifying modulo a small prime p works, and allows
+	 * using the NTT.
 	 *
 	 * We put Gt[] first in tmp[], and process it first, so that it does
 	 * not overlap with G[] in case we allocated it ourselves.
@@ -4053,10 +3887,10 @@ solve_NTRU(unsigned logn, int8_t *F, int8_t *G,
 	modp_NTT2(gt, gm, logn, p, p0i);
 	modp_NTT2(Ft, gm, logn, p, p0i);
 	modp_NTT2(Gt, gm, logn, p, p0i);
-	r = modp_montymul(12289, 1, p, p0i);
-	for (u = 0; u < n; u ++) {
-		uint32_t z;
 
+	// Changed: use q=1
+	r = modp_montymul(1, 1, p, p0i);
+	for (u = 0; u < n; u ++) {
 		z = modp_sub(modp_montymul(ft[u], Gt[u], p, p0i),
 			modp_montymul(gt[u], Ft[u], p, p0i), p);
 		if (z != r) {
@@ -4067,55 +3901,15 @@ solve_NTRU(unsigned logn, int8_t *F, int8_t *G,
 	return 1;
 }
 
-/*
- * Generate a random polynomial with a Gaussian distribution. This function
- * also makes sure that the resultant of the polynomial with phi is odd.
- */
-static void
-poly_small_mkgauss(RNG_CONTEXT *rng, int8_t *f, unsigned logn)
-{
-	size_t n, u;
-	unsigned mod2;
+/* =================================================================== */
 
-	n = MKN(logn);
-	mod2 = 0;
-	for (u = 0; u < n; u ++) {
-		int s;
-
-	restart:
-		s = mkgauss(rng, logn);
-
-		/*
-		 * We need the coefficient to fit within -127..+127;
-		 * realistically, this is always the case except for
-		 * the very low degrees (N = 2 or 4), for which there
-		 * is no real security anyway.
-		 */
-		if (s < -127 || s > 127) {
-			goto restart;
-		}
-
-		/*
-		 * We need the sum of all coefficients to be 1; otherwise,
-		 * the resultant of the polynomial with X^N+1 will be even,
-		 * and the binary GCD will fail.
-		 */
-		if (u == n - 1) {
-			if ((mod2 ^ (unsigned)(s & 1)) == 0) {
-				goto restart;
-			}
-		} else {
-			mod2 ^= (unsigned)(s & 1);
-		}
-		f[u] = (int8_t)s;
-	}
-}
-
-/* see falcon.h */
+/* see inner.h */
 void
 Zf(keygen)(inner_shake256_context *rng,
-	int8_t *f, int8_t *g, int8_t *F, int8_t *G, uint16_t *h,
-	unsigned logn, uint8_t *tmp)
+	int8_t *restrict f, int8_t *restrict g, // secret key
+	int8_t *restrict F, int8_t *restrict G, // secret key
+	fpr *restrict q00, fpr *restrict q10, fpr *restrict q11, // public key
+	unsigned logn, uint8_t *restrict tmp, fpr isigma_kg)
 {
 	/*
 	 * Algorithm is the following:
@@ -4124,58 +3918,33 @@ Zf(keygen)(inner_shake256_context *rng,
 	 *
 	 *  - If either Res(f,phi) or Res(g,phi) is even, try again.
 	 *
-	 *  - If ||(f,g)|| is too large, try again.
-	 *
-	 *  - If ||B~_{f,g}|| is too large, try again.
-	 *
-	 *  - If f is not invertible mod phi mod q, try again.
-	 *
-	 *  - Compute h = g/f mod phi mod q.
-	 *
-	 *  - Solve the NTRU equation fG - gF = q; if the solving fails,
+	 *  - Solve the NTRU equation fG - gF = 1; if the solving fails,
 	 *    try again. Usual failure condition is when Res(f,phi)
 	 *    and Res(g,phi) are not prime to each other.
 	 */
-	size_t n, u;
-	uint16_t *h2, *tmp2;
-	RNG_CONTEXT *rc;
+	size_t n;
 
 	n = MKN(logn);
-	rc = rng;
 
 	/*
-	 * We need to generate f and g randomly, until we find values
-	 * such that the norm of (g,-f), and of the orthogonalized
-	 * vector, are satisfying. The orthogonalized vector is:
-	 *   (q*adj(f)/(f*adj(f)+g*adj(g)), q*adj(g)/(f*adj(f)+g*adj(g)))
-	 * (it is actually the (N+1)-th row of the Gram-Schmidt basis).
-	 *
 	 * In the binary case, coefficients of f and g are generated
 	 * independently of each other, with a discrete Gaussian
-	 * distribution of standard deviation 1.17*sqrt(q/(2*N)). Then,
-	 * the two vectors have expected norm 1.17*sqrt(q), which is
-	 * also our acceptance bound: we require both vectors to be no
-	 * larger than that (this will be satisfied about 1/4th of the
-	 * time, thus we expect sampling new (f,g) about 4 times for that
-	 * step).
+	 * distribution of standard deviation 1/isigma_kg. Then,
+	 * the two vectors have expected norm 2n/isigma_kg.
 	 *
 	 * We require that Res(f,phi) and Res(g,phi) are both odd (the
 	 * NTRU equation solver requires it).
 	 */
 	for (;;) {
-		fpr *rt1, *rt2, *rt3;
-		fpr bnorm;
-		uint32_t normf, normg, norm;
+		fpr *rt1, *rt2;
 		int lim;
 
-		/*
-		 * The poly_small_mkgauss() function makes sure
-		 * that the sum of coefficients is 1 modulo 2
-		 * (i.e. the resultant of the polynomial with phi
-		 * will be odd).
-		 */
-		poly_small_mkgauss(rc, f, logn);
-		poly_small_mkgauss(rc, g, logn);
+		// Normal sampling. We use a fast PRNG seeded from our SHAKE context ('rng').
+		sampler_context spc;
+		void *samp_ctx;
+		spc.sigma_min = fpr_sigma_min[logn];
+		Zf(prng_init)(&spc.p, rng);
+		samp_ctx = &spc;
 
 		/*
 		 * Verify that all coefficients are within the bounds
@@ -4183,87 +3952,41 @@ Zf(keygen)(inner_shake256_context *rng,
 		 * overwhelming probability; this guarantees that the
 		 * key will be encodable with FALCON_COMP_TRIM.
 		 */
-		lim = 1 << (Zf(max_fg_bits)[logn] - 1);
-		for (u = 0; u < n; u ++) {
-			/*
-			 * We can use non-CT tests since on any failure
-			 * we will discard f and g.
-			 */
-			if (f[u] >= lim || f[u] <= -lim
-				|| g[u] >= lim || g[u] <= -lim)
-			{
-				lim = -1;
-				break;
-			}
-		}
-		if (lim < 0) {
-			continue;
-		}
+		lim = 128; // 1 << (Zf(max_fg_bits)[logn] - 1);
+		poly_small_mkgauss(samp_ctx, f, logn, isigma_kg, lim);
+		poly_small_mkgauss(samp_ctx, g, logn, isigma_kg, lim);
 
-		/*
-		 * Bound is 1.17*sqrt(q). We compute the squared
-		 * norms. With q = 12289, the squared bound is:
-		 *   (1.17^2)* 12289 = 16822.4121
-		 * Since f and g are integral, the squared norm
-		 * of (g,-f) is an integer.
-		 */
-		normf = poly_small_sqnorm(f, logn);
-		normg = poly_small_sqnorm(g, logn);
-		norm = (normf + normg) | -((normf | normg) >> 31);
-		if (norm >= 16823) {
-			continue;
-		}
-
-		/*
-		 * We compute the orthogonalized vector norm.
-		 */
-		rt1 = (fpr *)tmp;
-		rt2 = rt1 + n;
-		rt3 = rt2 + n;
-		poly_small_to_fp(rt1, f, logn);
-		poly_small_to_fp(rt2, g, logn);
-		Zf(FFT)(rt1, logn);
-		Zf(FFT)(rt2, logn);
-		Zf(poly_invnorm2_fft)(rt3, rt1, rt2, logn);
-		Zf(poly_adj_fft)(rt1, logn);
-		Zf(poly_adj_fft)(rt2, logn);
-		Zf(poly_mulconst)(rt1, fpr_q, logn);
-		Zf(poly_mulconst)(rt2, fpr_q, logn);
-		Zf(poly_mul_autoadj_fft)(rt1, rt3, logn);
-		Zf(poly_mul_autoadj_fft)(rt2, rt3, logn);
-		Zf(iFFT)(rt1, logn);
-		Zf(iFFT)(rt2, logn);
-		bnorm = fpr_zero;
-		for (u = 0; u < n; u ++) {
-			bnorm = fpr_add(bnorm, fpr_sqr(rt1[u]));
-			bnorm = fpr_add(bnorm, fpr_sqr(rt2[u]));
-		}
-		if (!fpr_lt(bnorm, fpr_bnorm_max)) {
-			continue;
-		}
-
-		/*
-		 * Compute public key h = g/f mod X^N+1 mod q. If this
-		 * fails, we must restart.
-		 */
-		if (h == NULL) {
-			h2 = (uint16_t *)tmp;
-			tmp2 = h2 + n;
-		} else {
-			h2 = h;
-			tmp2 = (uint16_t *)tmp;
-		}
-		if (!Zf(compute_public)(h2, f, g, logn, (uint8_t *)tmp2)) {
-			continue;
-		}
-
-		/*
-		 * Solve the NTRU equation to get F and G.
-		 */
-		lim = (1 << (Zf(max_FG_bits)[logn] - 1)) - 1;
+		// Solve the NTRU equation to get F and G.
+		lim = 128; // (1 << (Zf(max_FG_bits)[logn] - 1)) - 1;
 		if (!solve_NTRU(logn, F, G, f, g, lim, (uint32_t *)tmp)) {
 			continue;
 		}
+
+		// Calculate q00, q10, q11 (in FFT representation) using
+		// Q = B * adj(B^{T})
+		rt1 = (fpr *)tmp;
+		rt2 = rt1 + n;
+		poly_small_to_fp(q00, f, logn);
+		poly_small_to_fp(rt1, g, logn);
+		poly_small_to_fp(q11, F, logn);
+		poly_small_to_fp(rt2, G, logn);
+		Zf(FFT)(q00, logn); // f
+		Zf(FFT)(rt1, logn); // g
+		Zf(FFT)(q11, logn); // F
+		Zf(FFT)(rt2, logn); // G
+
+		// q10 = F*adj(f) + G*adj(g)
+		Zf(poly_add_muladj_fft)(q10, q11, rt2, q00, rt1, logn);
+
+		// q00 = f*adj(f) + g*adj(g)
+		Zf(poly_mulselfadj_fft)(q00, logn); // f*adj(f)
+		Zf(poly_mulselfadj_fft)(rt1, logn); // g*adj(g)
+		Zf(poly_add)(q00, rt1, logn);
+
+		// q11 = F*bar(F) + G*bar(G)
+		Zf(poly_mulselfadj_fft)(q11, logn); // F*adj(F)
+		Zf(poly_mulselfadj_fft)(rt2, logn); // G*adj(G)
+		Zf(poly_add)(q11, rt2, logn);
 
 		/*
 		 * Key pair is generated.

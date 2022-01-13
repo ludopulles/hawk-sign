@@ -8,29 +8,13 @@
 // x86_64 specific:
 #include<sys/time.h>
 
-// #include "api.h"
-// #include "inner.h"
-#include "codec.c"
-#include "common.c"
-#include "fft.c"
-#include "fpr.c"
-// #include "keygen.c"
-// #include "nist.c"
-#include "rng.c"
-#include "shake.c"
-// #include "sign.c"
-#include "lilipu_keygen.c"
-// #include "vrfy.c"
+#include "inner.h"
 
-// See nist.c for info on how to use TEMPALLOC
-#define TEMPALLOC
-// See nist.c
-#define NONCELEN   40
-// See api.h
-#define CRYPTO_SECRETKEYBYTES   2305
-#define CRYPTO_PUBLICKEYBYTES   1793
-#define CRYPTO_BYTES            1330
-#define CRYPTO_ALGNAME          "Lilipu-1024"
+/*
+ * Compute degree N from logarithm 'logn'.
+ */
+#define MKN(logn)   ((size_t)1 << (logn))
+
 
 // Simple randomness generator:
 void randombytes(unsigned char *x, unsigned long long xlen) {
@@ -66,16 +50,16 @@ void to_sage16(const char *varname, const int16_t *f, unsigned logn) {
 const size_t logn = 9, n = MKN(logn);
 
 void benchmark_lilipu(fpr isigma_kg, fpr isigma_sig) {
-	TEMPALLOC union {
+	union {
 		uint8_t b[28 * 512];
 		uint64_t dummy_u64;
 		fpr dummy_fpr;
 	} tmp;
-	TEMPALLOC int8_t f[512], g[512], F[512], G[512], h[512];
-	TEMPALLOC fpr q00[512], q10[512], q11[512];
-	TEMPALLOC int16_t sig[512];
-	TEMPALLOC unsigned char seed[48];
-	TEMPALLOC inner_shake256_context sc;
+	int8_t f[512], g[512], F[512], G[512], h[512];
+	fpr q00[512], q10[512], q11[512];
+	int16_t sig[512];
+	unsigned char seed[48];
+	inner_shake256_context sc;
 
 	struct timeval t0, t1;
 	const int n_repetitions = 1000;
@@ -89,7 +73,7 @@ void benchmark_lilipu(fpr isigma_kg, fpr isigma_sig) {
 	gettimeofday(&t0, NULL);
 
 	// Generate key pair.
-	lilipu_keygen(&sc, f, g, F, G, q00, q10, q11, logn, tmp.b, isigma_kg);
+	Zf(keygen)(&sc, f, g, F, G, q00, q10, q11, logn, tmp.b, isigma_kg);
 
 	gettimeofday(&t1, NULL);
 	printf("Key generation took %lld microseconds\n", time_diff(&t0, &t1));
@@ -104,7 +88,7 @@ void benchmark_lilipu(fpr isigma_kg, fpr isigma_sig) {
 		randombytes((unsigned char *)h, sizeof h);
 
 		// Compute the signature.
-		lilipu_sign(&sc, sig, f, g, h, logn, isigma_sig, tmp.b);
+		Zf(sign)(&sc, sig, f, g, h, logn, isigma_sig, tmp.b);
 	}
 
 	gettimeofday(&t1, NULL);
@@ -112,79 +96,17 @@ void benchmark_lilipu(fpr isigma_kg, fpr isigma_sig) {
 	printf("Lilipu sign/s = %.1f\n", sign_ps);
 }
 
-void benchmark_falcon() {
-	TEMPALLOC union {
-		uint8_t b[FALCON_KEYGEN_TEMP_10];
-		uint64_t dummy_u64;
-		fpr dummy_fpr;
-	} tmp;
-	TEMPALLOC union {
-		uint8_t b[72 * 1024];
-		uint64_t dummy_u64;
-		fpr dummy_fpr;
-	} tmp2;
-	TEMPALLOC union {
-		int16_t sig[1024];
-		uint16_t hm[1024];
-	} r;
-	TEMPALLOC int8_t f[1024], g[1024], F[1024], G[1024];
-	TEMPALLOC uint16_t h[1024];
-	TEMPALLOC unsigned char seed[48];
-	TEMPALLOC inner_shake256_context sc;
-
-	struct timeval t0, t1;
-	const int n_repetitions = 1000;
-
-	// Initialize a RNG.
-	randombytes(seed, sizeof seed);
-	inner_shake256_init(&sc);
-	inner_shake256_inject(&sc, seed, sizeof seed);
-	inner_shake256_flip(&sc);
-
-	gettimeofday(&t0, NULL);
-
-	// Generate key pair.
-	falcon_inner_keygen(&sc, f, g, F, G, h, logn, tmp.b);
-
-	gettimeofday(&t1, NULL);
-	printf("Key generation took %lld microseconds\n", time_diff(&t0, &t1));
-
-	// =========================================================================
-	// | Start the signing                                                     |
-	// =========================================================================
-	gettimeofday(&t0, NULL);
-
-	for (int rep = 0; rep < n_repetitions; rep++) {
-		// make a signature of a random message...
-		randombytes((unsigned char *)h, sizeof h);
-
-		// Compute the signature.
-		falcon_inner_sign_dyn(r.sig, &sc, f, g, F, G, r.hm, logn, tmp2.b);
-
-		if (rep == 25) {
-			for (size_t u = 0; u < n; u++) {
-				printf("%d,", r.sig[u]);
-			}
-			printf("\n");
-		}
-	}
-
-	gettimeofday(&t1, NULL);
-	double sign_ps = 1000000LL * n_repetitions / (double)time_diff(&t0, &t1);
-	printf("Falcon sign/s = %.1f\n", sign_ps);
-}
-
 void test_lilipu_valid_signature(fpr isigma_kg, fpr isigma_sig, fpr verif_bound) {
-	TEMPALLOC union {
+	union {
 		uint8_t b[42 * 1024];
 		uint64_t dummy_u64;
 		fpr dummy_fpr;
 	} tmp;
-	TEMPALLOC int8_t f[1024], g[1024], F[1024], G[1024], h[1024];
-	TEMPALLOC fpr q00[1024], q10[1024], q11[1024];
-	TEMPALLOC int16_t sig[1024], s0[1024];
-	TEMPALLOC unsigned char seed[48];
-	TEMPALLOC inner_shake256_context sc;
+	int8_t f[1024], g[1024], F[1024], G[1024], h[1024];
+	fpr q00[1024], q10[1024], q11[1024];
+	int16_t sig[1024], s0[1024];
+	unsigned char seed[48];
+	inner_shake256_context sc;
 
 	// Initialize a RNG.
 	randombytes(seed, sizeof seed);
@@ -193,7 +115,7 @@ void test_lilipu_valid_signature(fpr isigma_kg, fpr isigma_sig, fpr verif_bound)
 	inner_shake256_flip(&sc);
 
 	// Generate key pair.
-	lilipu_keygen(&sc, f, g, F, G, q00, q10, q11, logn, tmp.b, isigma_kg);
+	Zf(keygen)(&sc, f, g, F, G, q00, q10, q11, logn, tmp.b, isigma_kg);
 
 	for (int rep = 0; rep < 1000; rep++) {
 		// make a signature of a random message...
@@ -201,14 +123,14 @@ void test_lilipu_valid_signature(fpr isigma_kg, fpr isigma_sig, fpr verif_bound)
 		// to_sage16("h", (int16_t *)h, logn);
 
 		// Compute the signature.
-		lilipu_sign(&sc, sig, f, g, h, logn, isigma_sig, tmp.b);
+		Zf(sign)(&sc, sig, f, g, h, logn, isigma_sig, tmp.b);
 		// to_sage16("s1", sig, logn);
 
-		assert(lilipu_verify(h, s0, sig, q00, q10, q11, logn, verif_bound, tmp.b));
+		assert(Zf(verify)(h, s0, sig, q00, q10, q11, logn, verif_bound, tmp.b));
 		// randombytes((unsigned char *)sig, sizeof sig);
 		for (size_t u = 0; u < n; u ++)
 			sig[u] = 0;
-		assert(!lilipu_verify(h, s0, sig, q00, q10, q11, logn, verif_bound, tmp.b));
+		assert(!Zf(verify)(h, s0, sig, q00, q10, q11, logn, verif_bound, tmp.b));
 	}
 
 	printf("Valid signatures were signed.\n");
@@ -232,7 +154,7 @@ int try_forge(int16_t *s0, int16_t *s1, const fpr *q00, const fpr *q10, const fp
 	for (u = 0; u < n; u ++)
 		s1[u] = 0;
 
-	if (lilipu_verify(hm, s0, s1, q00, q10, q11, logn, verif_bound, tmp))
+	if (Zf(verify)(hm, s0, s1, q00, q10, q11, logn, verif_bound, tmp))
 		return 1; // we are done
 
 	unsigned char seed[48];
@@ -243,47 +165,38 @@ int try_forge(int16_t *s0, int16_t *s1, const fpr *q00, const fpr *q10, const fp
 	inner_shake256_flip(&sc);
 
 	sampler_context spc;
-	samplerZ samp;
 	void *samp_ctx;
 	spc.sigma_min = fpr_sigma_min[logn];
-	falcon_inner_prng_init(&spc.p, &sc);
-	samp = Zf(sampler);
+	Zf(prng_init)(&spc.p, &sc);
 	samp_ctx = &spc;
 
 	fpr sigma = fpr_div(fpr_of(28660196105754623LL), fpr_of(10000000000000000LL));
 	while (1) {
 		for (u = 0; u < n; u ++)
-			s0p[u] = 2*samp(samp_ctx, fpr_half(fpr_of(hm[u] & 1)), sigma) - (hm[u] & 1);
+			s0p[u] = 2*Zf(sampler)(samp_ctx, fpr_half(fpr_of(hm[u] & 1)), sigma) - (hm[u] & 1);
 		for (u = 0; u < n; u ++)
-			s1p[u] = 2*mkgauss(&sc, logn);
-
-		for (int rep = 10; rep-->0; ) {
-			for (u = 0; u < n; u ++)
-				s0p[u] += 2*mkgauss(&sc, logn);
-			for (u = 0; u < n; u ++)
-				s1p[u] += 2*mkgauss(&sc, logn);
-		}
+			s1p[u] = 2*Zf(sampler)(samp_ctx, fpr_half(fpr_of(hm[u] & 1)), sigma) - (hm[u] & 1);
 
 		for (u = 0; u < n; u++) t0[u] = fpr_of(s0p[u]);
-		falcon_inner_FFT(t0, logn);
+		Zf(FFT)(t0, logn);
 		memcpy(t3, t0, n * sizeof *t0);
 
 		for (u = 0; u < n; u++) t1[u] = fpr_of(s1p[u]);
-		falcon_inner_FFT(t1, logn);
+		Zf(FFT)(t1, logn);
 		memcpy(t2, t1, n * sizeof *t0);
 		// Currently in memory: s0, s1, s1, s0 (in FFT representation)
 
 		// Compute s0 q00 s0* + s0 q01 s1* + s1 q10 s0* + s1 q11 s1*
-		falcon_inner_poly_mulselfadj_fft(t2, logn);
-		falcon_inner_poly_mulselfadj_fft(t3, logn);
-		falcon_inner_poly_mul_autoadj_fft(t2, q11, logn); // t2 = s1 q11 s1*
-		falcon_inner_poly_mul_autoadj_fft(t3, q00, logn); // t3 = s0 q00 s0*
-		falcon_inner_poly_muladj_fft(t1, t0, logn); // t1 = s1 s0*
-		falcon_inner_poly_mul_fft(t1, q10, logn); // t1 = s1 q10 s0*
+		Zf(poly_mulselfadj_fft)(t2, logn);
+		Zf(poly_mulselfadj_fft)(t3, logn);
+		Zf(poly_mul_autoadj_fft)(t2, q11, logn); // t2 = s1 q11 s1*
+		Zf(poly_mul_autoadj_fft)(t3, q00, logn); // t3 = s0 q00 s0*
+		Zf(poly_muladj_fft)(t1, t0, logn); // t1 = s1 s0*
+		Zf(poly_mul_fft)(t1, q10, logn); // t1 = s1 q10 s0*
 
-		lilipu_inner_poly_addselfadj_fft(t1, logn); // t1 = s1 q10 s0* + s0 q01 s1*
-		lilipu_inner_poly_add_autoadj_fft(t1, t2, logn);
-		lilipu_inner_poly_add_autoadj_fft(t1, t3, logn);
+		Zf(poly_addselfadj_fft)(t1, logn); // t1 = s1 q10 s0* + s0 q01 s1*
+		Zf(poly_add_autoadj_fft)(t1, t2, logn);
+		Zf(poly_add_autoadj_fft)(t1, t3, logn);
 
 		trace = fpr_zero;
 		for (u = 0; u < n/2; u ++)
@@ -309,16 +222,16 @@ int try_forge(int16_t *s0, int16_t *s1, const fpr *q00, const fpr *q10, const fp
 }
 
 void test_forge_signature(fpr isigma_kg, fpr isigma_sig, fpr verif_bound) {
-	TEMPALLOC union {
+	union {
 		uint8_t b[42 * 1024];
 		uint64_t dummy_u64;
 		fpr dummy_fpr;
 	} tmp;
-	TEMPALLOC int8_t f[1024], g[1024], F[1024], G[1024], h[1024];
-	TEMPALLOC fpr q00[1024], q10[1024], q11[1024];
-	TEMPALLOC int16_t sig[1024], s0[1024];
-	TEMPALLOC unsigned char seed[48];
-	TEMPALLOC inner_shake256_context sc;
+	int8_t f[1024], g[1024], F[1024], G[1024], h[1024];
+	fpr q00[1024], q10[1024], q11[1024];
+	int16_t sig[1024], s0[1024];
+	unsigned char seed[48];
+	inner_shake256_context sc;
 	int res;
 
 
@@ -329,13 +242,13 @@ void test_forge_signature(fpr isigma_kg, fpr isigma_sig, fpr verif_bound) {
 	inner_shake256_flip(&sc);
 
 	// Generate key pair.
-	lilipu_keygen(&sc, f, g, F, G, q00, q10, q11, logn, tmp.b, isigma_kg);
+	Zf(keygen)(&sc, f, g, F, G, q00, q10, q11, logn, tmp.b, isigma_kg);
 
 	// generate random message
 	randombytes((unsigned char *)h, sizeof h);
 	// to_sage16("h", (int16_t *)h, logn);
 
-	lilipu_sign(&sc, sig, f, g, h, logn, isigma_sig, tmp.b);
+	Zf(sign)(&sc, sig, f, g, h, logn, isigma_sig, tmp.b);
 	printf("s1 = ");
 	for (size_t u = 0; u < n; u++) printf("%d,", sig[u]);
 	printf("\n");
@@ -345,54 +258,8 @@ void test_forge_signature(fpr isigma_kg, fpr isigma_sig, fpr verif_bound) {
 	res = try_forge(s0, sig, q00, q10, q11, h, verif_bound, tmp.b);
 	assert(res);
 
-	assert(!lilipu_verify(h, s0, sig, q00, q10, q11, logn, verif_bound, tmp.b));
+	assert(!Zf(verify)(h, s0, sig, q00, q10, q11, logn, verif_bound, tmp.b));
 	printf("No forgery found.\n");
-}
-
-void testmod2() {
-	int8_t f[1024], g[1024], fg[1024], check[1024];
-	uint16_t tmp[2*1024];
-
-	for (size_t rep = 0; rep < 10; rep ++) {
-		for (size_t u = 0; u < n; u ++)
-			f[u] = rand();
-		for (size_t u = 0; u < n; u ++)
-			g[u] = rand();
-		for (size_t u = 0; u < n; u ++)
-			check[u] = 0;
-
-		for (size_t u = 0; u < n; u ++)
-			for (size_t v = 0; v < n; v ++)
-				check[modp_add(u, v, n)] ^= f[u] & g[v];
-		for (size_t u = 0; u < n; u ++)
-			check[u] &= 1;
-
-		lilipu_inner_mulmod2(fg, f, g, logn, tmp);
-
-		for (size_t u = 0; u < n; u ++)
-			assert(fg[u] == check[u]);
-	}
-
-/*
-	struct timeval t0, t1;
-	gettimeofday(&t0, NULL);
-	for (size_t rep = 0; rep < 100; rep ++) {
-		for (size_t u = 0; u < n; u ++) f[u] = rand();
-		for (size_t u = 0; u < n; u ++) g[u] = rand();
-		lilipu_inner_mulmod2_old(fg, f, g, logn, tmp);
-	}
-	gettimeofday(&t1, NULL);
-	printf("d log d took: %d μs\n", time_diff(&t0, &t1));
-
-	gettimeofday(&t0, NULL);
-	for (size_t rep = 0; rep < 100; rep ++) {
-		for (size_t u = 0; u < n; u ++) f[u] = rand();
-		for (size_t u = 0; u < n; u ++) g[u] = rand();
-		lilipu_inner_mulmod2(fg, f, g, logn);
-	}
-	gettimeofday(&t1, NULL);
-	printf("d^2 took: %d μs\n", time_diff(&t0, &t1));
-*/
 }
 
 int8_t valid_sigma(fpr sigma_sig) {
@@ -414,7 +281,7 @@ int main() {
 	const fpr verif_bound = fpr_mul(fpr_sqr(fpr_mul(verif_margin, fpr_double(sigma_sig))), fpr_double(fpr_sqr(fpr_of(n))));
 
 #ifdef __AVX2__
-	const fpr sigma_FALCON = fpr_sqrt(fpr_div(fpr_of(117*117*Q), fpr_of(100*100*2*n))); // 1.17 √(q/2n)
+	const fpr sigma_FALCON = fpr_sqrt(fpr_div(fpr_of(117*117*12289), fpr_of(100*100*2*n))); // 1.17 √(q/2n)
 	printf("Sigmas: %.3f (lilipu) vs %.2f (falcon)\n", sigma_kg.v, sigma_FALCON.v);
 	printf("Verif margin: %.2f, bound: %.2f\n", verif_margin.v, verif_bound.v);
 #else
@@ -425,13 +292,10 @@ int main() {
 
 	printf("Seed: %u\n", seed);
 	srand(seed);
-	// prepare_random();
-	testmod2();
 	assert(valid_sigma(sigma_kg) && valid_sigma(sigma_sig));
 
 	// test_forge_signature(fpr_inv(sigma_kg), fpr_inv(sigma_sig), verif_bound);
 	benchmark_lilipu(fpr_inv(sigma_kg), fpr_inv(sigma_sig));
-	benchmark_falcon();
 
 	test_lilipu_valid_signature(fpr_inv(sigma_kg), fpr_inv(sigma_sig), verif_bound);
 	return 0;

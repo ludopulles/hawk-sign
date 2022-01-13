@@ -1,5 +1,5 @@
-#ifndef FALCON_INNER_H__
-#define FALCON_INNER_H__
+#ifndef HAWK_INNER_H__
+#define HAWK_INNER_H__
 
 /*
  * Internal functions for Falcon. This is not the API intended to be
@@ -44,7 +44,7 @@
  *  - All public functions (i.e. the non-static ones) must be referenced
  *    with the Zf() macro (e.g. Zf(verify_raw) for the verify_raw()
  *    function). That macro adds a prefix to the name, which is
- *    configurable with the FALCON_PREFIX macro. This allows compiling
+ *    configurable with the HAWK_PREFIX macro. This allows compiling
  *    the code into a specific "namespace" and potentially including
  *    several versions of this code into a single application (e.g. to
  *    have an AVX2 and a non-AVX2 variants and select the one to use at
@@ -78,16 +78,23 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* =================================================================== */
 
+/*
+ * Compute degree N from logarithm 'logn'.
+ */
+#define MKN(logn)   ((size_t)1 << (logn))
+
+/* ==================================================================== */
 
 /*
  * "Naming" macro used to apply a consistent prefix over all global
  * symbols.
  */
-#ifndef FALCON_PREFIX
-#define FALCON_PREFIX   falcon_inner
+#ifndef HAWK_PREFIX
+#define HAWK_PREFIX   hawk_inner
 #endif
-#define Zf(name)             Zf_(FALCON_PREFIX, name)
+#define Zf(name)             Zf_(HAWK_PREFIX, name)
 #define Zf_(prefix, name)    Zf__(prefix, name)
 #define Zf__(prefix, name)   prefix ## _ ## name  
 
@@ -157,217 +164,6 @@ void Zf(i_shake256_extract)(
 
 /*
  */
-
-/* ==================================================================== */
-/*
- * Encoding/decoding functions (codec.c).
- *
- * Encoding functions take as parameters an output buffer (out) with
- * a given maximum length (max_out_len); returned value is the actual
- * number of bytes which have been written. If the output buffer is
- * not large enough, then 0 is returned (some bytes may have been
- * written to the buffer). If 'out' is NULL, then 'max_out_len' is
- * ignored; instead, the function computes and returns the actual
- * required output length (in bytes).
- *
- * Decoding functions take as parameters an input buffer (in) with
- * its maximum length (max_in_len); returned value is the actual number
- * of bytes that have been read from the buffer. If the provided length
- * is too short, then 0 is returned.
- *
- * Values to encode or decode are vectors of integers, with N = 2^logn
- * elements.
- *
- * Three encoding formats are defined:
- *
- *   - modq: sequence of values modulo 12289, each encoded over exactly
- *     14 bits. The encoder and decoder verify that integers are within
- *     the valid range (0..12288). Values are arrays of uint16.
- *
- *   - trim: sequence of signed integers, a specified number of bits
- *     each. The number of bits is provided as parameter and includes
- *     the sign bit. Each integer x must be such that |x| < 2^(bits-1)
- *     (which means that the -2^(bits-1) value is forbidden); encode and
- *     decode functions check that property. Values are arrays of
- *     int16_t or int8_t, corresponding to names 'trim_i16' and
- *     'trim_i8', respectively.
- *
- *   - comp: variable-length encoding for signed integers; each integer
- *     uses a minimum of 9 bits, possibly more. This is normally used
- *     only for signatures.
- *
- */
-
-size_t Zf(modq_encode)(void *out, size_t max_out_len,
-	const uint16_t *x, unsigned logn);
-size_t Zf(trim_i16_encode)(void *out, size_t max_out_len,
-	const int16_t *x, unsigned logn, unsigned bits);
-size_t Zf(trim_i8_encode)(void *out, size_t max_out_len,
-	const int8_t *x, unsigned logn, unsigned bits);
-size_t Zf(comp_encode)(void *out, size_t max_out_len,
-	const int16_t *x, unsigned logn);
-
-size_t Zf(modq_decode)(uint16_t *x, unsigned logn,
-	const void *in, size_t max_in_len);
-size_t Zf(trim_i16_decode)(int16_t *x, unsigned logn, unsigned bits,
-	const void *in, size_t max_in_len);
-size_t Zf(trim_i8_decode)(int8_t *x, unsigned logn, unsigned bits,
-	const void *in, size_t max_in_len);
-size_t Zf(comp_decode)(int16_t *x, unsigned logn,
-	const void *in, size_t max_in_len);
-
-/*
- * Number of bits for key elements, indexed by logn (1 to 10). This
- * is at most 8 bits for all degrees, but some degrees may have shorter
- * elements.
- */
-extern const uint8_t Zf(max_fg_bits)[];
-extern const uint8_t Zf(max_FG_bits)[];
-
-/*
- * Maximum size, in bits, of elements in a signature, indexed by logn
- * (1 to 10). The size includes the sign bit.
- */
-extern const uint8_t Zf(max_sig_bits)[];
-
-/* ==================================================================== */
-/*
- * Support functions used for both signature generation and signature
- * verification (common.c).
- */
-
-/*
- * From a SHAKE256 context (must be already flipped), produce a new
- * point. This is the non-constant-time version, which may leak enough
- * information to serve as a stop condition on a brute force attack on
- * the hashed message (provided that the nonce value is known).
- */
-void Zf(hash_to_point_vartime)(inner_shake256_context *sc,
-	uint16_t *x, unsigned logn);
-
-/*
- * From a SHAKE256 context (must be already flipped), produce a new
- * point. The temporary buffer (tmp) must have room for 2*2^logn bytes.
- * This function is constant-time but is typically more expensive than
- * Zf(hash_to_point_vartime)().
- *
- * tmp[] must have 16-bit alignment.
- */
-void Zf(hash_to_point_ct)(inner_shake256_context *sc,
-	uint16_t *x, unsigned logn, uint8_t *tmp);
-
-/*
- * Tell whether a given vector (2N coordinates, in two halves) is
- * acceptable as a signature. This compares the appropriate norm of the
- * vector with the acceptance bound. Returned value is 1 on success
- * (vector is short enough to be acceptable), 0 otherwise.
- */
-int Zf(is_short)(const int16_t *s1, const int16_t *s2, unsigned logn);
-
-/*
- * Tell whether a given vector (2N coordinates, in two halves) is
- * acceptable as a signature. Instead of the first half s1, this
- * function receives the "saturated squared norm" of s1, i.e. the
- * sum of the squares of the coordinates of s1 (saturated at 2^32-1
- * if the sum exceeds 2^31-1).
- *
- * Returned value is 1 on success (vector is short enough to be
- * acceptable), 0 otherwise.
- */
-int Zf(is_short_half)(uint32_t sqn, const int16_t *s2, unsigned logn);
-
-/* ==================================================================== */
-/*
- * Signature verification functions (vrfy.c).
- */
-
-/*
- * Convert a public key to NTT + Montgomery format. Conversion is done
- * in place.
- */
-void Zf(to_ntt_monty)(uint16_t *h, unsigned logn);
-
-/*
- * Internal signature verification code:
- *   c0[]      contains the hashed nonce+message
- *   s2[]      is the decoded signature
- *   h[]       contains the public key, in NTT + Montgomery format
- *   logn      is the degree log
- *   tmp[]     temporary, must have at least 2*2^logn bytes
- * Returned value is 1 on success, 0 on error.
- *
- * tmp[] must have 16-bit alignment.
- */
-int Zf(verify_raw)(const uint16_t *c0, const int16_t *s2,
-	const uint16_t *h, unsigned logn, uint8_t *tmp);
-
-/*
- * Compute the public key h[], given the private key elements f[] and
- * g[]. This computes h = g/f mod phi mod q, where phi is the polynomial
- * modulus. This function returns 1 on success, 0 on error (an error is
- * reported if f is not invertible mod phi mod q).
- *
- * The tmp[] array must have room for at least 2*2^logn elements.
- * tmp[] must have 16-bit alignment.
- */
-int Zf(compute_public)(uint16_t *h,
-	const int8_t *f, const int8_t *g, unsigned logn, uint8_t *tmp);
-
-/*
- * Recompute the fourth private key element. Private key consists in
- * four polynomials with small coefficients f, g, F and G, which are
- * such that fG - gF = q mod phi; furthermore, f is invertible modulo
- * phi and modulo q. This function recomputes G from f, g and F.
- *
- * The tmp[] array must have room for at least 4*2^logn bytes.
- *
- * Returned value is 1 in success, 0 on error (f not invertible).
- * tmp[] must have 16-bit alignment.
- */
-int Zf(complete_private)(int8_t *G,
-	const int8_t *f, const int8_t *g, const int8_t *F,
-	unsigned logn, uint8_t *tmp);
-
-/*
- * Test whether a given polynomial is invertible modulo phi and q.
- * Polynomial coefficients are small integers.
- *
- * tmp[] must have 16-bit alignment.
- */
-int Zf(is_invertible)(
-	const int16_t *s2, unsigned logn, uint8_t *tmp);
-
-/*
- * Count the number of elements of value zero in the NTT representation
- * of the given polynomial: this is the number of primitive 2n-th roots
- * of unity (modulo q = 12289) that are roots of the provided polynomial
- * (taken modulo q).
- *
- * tmp[] must have 16-bit alignment.
- */
-int Zf(count_nttzero)(const int16_t *sig, unsigned logn, uint8_t *tmp);
-
-/*
- * Internal signature verification with public key recovery:
- *   h[]       receives the public key (NOT in NTT/Montgomery format)
- *   c0[]      contains the hashed nonce+message
- *   s1[]      is the first signature half
- *   s2[]      is the second signature half
- *   logn      is the degree log
- *   tmp[]     temporary, must have at least 2*2^logn bytes
- * Returned value is 1 on success, 0 on error. Success is returned if
- * the signature is a short enough vector; in that case, the public
- * key has been written to h[]. However, the caller must still
- * verify that h[] is the correct value (e.g. with regards to a known
- * hash of the public key).
- *
- * h[] may not overlap with any of the other arrays.
- *
- * tmp[] must have 16-bit alignment.
- */
-int Zf(verify_recover)(uint16_t *h,
-	const uint16_t *c0, const int16_t *s1, const int16_t *s2,
-	unsigned logn, uint8_t *tmp);
 
 /* ==================================================================== */
 /*
@@ -578,6 +374,39 @@ prng_get_u8(prng *p)
 
 /* ==================================================================== */
 /*
+ * Discrete gaussian sampling (sampling.c).
+ */
+
+/*
+ * Internal sampler engine. Exported for tests.
+ *
+ * sampler_context wraps around a source of random numbers (PRNG) and
+ * the sigma_min value (nominally dependent on the degree).
+ *
+ * sampler() takes as parameters:
+ *   ctx      pointer to the sampler_context structure
+ *   mu       center for the distribution
+ *   isigma   inverse of the distribution standard deviation
+ * It returns an integer sampled along the Gaussian distribution centered
+ * on mu and of standard deviation sigma = 1/isigma.
+ *
+ * gaussian0_sampler() takes as parameter a pointer to a PRNG, and
+ * returns an integer sampled along a half-Gaussian with standard
+ * deviation sigma0 = 1.8205 (center is 0, returned value is
+ * nonnegative).
+ */
+
+typedef struct {
+	prng p;
+	fpr sigma_min;
+} sampler_context;
+
+int Zf(sampler)(void *ctx, fpr mu, fpr isigma);
+
+int Zf(gaussian0_sampler)(prng *p);
+
+/* ==================================================================== */
+/*
  * FFT (falcon-fft.c).
  *
  * A real polynomial is represented as an array of N 'fpr' elements.
@@ -736,45 +565,46 @@ void Zf(poly_split_fft)(fpr *restrict f0, fpr *restrict f1,
 void Zf(poly_merge_fft)(fpr *restrict f,
 	const fpr *restrict f0, const fpr *restrict f1, unsigned logn);
 
+
+/*
+ * Add to a polynomial its own adjoint. This function works only in FFT
+ * representation.
+ */
+void
+Zf(poly_addselfadj_fft)(fpr *a, unsigned logn);
+
+/*
+ * Add polynomial b to polynomial a, where b is autoadjoint. Both a and b are
+ * in FFT representation. Since b is autoadjoint, all its FFT coefficients are
+ * real, and the array b contains only N/2 elements.
+ */
+void
+Zf(poly_add_autoadj_fft)(fpr *a, fpr *b, unsigned logn);
 /* ==================================================================== */
 /*
  * Key pair generation.
  */
 
-/*
- * Required sizes of the temporary buffer (in bytes).
+/**
+ * Compute a secret key and a public key belonging to the signature scheme.
+ * The secret key is a tuple (f, g, F, G) where each belongs to the ring
+ * Z[X] / (X^n + 1) with small coefficients (abs. value << 127), such that
  *
- * This size is 28*2^logn bytes, except for degrees 2 and 4 (logn = 1
- * or 2) where it is slightly greater.
+ *     f * G - g * F = 1 (mod X^n+1),
+ *
+ * holds. The public is given by the Gram matrix of the basis generated by the
+ * basis vectors (f, g) and (F, G).
+ * Here, isigma_kg is the inverse of the standard deviation used to generate
+ * coefficients of f and g.
+ *
+ * tmp: buffer for intermediate values, of size >= 28*512 = 14336 bytes.
  */
-#define FALCON_KEYGEN_TEMP_1      136
-#define FALCON_KEYGEN_TEMP_2      272
-#define FALCON_KEYGEN_TEMP_3      224
-#define FALCON_KEYGEN_TEMP_4      448
-#define FALCON_KEYGEN_TEMP_5      896
-#define FALCON_KEYGEN_TEMP_6     1792
-#define FALCON_KEYGEN_TEMP_7     3584
-#define FALCON_KEYGEN_TEMP_8     7168
-#define FALCON_KEYGEN_TEMP_9    14336
-#define FALCON_KEYGEN_TEMP_10   28672
-
-/*
- * Generate a new key pair. Randomness is extracted from the provided
- * SHAKE256 context, which must have already been seeded and flipped.
- * The tmp[] array must have suitable size (see FALCON_KEYGEN_TEMP_*
- * macros) and be aligned for the uint32_t, uint64_t and fpr types.
- *
- * The private key elements are written in f, g, F and G, and the
- * public key is written in h. Either or both of G and h may be NULL,
- * in which case the corresponding element is not returned (they can
- * be recomputed from f, g and F).
- *
- * tmp[] must have 64-bit alignment.
- * This function uses floating-point rounding (see set_fpu_cw()).
- */
-void Zf(keygen)(inner_shake256_context *rng,
-	int8_t *f, int8_t *g, int8_t *F, int8_t *G, uint16_t *h,
-	unsigned logn, uint8_t *tmp);
+void
+Zf(keygen)(inner_shake256_context *rng,
+	int8_t *restrict f, int8_t *restrict g, // secret key
+	int8_t *restrict F, int8_t *restrict G, // secret key
+	fpr *restrict q00, fpr *restrict q10, fpr *restrict q11, // public key
+	unsigned logn, uint8_t *restrict tmp, fpr isigma_kg);
 
 /* ==================================================================== */
 /*
@@ -782,87 +612,68 @@ void Zf(keygen)(inner_shake256_context *rng,
  */
 
 /*
- * Expand a private key into the B0 matrix in FFT representation and
- * the LDL tree. All the values are written in 'expanded_key', for
- * a total of (8*logn+40)*2^logn bytes.
+ * Compute a signature: the signature contains two vectors, s0 and s1.
+ * The s0 vector is not returned. The squared norm of (s0,s1) is
+ * computed, and if it is short enough, then s1 is returned into the
+ * s1[] buffer, and 1 is returned; otherwise, s1[] is untouched and 0 is
+ * returned; the caller should then try again.
  *
- * The tmp[] array must have room for at least 48*2^logn bytes.
- *
- * tmp[] must have 64-bit alignment.
- * This function uses floating-point rounding (see set_fpu_cw()).
+ * tmp: buffer for intermediate values, of size >= 42*512 = 21504 bytes.
  */
-void Zf(expand_privkey)(fpr *restrict expanded_key,
-	const int8_t *f, const int8_t *g, const int8_t *F, const int8_t *G,
-	unsigned logn, uint8_t *restrict tmp);
+void
+Zf(sign)(inner_shake256_context *rng, int16_t *restrict sig,
+	const int8_t *restrict f, const int8_t *restrict g,
+	const int8_t *restrict hm, unsigned logn, fpr isigma_sig,
+	uint8_t *restrict tmp);
 
 /*
- * Compute a signature over the provided hashed message (hm); the
- * signature value is one short vector. This function uses an
- * expanded key (as generated by Zf(expand_privkey)()).
- *
- * The sig[] and hm[] buffers may overlap.
- *
- * On successful output, the start of the tmp[] buffer contains the s1
- * vector (as int16_t elements).
- *
- * The minimal size (in bytes) of tmp[] is 48*2^logn bytes.
- *
- * tmp[] must have 64-bit alignment.
- * This function uses floating-point rounding (see set_fpu_cw()).
+ * Computes a whole signature (s0, s1) instead of only s1 as is done in
+ * Zf(sign).
  */
-void Zf(sign_tree)(int16_t *sig, inner_shake256_context *rng,
-	const fpr *restrict expanded_key,
-	const uint16_t *hm, unsigned logn, uint8_t *tmp);
-
-/*
- * Compute a signature over the provided hashed message (hm); the
- * signature value is one short vector. This function uses a raw
- * key and dynamically recompute the B0 matrix and LDL tree; this
- * saves RAM since there is no needed for an expanded key, but
- * increases the signature cost.
- *
- * The sig[] and hm[] buffers may overlap.
- *
- * On successful output, the start of the tmp[] buffer contains the s1
- * vector (as int16_t elements).
- *
- * The minimal size (in bytes) of tmp[] is 72*2^logn bytes.
- *
- * tmp[] must have 64-bit alignment.
- * This function uses floating-point rounding (see set_fpu_cw()).
- */
-void Zf(sign_dyn)(int16_t *sig, inner_shake256_context *rng,
+void
+Zf(complete_sign)(inner_shake256_context *rng,
+	int16_t *restrict s0, int16_t *restrict s1,
 	const int8_t *restrict f, const int8_t *restrict g,
 	const int8_t *restrict F, const int8_t *restrict G,
-	const uint16_t *hm, unsigned logn, uint8_t *tmp);
+	const int8_t *restrict hm, unsigned logn, fpr isigma_sig,
+	uint8_t *restrict tmp);
 
+/* ==================================================================== */
 /*
- * Internal sampler engine. Exported for tests.
- *
- * sampler_context wraps around a source of random numbers (PRNG) and
- * the sigma_min value (nominally dependent on the degree).
- *
- * sampler() takes as parameters:
- *   ctx      pointer to the sampler_context structure
- *   mu       center for the distribution
- *   isigma   inverse of the distribution standard deviation
- * It returns an integer sampled along the Gaussian distribution centered
- * on mu and of standard deviation sigma = 1/isigma.
- *
- * gaussian0_sampler() takes as parameter a pointer to a PRNG, and
- * returns an integer sampled along a half-Gaussian with standard
- * deviation sigma0 = 1.8205 (center is 0, returned value is
- * nonnegative).
+ * Signature verification functions (vrfy.c).
  */
 
-typedef struct {
-	prng p;
-	fpr sigma_min;
-} sampler_context;
+/**
+ * Verify if a signature is a valid signature (i.e. generated by someone having
+ * access to the secret key).
+ *
+ * hm: hashed message of length n = 2^logn with values in {0,1}
+ * s0: buffer of length n, that will be filled with a value that minimizes the
+ *     value (s0 s1) Q (s0 s1)^T.
+ * s1: buffer of length n, containing the signature
+ * q00, q10, q11: represents the matrix Q = [[q00, q10^T], [q10, q11]].
+ * verif_bound: if a signature (s0, s1) has Tr((s0 s1) Q (s0 s1)^T) smaller than
+ *              this bound, the signature is accepted.
+ *
+ * Note: q00, q11 are self adjoint.
+ * tmp: buffer for intermediate values, of size >= 32*512 = 16384 bytes.
+ */
+int
+Zf(verify)(const int8_t *restrict hm,
+	int16_t *restrict s0, const int16_t *restrict s1,
+	const fpr *restrict q00, const fpr *restrict q10, const fpr *restrict q11,
+	unsigned logn, const fpr verif_bound, uint8_t *restrict tmp);
 
-int Zf(sampler)(void *ctx, fpr mu, fpr isigma);
+/**
+ * Similar to Zf(verify), except that it takes (s0, s1) as signature, and 
+ * does not reconstruct s0.
+ */
+int
+Zf(complete_verify)(const int8_t *restrict hm,
+	const int16_t *restrict s0, const int16_t *restrict s1,
+	const fpr *restrict q00, const fpr *restrict q10, const fpr *restrict q11,
+	unsigned logn, const fpr verif_bound, uint8_t *restrict tmp);
 
-int Zf(gaussian0_sampler)(prng *p);
 
 /* ==================================================================== */
 
