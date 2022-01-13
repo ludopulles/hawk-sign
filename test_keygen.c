@@ -1,12 +1,7 @@
 #include <assert.h>
-#include <stddef.h>
-#include <string.h>
 #include <stdio.h>
-#include <stdlib.h>
-#include <time.h>
-
 // x86_64 specific:
-#include<sys/time.h>
+#include <sys/time.h>
 
 #include "keygen.c"
 
@@ -162,12 +157,17 @@ int8_t valid_sigma(fpr sigma_sig) {
 }
 
 int main() {
-	unsigned seed = time(NULL);
 	const fpr sigma_kg  = fpr_div(fpr_of(1425), fpr_of(1000));
 	const fpr sigma_sig = fpr_div(fpr_of(1292), fpr_of(1000));
 	const fpr verif_margin = fpr_div(sigma_kg, sigma_sig);
+
+	// set seed
+	struct timeval tv;
+	gettimeofday(&tv, NULL);
+	unsigned seed = 1000000 * tv.tv_sec + tv.tv_usec;
 	printf("Seed: %u\n", seed);
 	srand(seed);
+
 	assert(valid_sigma(sigma_kg) && valid_sigma(sigma_sig));
 
 	fpr isigma_kg = fpr_inv(sigma_kg), isigma_sig = fpr_inv(sigma_sig);

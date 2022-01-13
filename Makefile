@@ -12,7 +12,7 @@ OBJ = build/fft.o build/fpr.o build/keygen.o build/rng.o build/sampler.o build/s
 
 HEAD = fpr.h inner.h
 
-all: build build/main
+all: build build/main build/generate
 
 build:
 	-mkdir build
@@ -21,9 +21,11 @@ clean:
 	-rm -f $(OBJ) build/main.o build/main
 
 
-build/main: main.c build/main.o $(OBJ)
+build/main: build/main.o $(OBJ)
 	$(CC) $(CFLAGS) -o build/main build/main.o $(OBJ) $(LIBS)
 
+build/generate: build/generate.o $(OBJ)
+	$(CC) $(CFLAGS) -o build/generate build/generate.o $(OBJ) $(LIBS)
 
 build/fft.o: fft.c $(HEAD)
 	$(CC) $(CFLAGS) -c -o build/fft.o fft.c
@@ -45,3 +47,6 @@ build/vrfy.o: vrfy.c $(HEAD)
 
 build/main.o: main.c $(HEAD)
 	$(CC) $(CFLAGS) -c -o build/main.o main.c
+
+build/generate.o: generate.c $(HEAD)
+	$(CC) $(CFLAGS) -c -o build/generate.o generate.c

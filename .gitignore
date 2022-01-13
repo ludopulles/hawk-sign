@@ -31,7 +31,6 @@
 # Executables
 *.exe
 *.out
-<<<<<<< HEAD
 *.app
 *.i*86
 *.x86_64
@@ -51,11 +50,9 @@ modules.order
 Module.symvers
 Mkfile.old
 dkms.conf
-=======
 
 # Build directories
-c-code/build
-c-code/bin
-c-code/avx2-optimized/build
-c-code/avx2-optimized/bin
->>>>>>> 7363cdd (Reorganize all code by removing all unused falcon code.)
+/build/
+/bin/
+/avx2-optimized/build/
+/avx2-optimized/bin/
