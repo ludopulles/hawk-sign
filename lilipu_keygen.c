@@ -1366,12 +1366,12 @@ lilipu_verify(const int8_t *restrict hm,
 	Zf(iFFT)(t0, logn);
 
 	for (u = 0; u < n; u ++) {
-		s0[u] = (hm[u] & 1) + 2 * fpr_rint(fpr_half(t0[u]));
+		s0[u] = fpr_rint(fpr_half(t0[u]));
 	}
 
 	// Currently in memory: s0, s1 (in FFT representation)
 	for (u = 0; u < n; u ++) {
-		t0[u] = fpr_of(s0[u]);
+		t0[u] = fpr_of(2 * s0[u] + (hm[u] & 1));
 	}
 	Zf(FFT)(t0, logn);
 
@@ -1426,7 +1426,7 @@ lilipu_complete_verify(const int8_t *restrict hm,
 	t3 = t2 + n;
 
 	for (u = 0; u < n; u ++) {
-		t0[u] = fpr_of(2 * s0[u] + hm[u]);
+		t0[u] = fpr_of(2 * s0[u] + (hm[u] & 1));
 	}
 	for (u = 0; u < n; u ++) {
 		t1[u] = fpr_of(2 * s1[u]);

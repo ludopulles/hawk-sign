@@ -57,7 +57,7 @@ WorkerResult measure_signatures(fpr isigma_kg, fpr isigma_sig, fpr verif_bound) 
 	fpr q00[n], q10[n], q11[n];
 	unsigned char seed[48];
 	inner_shake256_context sc;
-	const int n_repetitions = 1000;
+	const int n_repetitions = 10000;
 
 	// Initialize a RNG.
 	randombytes(seed, sizeof seed);
@@ -78,32 +78,36 @@ WorkerResult measure_signatures(fpr isigma_kg, fpr isigma_sig, fpr verif_bound) 
 		// Compute the signature.
 		lilipu_complete_sign(&sc, s0, s1, f, g, F, G, h, logn, isigma_sig, b);
 
-		if (!lilipu_verify(h, s0, s1, q00, q10, q11, logn, verif_bound, b)) {
+		if (!lilipu_complete_verify(h, s0, s1, q00, q10, q11, logn, verif_bound, b))
 			result.num_invalid++;
-		} else if (!lilipu_verify(h, reconstructed_s0, s1, q00, q10, q11, logn, verif_bound, b)) {
+
+		if (!lilipu_verify(h, reconstructed_s0, s1, q00, q10, q11, logn, verif_bound, b))
 			result.num_babai_fail++;
-		} else {
-			int s0_eq = 1;
-			for (size_t u = 0; u < n; u++)
-				s0_eq &= (s0[u] == reconstructed_s0[u]);
-			if (!s0_eq)
+		else
+			assert(lilipu_complete_verify(h, reconstructed_s0, s1, q00, q10, q11, logn, verif_bound, b));
+
+		for (size_t u = 0; u < n; u++) {
+			if (s0[u] != reconstructed_s0[u]) {
 				result.num_sig_differ++;
+				break;
+			}
 		}
 	}
 	return result;
 }
 
-std::atomic<int> tot_signed = 0, tot_invalid = 0, tot_babai_fail = 0, tot_sig_differ = 0;
+std::atomic<int> tot_signed(0), tot_invalid(0), tot_babai_fail(0), tot_sig_differ(0);
+
+constexpr fpr sigma_kg  = { v: 1.425 };
+constexpr fpr sigma_sig = { v: 1.292 };
+constexpr fpr verif_margin = { v: sigma_kg.v / sigma_sig.v };
+
+fpr getverif_bound() {
+	return fpr_mul(fpr_sqr(fpr_mul(verif_margin, fpr_double(sigma_sig))), fpr_double(fpr_sqr(fpr_of(n))));
+}
 
 void work() {
-	const fpr sigma_kg  = fpr_div(fpr_of(1425), fpr_of(1000));
-	const fpr sigma_sig = fpr_div(fpr_of(1292), fpr_of(1000));
-	// verif_margin = 1 + √(64 * ln(2) / 1024)   (see scheme.sage)
-	const fpr verif_margin = fpr_add(fpr_one, fpr_sqrt(fpr_mul(fpr_log2, fpr_div(fpr_of(64), fpr_of(n)))));
-	const fpr verif_bound = fpr_mul(fpr_sqr(fpr_mul(verif_margin, fpr_double(sigma_sig))), fpr_double(fpr_sqr(fpr_of(n))));
-	fpr isigma_kg = fpr_inv(sigma_kg), isigma_sig = fpr_inv(sigma_sig);
-
-	WorkerResult result = measure_signatures(isigma_kg, isigma_sig, verif_bound);
+	WorkerResult result = measure_signatures(fpr_inv(sigma_kg), fpr_inv(sigma_sig), getverif_bound());
 
 	tot_signed += result.num_signed;
 	tot_invalid += result.num_invalid;
@@ -112,18 +116,13 @@ void work() {
 }
 
 
-int8_t valid_sigma(fpr sigma_sig) {
-	return !fpr_lt(sigma_sig, fpr_sigma_min[logn])
-		&& fpr_lt(sigma_sig, fpr_div(fpr_of(18205), fpr_of(10000)));
+int8_t valid_sigma(fpr sigma) {
+	return !fpr_lt(sigma, fpr_sigma_min[logn]) && fpr_lt(sigma, fpr_div(fpr_of(18205), fpr_of(10000)));
 }
 
 int main() {
 	unsigned seed = time(NULL);
 
-	const fpr sigma_kg  = fpr_div(fpr_of(1425), fpr_of(1000));
-	const fpr sigma_sig = fpr_div(fpr_of(1292), fpr_of(1000));
-	// verif_margin = 1 + √(64 * ln(2) / 1024)   (see scheme.sage)
-	const fpr verif_margin = fpr_add(fpr_one, fpr_sqrt(fpr_mul(fpr_log2, fpr_div(fpr_of( 8), fpr_of(n)))));
 	// verif_bound = (verif_margin 2 \sigma_sig)^2 (2 n^2)
 	// Note 2n * n, where 2n comes from the rank of lattice R^2 over ZZ,
 	// and n comes from the ratio between coefficient embedding and canonical embedding.
@@ -140,13 +139,17 @@ int main() {
 	assert(valid_sigma(sigma_kg) && valid_sigma(sigma_sig));
 
 	int nthreads = 4;
-	std::vector<std::thread*> pool(nthreads);
-	for (int i = 0; i < nthreads; i++) {
-		pool[i] = new std::thread(work);
-	}
+	if (nthreads == 1) {
+		work();
+	} else {
+		std::vector<std::thread*> pool(nthreads);
+		for (int i = 0; i < nthreads; i++) {
+			pool[i] = new std::thread(work);
+		}
 
-	for (int i = 0; i < nthreads; i++) {
-		pool[i]->join();
+		for (int i = 0; i < nthreads; i++) {
+			pool[i]->join();
+		}
 	}
 
 	printf("# Signatures signed:      %d\n", static_cast<int>(tot_signed));

@@ -33,6 +33,8 @@ clean:
 a:
 	$(CC) $(CFLAGS) -o a.out lilipu.c
 
+keygen: run_keygen.c lilipu_keygen.c
+	$(CC) $(CFLAGS) -o keygen run_keygen.c
 
 build/kat1024int: $(OBJ1) $(OBJ2)
 	$(LD) $(LDFLAGS) -o build/kat1024int $(OBJ1) $(OBJ2) $(LIBS)
