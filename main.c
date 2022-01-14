@@ -10,12 +10,6 @@
 
 #include "inner.h"
 
-/*
- * Compute degree N from logarithm 'logn'.
- */
-#define MKN(logn)   ((size_t)1 << (logn))
-
-
 // Simple randomness generator:
 void randombytes(unsigned char *x, unsigned long long xlen) {
 	for (; xlen -- > 0; ++x)
@@ -49,7 +43,7 @@ void to_sage16(const char *varname, const int16_t *f, unsigned logn) {
 // =============================================================================
 const size_t logn = 9, n = MKN(logn);
 
-void benchmark_lilipu(fpr isigma_kg, fpr isigma_sig) {
+void benchmark(fpr isigma_kg, fpr isigma_sig) {
 	union {
 		uint8_t b[28 * 512];
 		uint64_t dummy_u64;
@@ -96,7 +90,7 @@ void benchmark_lilipu(fpr isigma_kg, fpr isigma_sig) {
 	printf("Lilipu sign/s = %.1f\n", sign_ps);
 }
 
-void test_lilipu_valid_signature(fpr isigma_kg, fpr isigma_sig, fpr verif_bound) {
+void test_valid_signature(fpr isigma_kg, fpr isigma_sig, fpr verif_bound) {
 	union {
 		uint8_t b[42 * 1024];
 		uint64_t dummy_u64;
@@ -282,7 +276,7 @@ int main() {
 
 #ifdef __AVX2__
 	const fpr sigma_FALCON = fpr_sqrt(fpr_div(fpr_of(117*117*12289), fpr_of(100*100*2*n))); // 1.17 √(q/2n)
-	printf("Sigmas: %.3f (lilipu) vs %.2f (falcon)\n", sigma_kg.v, sigma_FALCON.v);
+	printf("Sigma: %.3f vs %.3f of falcon\n", sigma_kg.v, sigma_FALCON.v);
 	printf("Verif margin: %.2f, bound: %.2f\n", verif_margin.v, verif_bound.v);
 #else
 #endif
@@ -295,8 +289,8 @@ int main() {
 	assert(valid_sigma(sigma_kg) && valid_sigma(sigma_sig));
 
 	// test_forge_signature(fpr_inv(sigma_kg), fpr_inv(sigma_sig), verif_bound);
-	benchmark_lilipu(fpr_inv(sigma_kg), fpr_inv(sigma_sig));
+	benchmark(fpr_inv(sigma_kg), fpr_inv(sigma_sig));
 
-	test_lilipu_valid_signature(fpr_inv(sigma_kg), fpr_inv(sigma_sig), verif_bound);
+	test_valid_signature(fpr_inv(sigma_kg), fpr_inv(sigma_sig), verif_bound);
 	return 0;
 }

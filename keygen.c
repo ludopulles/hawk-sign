@@ -701,18 +701,6 @@ modp_sub(uint32_t a, uint32_t b, uint32_t p)
 }
 
 /*
- * Halving modulo p.
- */
-/* unused
-static inline uint32_t
-modp_half(uint32_t a, uint32_t p)
-{
-	a += p & -(a & 1);
-	return a >> 1;
-}
-*/
-
-/*
  * Montgomery multiplication modulo p. The 'p0i' value is -1/p mod 2^31.
  * It is required that p is an odd integer.
  */
@@ -2237,10 +2225,14 @@ poly_sub_scaled_ntt(uint32_t *restrict F, size_t Flen, size_t Fstride,
  * represent a number at a certain depth.
 */
 
+#ifdef __CONFIG_fg
+static const size_t MAX_BL_SMALL[10] = { 1, 1, 2, 4, 4, 8, 16, 32, 64, 128 };
+#else
 static const size_t MAX_BL_SMALL[10] = {
 //  1, 1, 2, 2, 4, 7, 14, 27, 53, 106, 209 // (FALCON)
 	1, 1, 2, 2, 4, 6, 11, 21, 41,  82 //, ??
 };
+#endif // __CONFIG_fg
 
 static const size_t MAX_BL_LARGE[9] = {
 //	2, 2, 5, 7, 12, 21, 40, 78, 157, 308 // (FALCON)

@@ -15,6 +15,20 @@ long long time_diff(const struct timeval *begin, const struct timeval *end) {
 	return 1000000LL * (end->tv_sec - begin->tv_sec) + (end->tv_usec - begin->tv_usec);
 }
 
+void poly_output(fpr *p, size_t logn) {
+	/* fpr sqnorm = fpr_zero;
+	for (size_t u = 0; u < MKN(logn); u++)
+		sqnorm = fpr_add(sqnorm, fpr_sqr(p[u]));
+	
+	printf("norm %ld ", fpr_rint(fpr_sqrt(sqnorm))); */
+
+	for (size_t u = 0; u < MKN(logn); u++) {
+		if (u) printf(" ");
+		printf("%ld", fpr_rint(p[u]));
+	}
+	printf("\n");
+}
+
 /* see inner.h for keygen */
 void
 keygen_count_fails(inner_shake256_context *rng,
@@ -68,6 +82,7 @@ void measure_keygen(fpr isigma_kg) {
 	uint8_t b[28 << logn]; // 14 kB temporary memory, 17.5 kB total
 	int8_t f[n], g[n], F[n], G[n];
 	fpr q00[n], q10[n], q11[n];
+	fpr q00i[n], q10i[n], q11i[n];
 	unsigned char seed[48];
 	inner_shake256_context sc;
 
@@ -86,6 +101,16 @@ void measure_keygen(fpr isigma_kg) {
 	for (int i = 0; i < n_repetitions; i++) {
 		// Generate key pair.
 		keygen_count_fails(&sc, f, g, F, G, q00, q10, q11, logn, b, isigma_kg, &fails);
+		memcpy(q00i, q00, sizeof(q00));
+		memcpy(q10i, q10, sizeof(q10));
+		memcpy(q11i, q11, sizeof(q11));
+		Zf(iFFT)(q00i, logn);
+		Zf(iFFT)(q10i, logn);
+		Zf(iFFT)(q11i, logn);
+		poly_output(q00i, logn);
+		poly_output(q10i, logn);
+		poly_output(q11i, logn);
+		printf("\n");
 	}
 
 	gettimeofday(&t1, NULL);
@@ -174,6 +199,6 @@ int main() {
 	fpr verif_bound = fpr_mul(fpr_sqr(fpr_mul(verif_margin, fpr_double(sigma_sig))), fpr_double(fpr_sqr(fpr_of(n))));
 
 	measure_keygen(isigma_kg);
-	measure_signatures(isigma_kg, isigma_sig, verif_bound);
+	// measure_signatures(isigma_kg, isigma_sig, verif_bound);
 	return 0;
 }

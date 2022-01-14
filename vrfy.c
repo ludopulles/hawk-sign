@@ -195,7 +195,6 @@ Zf(complete_verify)(const int8_t *restrict hm,
 	// note: only n/2 embeddings are stored,
 	// the others are simply the conjugate embeddings.
 	trace = fpr_double(trace);
-
 	/*
 	 * Signature is valid if and only if
 	 * `v` is short enough

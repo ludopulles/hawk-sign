@@ -4,9 +4,9 @@
 
 CC = c99
 CFLAGS = -W -Wall -Wshadow -O2 -mavx2
-LD = c99
-LDFLAGS = 
-LIBS = -lpthread
+LD = $(CC)
+LDFLAGS = $(CFLAGS)
+LIBS = -lpthread -lm
 CPP = g++
 CPPFLAGS = --std=c++11 $(CFLAGS)
 
@@ -14,24 +14,29 @@ OBJ = build/fft.o build/fpr.o build/keygen.o build/rng.o build/sampler.o build/s
 
 HEAD = fpr.h inner.h
 
-all: build build/main build/test_keygen build/test_sign
+all: build build/main build/test_keygen build/test_sign build/config_fg build/config_FG
 
 build:
 	-mkdir build
 
 clean:
-	-rm -f $(OBJ) build/main.o build/main build/test_keygen build/test_keygen.o
+	-rm -f $(OBJ) build/main.o build/main build/test_keygen build/test_keygen.o build/test_sign build/test_sign.o build/config_fg build/config_fg.o build/config_FG build/config_FG.o
 
 
 build/main: main.c build/main.o $(OBJ)
-	$(CC) $(CFLAGS) -o build/main build/main.o $(OBJ) $(LIBS)
+	$(LD) $(LDFLAGS) -o build/main build/main.o $(OBJ) $(LIBS)
 
 build/test_keygen: test_keygen.c build/test_keygen.o $(OBJ)
-	$(CC) $(CFLAGS) -o build/test_keygen build/test_keygen.o $(filter-out build/keygen.o,$(OBJ)) $(LIBS)
+	$(LD) $(LDFLAGS) -o build/test_keygen build/test_keygen.o $(filter-out build/keygen.o,$(OBJ)) $(LIBS)
 
 build/test_sign: test_sign.cpp build/test_sign.o $(OBJ)
 	$(CPP) $(CPPFLAGS) -o build/test_sign build/test_sign.o $(OBJ) $(LIBS)
 
+build/config_fg: config_fg.c build/config_fg.o $(OBJ)
+	$(LD) $(LDFLAGS) -o build/config_fg build/config_fg.o $(filter-out build/keygen.o,$(OBJ)) $(LIBS)
+
+build/config_FG: config_FG.c build/config_FG.o $(OBJ)
+	$(LD) $(LDFLAGS) -o build/config_FG build/config_FG.o $(filter-out build/keygen.o,$(OBJ)) $(LIBS)
 
 build/fft.o: fft.c $(HEAD)
 	$(CC) $(CFLAGS) -c -o build/fft.o fft.c
@@ -59,3 +64,9 @@ build/test_keygen.o: test_keygen.c
 
 build/test_sign.o: test_sign.cpp
 	$(CPP) $(CPPFLAGS) -c -o build/test_sign.o test_sign.cpp
+
+build/config_fg.o: config_fg.c
+	$(CC) $(CFLAGS) -c -o build/config_fg.o config_fg.c
+
+build/config_FG.o: config_FG.c
+	$(CC) $(CFLAGS) -c -o build/config_FG.o config_FG.c

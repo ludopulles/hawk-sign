@@ -25,6 +25,107 @@ long long time_diff(const struct timeval *begin, const struct timeval *end) {
 	return 1000000LL * (end->tv_sec - begin->tv_sec) + (end->tv_usec - begin->tv_usec);
 }
 
+/* see inner.h */
+size_t
+Zf(comp_encode)(
+	void *out, size_t max_out_len,
+	const int16_t *x, unsigned logn)
+{
+	uint8_t *buf;
+	size_t n, u, v;
+	uint32_t acc;
+	unsigned acc_len;
+
+	n = (size_t)1 << logn;
+	buf = (uint8_t *)out;
+
+	/*
+	 * Make sure that all values are within the -2047..+2047 range.
+	 */
+	for (u = 0; u < n; u ++) {
+		if (x[u] < -2047 || x[u] > +2047) {
+			return 0;
+		}
+	}
+
+	acc = 0;
+	acc_len = 0;
+	v = 0;
+	for (u = 0; u < n; u ++) {
+		int t;
+		unsigned w;
+
+		/*
+		 * Get sign and absolute value of next integer; push the
+		 * sign bit.
+		 */
+		acc <<= 1;
+		t = x[u];
+		if (t < 0) {
+			t = -t;
+			acc |= 1;
+		}
+		w = (unsigned)t;
+
+		/*
+		 * Push the low `lo_bits` bits of the absolute value.
+		 */
+
+		constexpr int lo_bits = 5;
+
+		acc <<= lo_bits;
+		acc |= w & ((1U << lo_bits) - 1);
+		w >>= lo_bits;
+
+		/*
+		 * We pushed exactly `lo_bits + 1` bits.
+		 */
+		acc_len += (lo_bits + 1);
+
+		/*
+		 * Push as many zeros as necessary, then a one. Since the
+		 * absolute value is at most 2047, w can only range up to
+		 * 15 at this point, thus we will add at most 16 bits
+		 * here. With the 8 bits above and possibly up to 7 bits
+		 * from previous iterations, we may go up to 31 bits, which
+		 * will fit in the accumulator, which is an uint32_t.
+		 */
+		acc <<= (w + 1);
+		acc |= 1;
+		acc_len += w + 1;
+
+		/*
+		 * Produce all full bytes.
+		 */
+		while (acc_len >= 8) {
+			acc_len -= 8;
+			if (buf != NULL) {
+				if (v >= max_out_len) {
+					return 0;
+				}
+				buf[v] = (uint8_t)(acc >> acc_len);
+			}
+			v ++;
+		}
+	}
+
+	/*
+	 * Flush remaining bits (if any).
+	 */
+	if (acc_len > 0) {
+		if (buf != NULL) {
+			if (v >= max_out_len) {
+				return 0;
+			}
+			buf[v] = (uint8_t)(acc << (8 - acc_len));
+		}
+		v ++;
+	}
+
+	return v;
+}
+
+
 // =============================================================================
 // | TESTING CODE                                                              |
 // =============================================================================
@@ -66,6 +167,9 @@ WorkerResult measure_signatures(fpr isigma_kg, fpr isigma_sig, fpr verif_bound) 
 
 		// Compute the signature.
 		Zf(complete_sign)(&sc, s0, s1, f, g, F, G, h, logn, isigma_sig, b);
+
+		printf("%zu ", Zf(comp_encode)(NULL, 0, s1, logn));
+		fflush(stdout);
 
 		if (!Zf(complete_verify)(h, s0, s1, q00, q10, q11, logn, verif_bound, b))
 			result.num_invalid++;
