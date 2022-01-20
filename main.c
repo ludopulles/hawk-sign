@@ -274,6 +274,13 @@ int main() {
 	// Using trace(s Q s^H) = trace(x x^H) = ||x||^2 [K:\QQ] = ||x||^2 d, we arrive at the verif_bound.
 	const fpr verif_bound = fpr_mul(fpr_sqr(fpr_mul(verif_margin, fpr_double(sigma_sig))), fpr_double(fpr_sqr(fpr_of(n))));
 
+	// verif_margin = sigma_kg/sigma_sig:
+	// fail probability < 0.00003
+	// $ ./python
+	//     >>> r = 1.425 / 1.292
+	//     >>> (1 + eps) * r**(2*d) * math.exp(-d*(r*r-1))
+	//     2.7387274647723652e-05
+
 #ifdef __AVX2__
 	const fpr sigma_FALCON = fpr_sqrt(fpr_div(fpr_of(117*117*12289), fpr_of(100*100*2*n))); // 1.17 √(q/2n)
 	printf("Sigma: %.3f vs %.3f of falcon\n", sigma_kg.v, sigma_FALCON.v);

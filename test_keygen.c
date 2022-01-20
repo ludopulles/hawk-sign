@@ -15,6 +15,17 @@ long long time_diff(const struct timeval *begin, const struct timeval *end) {
 	return 1000000LL * (end->tv_sec - begin->tv_sec) + (end->tv_usec - begin->tv_usec);
 }
 
+void fpr_to_int16(int16_t *buf, fpr *p, size_t logn) {
+	unsigned n, u;
+
+	n = MKN(logn);
+	for (u = 0; u < n; u ++) {
+		int val = fpr_rint(p[u]);
+		assert(-(1 << 15) <= val && val < (1 << 15));
+		buf[u] = (int16_t) val;
+	}
+}
+
 void poly_output(fpr *p, size_t logn) {
 	/* fpr sqnorm = fpr_zero;
 	for (size_t u = 0; u < MKN(logn); u++)
@@ -27,6 +38,236 @@ void poly_output(fpr *p, size_t logn) {
 		printf("%ld", fpr_rint(p[u]));
 	}
 	printf("\n");
+}
+
+/* see inner.h */
+size_t
+Zf(comp_encode_q00)(
+	void *out, size_t max_out_len,
+	const int16_t *x, unsigned logn)
+{
+	uint8_t *buf;
+	size_t n, u, v;
+	uint32_t acc;
+	unsigned acc_len;
+
+	n = (size_t)1 << logn;
+	buf = (uint8_t *)out;
+
+	/*
+	 * Make sure that all values are within the -2047..+2047 range.
+	 * Moreover, q00 = q00^* so q00 + q00^* must be in fact an integer.
+	 */
+	for (u = 1; u < n/2; u ++) {
+		if (x[u] < -2047 || x[u] > +2047 || x[u] + x[n-u] != 0) {
+			return 0;
+		}
+	}
+
+	// acc = 0;
+	// acc_len = 0;
+	v = 0;
+
+	/*
+	 * The first value of q00 is of the order sigma_kg^2 2d,
+	 * but definitely << 8d when sigma_kg = 1.425, by the standard
+	 * Laurent-Massart bound (see https://en.wikipedia.org/wiki/Chi-squared_distribution#Concentration).
+	 */
+	acc_len = 3 + logn;
+	acc = (uint32_t) x[0];
+
+	int32_t max_val = 1 << acc_len;
+	if (x[0] <= -max_val || x[0] >= max_val) {
+		return 0;
+	}
+
+	/*
+	 * Produce all full bytes.
+	 */
+	while (acc_len >= 8) {
+		acc_len -= 8;
+		if (buf != NULL) {
+			if (v >= max_out_len) {
+				return 0;
+			}
+			buf[v] = (uint8_t)(acc >> acc_len);
+		}
+		v ++;
+	}
+
+	for (u = 1; u < n/2; u ++) {
+		int t;
+		unsigned w;
+
+		/*
+		 * Get sign and absolute value of next integer; push the
+		 * sign bit.
+		 */
+		acc <<= 1;
+		t = x[u];
+		if (t < 0) {
+			t = -t;
+			acc |= 1;
+		}
+		w = (unsigned)t;
+
+		/*
+		 * Push the low `lo_bits` bits of the absolute value.
+		 */
+
+		const int lo_bits = 5;
+		acc <<= lo_bits;
+		acc |= w & ((1U << lo_bits) - 1);
+		w >>= lo_bits;
+
+		/*
+		 * We pushed exactly `lo_bits + 1` bits.
+		 */
+		acc_len += (lo_bits + 1);
+
+		/*
+		 * Push as many zeros as necessary, then a one. Since the
+		 * absolute value is at most 2047, w can only range up to
+		 * 15 at this point, thus we will add at most 16 bits
+		 * here. With the 8 bits above and possibly up to 7 bits
+		 * from previous iterations, we may go up to 31 bits, which
+		 * will fit in the accumulator, which is an uint32_t.
+		 */
+		acc <<= (w + 1);
+		acc |= 1;
+		acc_len += w + 1;
+
+		/*
+		 * Produce all full bytes.
+		 */
+		while (acc_len >= 8) {
+			acc_len -= 8;
+			if (buf != NULL) {
+				if (v >= max_out_len) {
+					return 0;
+				}
+				buf[v] = (uint8_t)(acc >> acc_len);
+			}
+			v ++;
+		}
+	}
+
+	/*
+	 * Flush remaining bits (if any).
+	 */
+	if (acc_len > 0) {
+		if (buf != NULL) {
+			if (v >= max_out_len) {
+				return 0;
+			}
+			buf[v] = (uint8_t)(acc << (8 - acc_len));
+		}
+		v ++;
+	}
+
+	return v;
+}
+
+/* see inner.h */
+size_t
+Zf(comp_encode_q10)(
+	void *out, size_t max_out_len,
+	const int16_t *x, unsigned logn)
+{
+	uint8_t *buf;
+	size_t n, u, v;
+	uint64_t acc;
+	unsigned acc_len;
+
+	n = (size_t)1 << logn;
+	buf = (uint8_t *)out;
+
+	/*
+	 * Make sure that all values are within the -4095..+4095 range.
+	 */
+	for (u = 0; u < n; u ++) {
+		if (x[u] < -4095 || x[u] > +4095) {
+			return 0;
+		}
+	}
+
+	acc = 0;
+	acc_len = 0;
+	v = 0;
+	for (u = 0; u < n; u ++) {
+		int t;
+		unsigned w;
+
+		/*
+		 * Get sign and absolute value of next integer; push the
+		 * sign bit.
+		 */
+		acc <<= 1;
+		t = x[u];
+		if (t < 0) {
+			t = -t;
+			acc |= 1;
+		}
+		w = (unsigned)t;
+
+		/*
+		 * Push the low `lo_bits` bits of the absolute value.
+		 */
+
+		const int lo_bits = 9;
+
+		acc <<= lo_bits;
+		acc |= w & ((1U << lo_bits) - 1);
+		w >>= lo_bits;
+
+		/*
+		 * We pushed exactly `lo_bits + 1` bits.
+		 */
+		acc_len += (lo_bits + 1);
+
+		// TODO: perhaps this still works, but perhaps we need uint64_t...
+
+		/*
+		 * Push as many zeros as necessary, then a one. Since the
+		 * absolute value is at most 4095, w can only range up to
+		 * 7 at this point, thus we will add at most 8 bits
+		 * here. With the 10 bits above and possibly up to 7 bits
+		 * from previous iterations, we may go up to 25 bits, which
+		 * will fit in the accumulator, which is an uint32_t.
+		 */
+		acc <<= (w + 1);
+		acc |= 1;
+		acc_len += w + 1;
+
+		/*
+		 * Produce all full bytes.
+		 */
+		while (acc_len >= 8) {
+			acc_len -= 8;
+			if (buf != NULL) {
+				if (v >= max_out_len) {
+					return 0;
+				}
+				buf[v] = (uint8_t)(acc >> acc_len);
+			}
+			v ++;
+		}
+	}
+
+	/*
+	 * Flush remaining bits (if any).
+	 */
+	if (acc_len > 0) {
+		if (buf != NULL) {
+			if (v >= max_out_len) {
+				return 0;
+			}
+			buf[v] = (uint8_t)(acc << (8 - acc_len));
+		}
+		v ++;
+	}
+
+	return v;
 }
 
 /* see inner.h for keygen */
@@ -83,6 +324,7 @@ void measure_keygen(fpr isigma_kg) {
 	int8_t f[n], g[n], F[n], G[n];
 	fpr q00[n], q10[n], q11[n];
 	fpr q00i[n], q10i[n], q11i[n];
+	int16_t q00n[n], q10n[n];
 	unsigned char seed[48];
 	inner_shake256_context sc;
 
@@ -97,20 +339,49 @@ void measure_keygen(fpr isigma_kg) {
 
 	gettimeofday(&t0, NULL);
 
+	/* long long sumval[16], sumsqval[16];
+	memset(sumval, 0, sizeof sumval);
+	memset(sumsqval, 0, sizeof sumsqval); */
+
 	int fails = 0;
 	for (int i = 0; i < n_repetitions; i++) {
 		// Generate key pair.
 		keygen_count_fails(&sc, f, g, F, G, q00, q10, q11, logn, b, isigma_kg, &fails);
+
 		memcpy(q00i, q00, sizeof(q00));
 		memcpy(q10i, q10, sizeof(q10));
 		memcpy(q11i, q11, sizeof(q11));
+
 		Zf(iFFT)(q00i, logn);
 		Zf(iFFT)(q10i, logn);
 		Zf(iFFT)(q11i, logn);
-		poly_output(q00i, logn);
-		poly_output(q10i, logn);
-		poly_output(q11i, logn);
-		printf("\n");
+
+		fpr_to_int16(q00n, q00i, logn);
+		fpr_to_int16(q10n, q10i, logn);
+
+		// poly_output(q00i, logn);
+		// poly_output(q10i, logn);
+		// poly_output(q11i, logn);
+
+		assert(q00n[n / 2] == 0);
+		for (size_t u = 1; u < n; u++) {
+			assert(q00n[n - u] == -q00n[u]);
+		}
+
+		size_t pubkey_sz =
+			Zf(comp_encode_q00)(NULL, 0, q00n, logn) +
+			Zf(comp_encode_q10)(NULL, 0, q10n, logn);
+		if (pubkey_sz >= 1024)
+			printf("Public key size (bits): \t%zu\n", pubkey_sz);
+
+		/* for (size_t lobits = 1; lobits < 16; lobits++) {
+			size_t s = Zf(comp_encode_q10)(NULL, 0, q10n, logn, lobits);
+			if (s == 0) {
+				printf("Failed for lobits=%zu\n", lobits);
+			}
+			sumval[lobits] += s;
+			sumsqval[lobits] += s*s;
+		} */
 	}
 
 	gettimeofday(&t1, NULL);
@@ -118,62 +389,15 @@ void measure_keygen(fpr isigma_kg) {
 	printf("Average time per keygen: %.3f ms\n", kg_duration / 1000.0);
 	// This requires catching failed attempts
 	printf("Probability failure: %.2f%%\n", 100.0 * fails / n_repetitions);
-}
 
-void measure_signatures(fpr isigma_kg, fpr isigma_sig, fpr verif_bound) {
-	uint8_t b[42 << logn];
-	int8_t f[n], g[n], F[n], G[n], h[n];
-	int16_t s0[n], reconstructed_s0[n], s1[n];
-	fpr q00[n], q10[n], q11[n];
-	unsigned char seed[48];
-	inner_shake256_context sc;
-
-	const int n_repetitions = 500;
-
-	// Initialize a RNG.
-	randombytes(seed, sizeof seed);
-	inner_shake256_init(&sc);
-	inner_shake256_inject(&sc, seed, sizeof seed);
-	inner_shake256_flip(&sc);
-
-	int histogram[10000] = {};
-
-	for (int rep = 0; rep < n_repetitions; rep++) {
-		// Generate key pair.
-		Zf(keygen)(&sc, f, g, F, G, q00, q10, q11, logn, b, isigma_kg);
-
-		// make a signature of a random message...
-		randombytes((unsigned char *)h, sizeof h);
-
-		// Compute the signature.
-		Zf(complete_sign)(&sc, s0, s1, f, g, F, G, h, logn, isigma_sig, b);
-
-		for (size_t u = 0; u < n; u++)
-			histogram[5000 + s1[u]]++;
-
-		if (!Zf(complete_verify)(h, s0, s1, q00, q10, q11, logn, verif_bound, b)) {
-			fprintf(stderr, "Invalid signature generated!\n");
-		} else {
-			if (!Zf(verify)(h, reconstructed_s0, s1, q00, q10, q11, logn, verif_bound, b)) {
-				fprintf(stderr, "Babai was not succesful!\n");
-			} else {
-				int s0_eq = 1;
-				for (size_t u = 0; u < n; u++)
-					s0_eq &= (s0[u] == reconstructed_s0[u]);
-				if (!s0_eq)
-					fprintf(stderr, "Reconstructed s0 was different\n");
-			}
-		}
+/*
+	// Gather statistics
+	for (size_t lobits = 1; lobits < 16; lobits++) {
+		double avg = ((double) sumval[lobits]) / n_repetitions;
+		double var = ((double) sumsqval[lobits]) / n_repetitions - avg*avg;
+		printf("Average (lobits=%zu): %.2f\t stddev %.2f\n", lobits, avg, sqrt(var));
 	}
-
-	printf("All signatures were verified\n");
-	for (int i = 0; i < 10000; i++) {
-		int freq = histogram[i];
-		if (freq != 0) {
-			printf("(%d,%d),", i - 5000, freq);
-		}
-	}
-	printf("\n");
+*/
 }
 
 int8_t valid_sigma(fpr sigma_sig) {
@@ -182,10 +406,6 @@ int8_t valid_sigma(fpr sigma_sig) {
 }
 
 int main() {
-	const fpr sigma_kg  = fpr_div(fpr_of(1425), fpr_of(1000));
-	const fpr sigma_sig = fpr_div(fpr_of(1292), fpr_of(1000));
-	const fpr verif_margin = fpr_div(sigma_kg, sigma_sig);
-
 	// set seed
 	struct timeval tv;
 	gettimeofday(&tv, NULL);
@@ -193,12 +413,9 @@ int main() {
 	printf("Seed: %u\n", seed);
 	srand(seed);
 
-	assert(valid_sigma(sigma_kg) && valid_sigma(sigma_sig));
-
-	fpr isigma_kg = fpr_inv(sigma_kg), isigma_sig = fpr_inv(sigma_sig);
-	fpr verif_bound = fpr_mul(fpr_sqr(fpr_mul(verif_margin, fpr_double(sigma_sig))), fpr_double(fpr_sqr(fpr_of(n))));
-
+	const fpr sigma_kg  = fpr_div(fpr_of(1425), fpr_of(1000));
+	assert(valid_sigma(sigma_kg));
+	fpr isigma_kg = fpr_inv(sigma_kg);
 	measure_keygen(isigma_kg);
-	// measure_signatures(isigma_kg, isigma_sig, verif_bound);
 	return 0;
 }
