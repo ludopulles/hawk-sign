@@ -40,6 +40,164 @@ void poly_output(fpr *p, size_t logn) {
 	printf("\n");
 }
 
+
+#define MAX_Q00 (512) // ~6*sigma
+#define MAXLEN_Q00 (96) // max path in the tree
+// #define MAX_Q10 (2048) // sufficient enough
+// #define MAXLEN_Q10 (21) // max path in the tree
+#define MAX_Q10 (4096)
+#define MAXLEN_Q10 (56)
+
+struct {
+	uint16_t a[MAX_Q00][2]; // { left child, right child }
+	uint16_t p[2*MAX_Q00]; // parent
+} huffman_tree_q00;
+struct {
+	uint16_t a[MAX_Q10][2]; // { left child, right child }
+	uint16_t p[2*MAX_Q10]; // parent
+} huffman_tree_q10;
+
+void init_huffman_trees() {
+	float freq[2*MAX_Q10], sigma = 45.75;
+	int len[2*MAX_Q10];
+
+#define BUILD_TREE(T, N, L)                                              \
+	/* calculate PDF of normal distribution */                           \
+	memset(len, 0, sizeof len);                                          \
+	for (int x = 0; x < N; x++)                                          \
+		freq[N + x] = exp((float)-x * x / (2.0 * sigma * sigma));        \
+                                                                         \
+	/* construct the tree */                                             \
+	for (uint16_t node = N; --node >= 1; ) {                             \
+		/* find 2 nodes with smallest frequencies */                     \
+		uint16_t l = 0, r = 0;                                           \
+		for (uint16_t idx = node; ++idx < 2*N; ) {                       \
+			if (freq[idx] < 0) continue;                                 \
+			if (!l || freq[idx] < freq[l]) r = l, l = idx;               \
+			else if (!r || freq[idx] < freq[r]) r = idx;                 \
+		}                                                                \
+		/* hide frequency */                                             \
+		freq[node] = freq[l] + freq[r];                                  \
+		freq[l] = freq[r] = -1;                                          \
+		len[node] = 1 + (len[l] > len[r] ? len[l] : len[r]);             \
+		T.p[l] = T.p[r] = node;                                          \
+		T.a[node][0] = l;                                                \
+		T.a[node][1] = r;                                                \
+	}                                                                    \
+	assert(len[1] <= L && "Longest codeword is too long!");              \
+	if (len[1] != L) printf("Longest codeword has length %d\n", len[1]) // ;
+
+	BUILD_TREE(huffman_tree_q00, MAX_Q00, MAXLEN_Q00);
+	sigma = 512.0;
+	BUILD_TREE(huffman_tree_q10, MAX_Q10, MAXLEN_Q10);
+}
+
+size_t Zf(huffman_encode_q00)(void *out, size_t max_out_len, const int16_t *x, unsigned logn) {
+	uint8_t *buf = (uint8_t *)out;
+	size_t n = MKN(logn), u, v = 0;
+	uint8_t acc = 0, acc_len = 0, steps[MAXLEN_Q00];
+
+	/*
+	 * The first value of q00 is of the order sigma_kg^2 2d,
+	 * but definitely << 8d when sigma_kg = 1.425, by the standard
+	 * Laurent-Massart bound (see https://en.wikipedia.org/wiki/Chi-squared_distribution#Concentration).
+	 * Here, be lazy and print the whole of x[0].
+	 */
+
+	// output x[0] directly, without using acc
+	if (buf != NULL) {
+		if (max_out_len < 2) return 0;
+		buf[0] = ((uint16_t)x[0]) >> 8;
+		buf[1] = (uint8_t)x[0];
+	}
+	v += 2;
+
+	for (u = 1; u < n/2; u ++)
+		if (x[u] <= -MAX_Q00 || x[u] >= MAX_Q00) return 0;
+	for (u = 1; u < n/2; u ++) {
+		// Get sign and absolute value of next integer; push the sign bit.
+		acc <<= 1;
+		int16_t t = x[u];
+		if (t < 0) t = -t, acc |= 1;
+
+		// store the steps to go up the tree in the buffer
+		size_t nsteps = 0;
+		for (int16_t idx = MAX_Q00 + t; idx > 1; ) {
+			int16_t next_idx = huffman_tree_q00.p[idx];
+			steps[nsteps++] = huffman_tree_q00.a[next_idx][1] == idx ? 1 : 0;
+			idx = next_idx;
+		}
+
+		// print the bits in reverse order, i.e. from top to bottom
+		while (nsteps --> 0) {
+			acc = (acc << 1) | steps[nsteps];
+			if (++acc_len == 8) {
+				if (buf != NULL) {
+					if (v >= max_out_len) return 0;
+					buf[v] = acc;
+				}
+				acc_len = acc = 0; // reset acc
+				v++;
+			}
+		}
+	}
+	// printf("\n");
+
+	// Flush remaining bits (if any).
+	if (acc_len > 0) {
+		if (buf != NULL) {
+			if (v >= max_out_len) return 0;
+			buf[v] = (uint8_t)(acc << (8 - acc_len));
+		}
+		v++;
+	}
+	return v;
+}
+
+size_t Zf(huffman_encode_q10)(void *out, size_t max_out_len, const int16_t *x, unsigned logn) {
+	uint8_t *buf = (uint8_t *)out;
+	size_t n = MKN(logn), u, v = 0;
+	uint8_t acc = 0, acc_len = 0, steps[MAXLEN_Q10];
+
+	for (u = 0; u < n; u ++)
+		if (x[u] <= -MAX_Q10 || x[u] >= MAX_Q10) return 0;
+	for (u = 0; u < n; u ++) {
+		// Get sign and absolute value of next integer; push the sign bit.
+		acc <<= 1;
+		int16_t t = x[u];
+		if (t < 0) t = -t, acc |= 1;
+
+		size_t nsteps = 0;
+		for (int16_t idx = MAX_Q10 + t; idx > 1; ) {
+			int16_t next_idx = huffman_tree_q10.p[idx];
+			steps[nsteps++] = huffman_tree_q10.a[next_idx][1] == idx ? 1 : 0;
+			idx = next_idx;
+		}
+
+		while (nsteps --> 0) {
+			acc = (acc << 1) | steps[nsteps];
+			if (++acc_len == 8) {
+				if (buf != NULL) {
+					if (v >= max_out_len) return 0;
+					buf[v] = acc;
+				}
+				acc_len = acc = 0; // reset acc
+				v++;
+			}
+		}
+	}
+
+	// Flush remaining bits (if any).
+	if (acc_len > 0) {
+		if (buf != NULL) {
+			if (v >= max_out_len) return 0;
+			buf[v] = (uint8_t)(acc << (8 - acc_len));
+		}
+		v++;
+	}
+	return v;
+}
+
 /* see inner.h */
 size_t
 Zf(comp_encode_q00)(
@@ -343,6 +501,9 @@ void measure_keygen(fpr isigma_kg) {
 	memset(sumval, 0, sizeof sumval);
 	memset(sumsqval, 0, sizeof sumsqval); */
 
+	size_t tot_h00 = 0, tot_c00 = 0;
+	size_t tot_h10 = 0, tot_c10 = 0;
+
 	int fails = 0;
 	for (int i = 0; i < n_repetitions; i++) {
 		// Generate key pair.
@@ -363,16 +524,31 @@ void measure_keygen(fpr isigma_kg) {
 		// poly_output(q10i, logn);
 		// poly_output(q11i, logn);
 
-		assert(q00n[n / 2] == 0);
-		for (size_t u = 1; u < n; u++) {
-			assert(q00n[n - u] == -q00n[u]);
+		/* assert(q00n[n / 2] == 0);
+		for (size_t u = 1; u < n; u++) assert(q00n[n - u] == -q00n[u]); */
+
+		size_t pubkey_sz_hq00 = Zf(huffman_encode_q00)(NULL, 0, q00n, logn);
+		size_t pubkey_sz_hq10 = Zf(huffman_encode_q10)(NULL, 0, q10n, logn);
+		size_t pubkey_sz_cq00 = Zf(comp_encode_q00)(NULL, 0, q00n, logn);
+		size_t pubkey_sz_cq10 = Zf(comp_encode_q10)(NULL, 0, q10n, logn);
+
+		if (!pubkey_sz_hq00 || !pubkey_sz_hq10 || !pubkey_sz_cq00 ||!pubkey_sz_cq10) {
+			// printf("Encoding failed at step %d\n", i);
+			i--; continue;
 		}
 
-		size_t pubkey_sz =
-			Zf(comp_encode_q00)(NULL, 0, q00n, logn) +
-			Zf(comp_encode_q10)(NULL, 0, q10n, logn);
-		if (pubkey_sz >= 1024)
-			printf("Public key size (bits): \t%zu\n", pubkey_sz);
+		tot_h00 += pubkey_sz_hq00;
+		tot_c00 += pubkey_sz_cq00;
+		tot_h10 += pubkey_sz_hq10;
+		tot_c10 += pubkey_sz_cq10;
+		// continue;
+
+		size_t pubkey_sz_c = pubkey_sz_cq00 + pubkey_sz_cq10;
+		size_t pubkey_sz_h = pubkey_sz_hq00 + pubkey_sz_hq10;
+
+		/* printf("Public key size (bits): \t%zu (%zu + %zu) vs %zu (%zu + %zu)\n",
+			pubkey_sz_c, pubkey_sz_cq00, pubkey_sz_cq10,
+			pubkey_sz_h, pubkey_sz_hq00, pubkey_sz_hq10); */
 
 		/* for (size_t lobits = 1; lobits < 16; lobits++) {
 			size_t s = Zf(comp_encode_q10)(NULL, 0, q10n, logn, lobits);
@@ -389,6 +565,12 @@ void measure_keygen(fpr isigma_kg) {
 	printf("Average time per keygen: %.3f ms\n", kg_duration / 1000.0);
 	// This requires catching failed attempts
 	printf("Probability failure: %.2f%%\n", 100.0 * fails / n_repetitions);
+
+	printf("Type |  Total\n");
+	printf("hq00 | %6zu\n", tot_h00);
+	printf("cq00 | %6zu\n", tot_c00);
+	printf("hq10 | %6zu\n", tot_h10);
+	printf("cq10 | %6zu\n", tot_c10);
 
 /*
 	// Gather statistics
@@ -412,6 +594,8 @@ int main() {
 	unsigned seed = 1000000 * tv.tv_sec + tv.tv_usec;
 	printf("Seed: %u\n", seed);
 	srand(seed);
+
+	init_huffman_trees();
 
 	const fpr sigma_kg  = fpr_div(fpr_of(1425), fpr_of(1000));
 	assert(valid_sigma(sigma_kg));

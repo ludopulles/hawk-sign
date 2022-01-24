@@ -13,7 +13,7 @@ LIBS = -lpthread -lm
 CPP = g++
 CPPFLAGS = --std=c++11 $(CFLAGS)
 
-OBJ = build/fft.o build/fpr.o build/keygen.o build/rng.o build/sampler.o build/shake.o build/sign.o build/vrfy.o
+OBJ = build/fft.o build/ffo.o build/fpr.o build/keygen.o build/rng.o build/sampler.o build/shake.o build/sign.o build/vrfy.o
 
 HEAD = fpr.h inner.h
 
@@ -46,6 +46,8 @@ build/test_babai: test_babai.cpp build/test_babai.o $(OBJ)
 
 build/fft.o: fft.c $(HEAD)
 	$(CC) $(CFLAGS) -c -o build/fft.o fft.c
+build/ffo.o: ffo.c $(HEAD)
+	$(CC) $(CFLAGS) -c -o build/ffo.o ffo.c
 build/fpr.o: fpr.c $(HEAD)
 	$(CC) $(CFLAGS) -c -o build/fpr.o fpr.c
 build/keygen.o: keygen.c $(HEAD)

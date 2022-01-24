@@ -46,15 +46,15 @@ static inline unsigned
 ffLDL_treesize(unsigned logn)
 {
 	/*
-	 * For logn = 0 (polynomials are constant), the "tree" is a
-	 * single element. Otherwise, the tree node has size 2^logn, and
-	 * has two child trees for size logn-1 each. Thus, treesize s()
-	 * must fulfill these two relations:
+	 * For logn = 0 (polynomials are constant), the tree is empty as the leaves
+	 * do not require any information to be stored. Otherwise, the tree node
+	 * has size 2^logn, and has two child trees for size logn-1 each. Thus,
+	 * treesize s() must fulfill these two relations:
 	 *
-	 *   s(0) = 1
+	 *   s(0) = s(1) = 0
 	 *   s(logn) = (2^logn) + 2*s(logn-1)
 	 */
-	return (logn + 1) << logn;
+	return (logn - 1) << logn;
 }
 
 /*
@@ -69,13 +69,15 @@ ffLDL_fft_inner(fpr *restrict tree,
 	fpr *restrict g0, fpr *restrict g1, unsigned logn, fpr *restrict tmp)
 {
 	size_t n, hn;
+	fpr *tree0, *tree1;
+
+	if (logn == 0)
+		return;
 
 	n = MKN(logn);
-	if (n == 1) {
-		tree[0] = g0[0];
-		return;
-	}
 	hn = n >> 1;
+	tree0 = tree + n;
+	tree1 = tree + n + ffLDL_treesize(logn - 1);
 
 	/*
 	 * The LDL decomposition yields L (which is written in the tree)
@@ -97,220 +99,29 @@ ffLDL_fft_inner(fpr *restrict tree,
 	 * Each split result is the first row of a new auto-adjoint
 	 * quasicyclic matrix for the next recursive step.
 	 */
-	ffLDL_fft_inner(tree + n,
-		g1, g1 + hn, logn - 1, tmp);
-	ffLDL_fft_inner(tree + n + ffLDL_treesize(logn - 1),
-		g0, g0 + hn, logn - 1, tmp);
-}
-
-/*
- * Compute the ffLDL tree of an auto-adjoint matrix G. The matrix
- * is provided as three polynomials (FFT representation).
- *
- * The "tree" array is filled with the computed tree, of size
- * (logn+1)*(2^logn) elements (see ffLDL_treesize()).
- *
- * Input arrays MUST NOT overlap, except possibly the three unmodified
- * arrays g00, g01 and g11. tmp[] should have room for at least three
- * polynomials of 2^logn elements each.
- */
-static void
-ffLDL_fft(fpr *restrict tree, const fpr *restrict g00,
-	const fpr *restrict g01, const fpr *restrict g11,
-	unsigned logn, fpr *restrict tmp)
-{
-	size_t n, hn;
-	fpr *d00, *d11;
-
-	n = MKN(logn);
-	if (n == 1) {
-		tree[0] = g00[0];
-		return;
-	}
-	hn = n >> 1;
-	d00 = tmp;
-	d11 = tmp + n;
-	tmp += n << 1;
-
-	memcpy(d00, g00, n * sizeof *g00);
-	Zf(poly_LDLmv_fft)(d11, tree, g00, g01, g11, logn);
-
-	Zf(poly_split_fft)(tmp, tmp + hn, d00, logn);
-	Zf(poly_split_fft)(d00, d00 + hn, d11, logn);
-	memcpy(d11, tmp, n * sizeof *tmp);
-	ffLDL_fft_inner(tree + n,
-		d11, d11 + hn, logn - 1, tmp);
-	ffLDL_fft_inner(tree + n + ffLDL_treesize(logn - 1),
-		d00, d00 + hn, logn - 1, tmp);
-}
-
-/*
- * Normalize an ffLDL tree: each leaf of value x is replaced with
- * sigma / sqrt(x).
- */
-static void
-ffLDL_binary_normalize(fpr *tree, unsigned orig_logn, unsigned logn)
-{
-	/*
-	 * TODO: make an iterative version.
-	 */
-	size_t n;
-
-	n = MKN(logn);
-	if (n == 1) {
-		/*
-		 * We actually store in the tree leaf the inverse of
-		 * the value mandated by the specification: this
-		 * saves a division both here and in the sampler.
-		 */
-		tree[0] = fpr_mul(fpr_sqrt(tree[0]), fpr_inv_sigma[orig_logn]);
-	} else {
-		ffLDL_binary_normalize(tree + n, orig_logn, logn - 1);
-		ffLDL_binary_normalize(tree + n + ffLDL_treesize(logn - 1),
-			orig_logn, logn - 1);
-	}
-}
-
-/* =================================================================== */
-
-/*
- * Convert an integer polynomial (with small values) into the
- * representation with complex numbers.
- */
-static void
-smallints_to_fpr(fpr *r, const int8_t *t, unsigned logn)
-{
-	size_t n, u;
-
-	n = MKN(logn);
-	for (u = 0; u < n; u ++) {
-		r[u] = fpr_of(t[u]);
-	}
-}
-
-/*
- * The expanded private key contains:
- *  - The B0 matrix (four elements)
- *  - The ffLDL tree
- */
-
-static inline size_t
-skoff_b00(unsigned logn)
-{
-	(void)logn;
-	return 0;
-}
-
-static inline size_t
-skoff_b01(unsigned logn)
-{
-	return MKN(logn);
-}
-
-static inline size_t
-skoff_b10(unsigned logn)
-{
-	return 2 * MKN(logn);
-}
-
-static inline size_t
-skoff_b11(unsigned logn)
-{
-	return 3 * MKN(logn);
-}
-
-static inline size_t
-skoff_tree(unsigned logn)
-{
-	return 4 * MKN(logn);
+	ffLDL_fft_inner(tree0, g1, g1 + hn, logn - 1, tmp);
+	ffLDL_fft_inner(tree1, g0, g0 + hn, logn - 1, tmp);
 }
 
 /* see inner.h */
 void
-Zf(expand_privkey)(fpr *restrict expanded_key,
-	const int8_t *f, const int8_t *g,
-	const int8_t *F, const int8_t *G,
-	unsigned logn, uint8_t *restrict tmp)
+Zf(ffLDL_fft)(fpr *restrict tree, const fpr *restrict q00, unsigned logn,
+	fpr *restrict tmp)
 {
-	size_t n;
-	fpr *rf, *rg, *rF, *rG;
-	fpr *b00, *b01, *b10, *b11;
-	fpr *g00, *g01, *g11, *gxx;
-	fpr *tree;
+	size_t n, hn;
+	fpr *g0, *g1;
+
+	if (logn <= 1)
+		return;
 
 	n = MKN(logn);
-	b00 = expanded_key + skoff_b00(logn);
-	b01 = expanded_key + skoff_b01(logn);
-	b10 = expanded_key + skoff_b10(logn);
-	b11 = expanded_key + skoff_b11(logn);
-	tree = expanded_key + skoff_tree(logn);
+	hn = n >> 1;
+	g0 = tmp;
+	g1 = tmp + hn;
+	tmp += n;
 
-	/*
-	 * We load the private key elements directly into the B0 matrix,
-	 * since B0 = [[g, -f], [G, -F]].
-	 */
-	rf = b01;
-	rg = b00;
-	rF = b11;
-	rG = b10;
-
-	smallints_to_fpr(rf, f, logn);
-	smallints_to_fpr(rg, g, logn);
-	smallints_to_fpr(rF, F, logn);
-	smallints_to_fpr(rG, G, logn);
-
-	/*
-	 * Compute the FFT for the key elements, and negate f and F.
-	 */
-	Zf(FFT)(rf, logn);
-	Zf(FFT)(rg, logn);
-	Zf(FFT)(rF, logn);
-	Zf(FFT)(rG, logn);
-	Zf(poly_neg)(rf, logn);
-	Zf(poly_neg)(rF, logn);
-
-	/*
-	 * The Gram matrix is G = B·B*. Formulas are:
-	 *   g00 = b00*adj(b00) + b01*adj(b01)
-	 *   g01 = b00*adj(b10) + b01*adj(b11)
-	 *   g10 = b10*adj(b00) + b11*adj(b01)
-	 *   g11 = b10*adj(b10) + b11*adj(b11)
-	 *
-	 * For historical reasons, this implementation uses
-	 * g00, g01 and g11 (upper triangle).
-	 */
-	g00 = (fpr *)tmp;
-	g01 = g00 + n;
-	g11 = g01 + n;
-	gxx = g11 + n;
-
-	memcpy(g00, b00, n * sizeof *b00);
-	Zf(poly_mulselfadj_fft)(g00, logn);
-	memcpy(gxx, b01, n * sizeof *b01);
-	Zf(poly_mulselfadj_fft)(gxx, logn);
-	Zf(poly_add)(g00, gxx, logn);
-
-	memcpy(g01, b00, n * sizeof *b00);
-	Zf(poly_muladj_fft)(g01, b10, logn);
-	memcpy(gxx, b01, n * sizeof *b01);
-	Zf(poly_muladj_fft)(gxx, b11, logn);
-	Zf(poly_add)(g01, gxx, logn);
-
-	memcpy(g11, b10, n * sizeof *b10);
-	Zf(poly_mulselfadj_fft)(g11, logn);
-	memcpy(gxx, b11, n * sizeof *b11);
-	Zf(poly_mulselfadj_fft)(gxx, logn);
-	Zf(poly_add)(g11, gxx, logn);
-
-	/*
-	 * Compute the Falcon tree.
-	 */
-	ffLDL_fft(tree, g00, g01, g11, logn, gxx);
-
-	/*
-	 * Normalize tree.
-	 */
-	ffLDL_binary_normalize(tree, logn, logn);
+	Zf(poly_split_fft)(g0, g1, q00, logn);
+	ffLDL_fft_inner(tree, g0, g1, logn - 1, tmp);
 }
 
 /*
@@ -318,7 +129,7 @@ Zf(expand_privkey)(fpr *restrict expanded_key,
  * tmp[] must have size for at least two polynomials of size 2^logn.
  */
 static void
-ffNearestPlane(void *samp_ctx, fpr *restrict z0, fpr *restrict z1,
+ffNearestPlane_inner(fpr *restrict z0, fpr *restrict z1,
 	const fpr *restrict tree, const fpr *restrict t0, const fpr *restrict t1,
 	unsigned logn, fpr *restrict tmp)
 {
@@ -330,20 +141,19 @@ ffNearestPlane(void *samp_ctx, fpr *restrict z0, fpr *restrict z1,
 	 * Inline the last two recursion levels to get better performance here.
 	 */
 	if (logn == 0) {
-		fpr x0, x1, sigma;
-
-		x0 = t0[0];
-		x1 = t1[0];
-		sigma = tree[0];
-		z0[0] = fpr_of(Zf(sampler)(samp_ctx, x0, sigma));
-		z1[0] = fpr_of(Zf(sampler)(samp_ctx, x1, sigma));
+		/*
+		 * Simple rounding when n=1, since Z[\zeta] = Z[i] has two orthogonal
+		 * basis vectors so Babai == simple rounding in this case.
+		 */
+		z0[0] = fpr_of(fpr_rint(t0[0]));
+		z1[0] = fpr_of(fpr_rint(t1[0]));
 		return;
 	}
 
 	/*
 	 * General recursive case (logn >= 1).
 	 */
-	n = (size_t)1 << logn;
+	n = MKN(logn);
 	hn = n >> 1;
 	tree0 = tree + n;
 	tree1 = tree + n + ffLDL_treesize(logn - 1);
@@ -354,7 +164,7 @@ ffNearestPlane(void *samp_ctx, fpr *restrict z0, fpr *restrict z1,
 	 * merge back into z1.
 	 */
 	Zf(poly_split_fft)(z1, z1 + hn, t1, logn);
-	ffNearestPlane(samp_ctx, tmp, tmp + hn,
+	ffNearestPlane_inner(tmp, tmp + hn,
 		tree1, z1, z1 + hn, logn - 1, tmp + n);
 	Zf(poly_merge_fft)(z1, tmp, tmp + hn, logn);
 
@@ -370,10 +180,309 @@ ffNearestPlane(void *samp_ctx, fpr *restrict z0, fpr *restrict z1,
 	 * Second recursive invocation.
 	 */
 	Zf(poly_split_fft)(z0, z0 + hn, tmp, logn);
-	ffNearestPlane(samp_ctx, tmp, tmp + hn,
+	ffNearestPlane_inner(tmp, tmp + hn,
 		tree0, z0, z0 + hn, logn - 1, tmp + n);
 	Zf(poly_merge_fft)(z0, tmp, tmp + hn, logn);
 }
 
-// TODO: implement naive LDL-decomposition and Babai
+/*
+ * Perform Fast Fourier Sampling for target vector t and LDL tree T.
+ * tmp[] must have size for at least two polynomials of size 2^logn.
+ */
+void
+Zf(ffNearestPlane)(fpr *restrict z, const fpr *restrict tree,
+	const fpr *restrict t, unsigned logn, fpr *restrict tmp)
+{
+	size_t n, hn;
+	fpr *t0, *t1;
 
+	n = MKN(logn);
+	hn = n >> 1;
+
+	t0 = tmp;
+	t1 = t0 + hn;
+	tmp += n;
+
+	Zf(poly_split_fft)(t0, t1, t, logn);
+	ffNearestPlane_inner(z, z + hn, tree, t0, t1, logn - 1, tmp);
+	memcpy(t0, z, n * sizeof(fpr));
+	Zf(poly_merge_fft)(z, t0, t1, logn);
+}
+
+/*
+ * Convert an integer polynomial (with small values) into the
+ * representation with complex numbers.
+ */
+static void
+smallints_to_fpr(fpr *r, const int8_t *t, unsigned logn)
+{
+	size_t n = MKN(logn), u;
+	for (u = 0; u < n; u ++) {
+		r[u] = fpr_of(t[u]);
+	}
+}
+
+
+void
+Zf(ffBabai)(const int8_t *restrict f, const int8_t *restrict g,
+	int8_t *restrict F, int8_t *restrict G, unsigned logn,
+	fpr *restrict tree, fpr *restrict tmp)
+{
+	size_t n = MKN(logn);
+
+	fpr *t = tmp, *z = t + n;
+	fpr *_f = z + n, *_g = _f + n;
+	fpr *_F = _g + n, *_G = _F + n;
+	tmp += 6*n;
+
+	smallints_to_fpr(_f, f, logn);
+	smallints_to_fpr(_g, g, logn);
+	smallints_to_fpr(_F, F, logn);
+	smallints_to_fpr(_G, G, logn);
+	Zf(FFT)(_f, logn);
+	Zf(FFT)(_g, logn);
+	Zf(FFT)(_F, logn);
+	Zf(FFT)(_G, logn);
+
+	// calculate (F adj(f) + G adj(g)) / (f adj(f) + g adj(g))
+	Zf(poly_add_muladj_fft)(t, _F, _G, _f, _g, logn);
+	Zf(poly_invnorm2_fft)(z, _f, _g, logn);
+	Zf(poly_mul_autoadj_fft)(t, z, logn);
+
+	// inverting an autoadj polynomial:
+	for (size_t u = 0; u < n/2; u++)
+		z[u] = fpr_inv(z[u]),
+		z[u + n/2] = fpr_zero;
+
+	Zf(ffLDL_fft)(tree, z, logn, tmp);
+	Zf(ffNearestPlane)(z, tree, t, logn, tmp);
+
+	/* memcpy(_F, z, n * sizeof(fpr));
+	Zf(iFFT)(_F, logn);
+	printf("z = ");
+	for (size_t u = 0; u < n; u++) printf("%d ", fpr_rint(_F[u]));
+	printf("\n"); */
+
+	Zf(poly_mul_fft)(_f, z, logn);
+	Zf(poly_mul_fft)(_g, z, logn);
+	Zf(iFFT)(_f, logn);
+	Zf(iFFT)(_g, logn);
+	// subtract (f,g) from (F,G)
+
+	for (size_t u = 0; u < n; u++) {
+		F[u] -= fpr_rint(_f[u]);
+		G[u] -= fpr_rint(_g[u]);
+	}
+}
+
+/* =======================================================================
+ * Do straight Babai, if you build the tree once for every Babai call,
+ * so building tree is not more efficient.
+ */
+static void
+ffBabai_inner(
+	fpr *restrict z0, fpr *restrict z1,
+	fpr *restrict g0, fpr *restrict g1,
+	fpr *restrict t0, fpr *restrict t1,
+	unsigned logn, fpr *restrict tmp)
+{
+	size_t n, hn;
+	fpr *d11, *l10;
+
+	/*
+	 * Normal end of recursion is for logn == 0.
+	 * Inline the last two recursion levels to get better performance here.
+	 */
+	if (logn == 0) {
+		/*
+		 * Simple rounding when n=1, since Z[\zeta] = Z[i] has two orthogonal
+		 * basis vectors so Babai == simple rounding in this case.
+		 */
+		z0[0] = fpr_of(fpr_rint(t0[0]));
+		z1[0] = fpr_of(fpr_rint(t1[0]));
+		return;
+	}
+
+	n = MKN(logn);
+	hn = n >> 1;
+
+	d11 = tmp;
+	l10 = d11 + n;
+	tmp += 2*n;
+
+	/*
+	 * The LDL decomposition yields L and the diagonal of D. Note that d00 = g0.
+	 */
+	Zf(poly_LDLmv_fft)(d11, l10, g0, g1, g0, logn);
+
+	/*
+	 * Split d00 (currently in g0) and d11 (currently in tmp). We
+	 * reuse g0 and g1 as temporary storage spaces:
+	 *   d00 splits into g1, g1+hn
+	 *   d11 splits into g0, g0+hn
+	 */
+	Zf(poly_split_fft)(g1, g1 + hn, g0, logn);
+	Zf(poly_split_fft)(g0, g0 + hn, d11, logn);
+
+	/*
+	 * Each split result is the first row of a new auto-adjoint
+	 * quasicyclic matrix for the next recursive step.
+	 * We split t1 into z1 (reused as temporary storage), then do
+	 * the recursive invocation, with output in tmp. We finally
+	 * merge back into z1.
+	 */
+	Zf(poly_split_fft)(z1, z1 + hn, t1, logn);
+	ffBabai_inner(tmp, tmp + hn, g0, g0 + hn, z1, z1 + hn, logn - 1, tmp + n);
+	Zf(poly_merge_fft)(z1, tmp, tmp + hn, logn);
+
+	/*
+	 * Compute tb0 = t0 + (t1 - z1) * L. Value tb0 ends up in tmp[].
+	 */
+	memcpy(tmp, t1, n * sizeof *t1);
+	Zf(poly_sub)(tmp, z1, logn);
+	Zf(poly_mul_fft)(tmp, l10, logn);
+	Zf(poly_add)(tmp, t0, logn);
+
+	/*
+	 * Second recursive invocation.
+	 */
+	Zf(poly_split_fft)(z0, z0 + hn, tmp, logn);
+	ffBabai_inner(tmp, tmp + hn, g1, g1 + hn, z0, z0 + hn, logn - 1, tmp + n);
+	Zf(poly_merge_fft)(z0, tmp, tmp + hn, logn);
+}
+
+void
+Zf(ffStraightBabai)(const int8_t *restrict f, const int8_t *restrict g,
+	int8_t *restrict F, int8_t *restrict G,
+	unsigned logn, fpr *restrict tmp)
+{
+	size_t n, hn;
+	fpr *t, *z, *_f, *_g, *_F, *_G, *g0, *g1, *t0, *t1;
+
+	n = MKN(logn);
+	hn = n >> 1;
+
+	t = tmp;
+	z = t + n;
+	_f = z + n;
+	_g = _f + n;
+	_F = _g + n;
+	_G = _F + n;
+	tmp += 6*n;
+
+	smallints_to_fpr(_f, f, logn);
+	smallints_to_fpr(_g, g, logn);
+	smallints_to_fpr(_F, F, logn);
+	smallints_to_fpr(_G, G, logn);
+	Zf(FFT)(_f, logn);
+	Zf(FFT)(_g, logn);
+	Zf(FFT)(_F, logn);
+	Zf(FFT)(_G, logn);
+
+	// calculate (F adj(f) + G adj(g)) / (f adj(f) + g adj(g))
+	Zf(poly_add_muladj_fft)(t, _F, _G, _f, _g, logn);
+	Zf(poly_invnorm2_fft)(z, _f, _g, logn);
+	Zf(poly_mul_autoadj_fft)(t, z, logn);
+
+	// inverting an autoadj polynomial:
+	for (size_t u = 0; u < n/2; u++)
+		z[u] = fpr_inv(z[u]),
+		z[u + n/2] = fpr_zero;
+
+	// Execute Babai with Gram-matrix z, target t, and put the result in z.
+	// ffLDL_fft(tree, z, logn, tmp);
+	// ffNearestPlane(z, tree, t, logn, tmp);
+	// {
+	g0 = tmp;
+	g1 = g0 + hn;
+	t0 = g1 + hn;
+	t1 = t0 + hn;
+	tmp += 2*n;
+
+	Zf(poly_split_fft)(g0, g1, z, logn);
+	Zf(poly_split_fft)(t0, t1, t, logn);
+
+	ffBabai_inner(t, t + hn, g0, g1, t0, t1, logn - 1, tmp);
+	Zf(poly_merge_fft)(z, t, t + hn, logn);
+	// }
+
+	/* memcpy(_F, z, n * sizeof(fpr));
+	Zf(iFFT)(_F, logn);
+	printf("z = ");
+	for (size_t u = 0; u < n; u++) printf("%d ", fpr_rint(_F[u]));
+	printf("\n"); */
+
+	Zf(poly_mul_fft)(_f, z, logn);
+	Zf(poly_mul_fft)(_g, z, logn);
+	Zf(iFFT)(_f, logn);
+	Zf(iFFT)(_g, logn);
+	// subtract (f,g) from (F,G)
+
+	for (size_t u = 0; u < n; u++) {
+		F[u] -= fpr_rint(_f[u]);
+		G[u] -= fpr_rint(_g[u]);
+	}
+}
+
+void
+Zf(ffBabai_reduce)(const fpr *restrict f, const fpr *restrict g,
+	fpr *restrict F, fpr *restrict G, int8_t *restrict Fn,
+	int8_t *restrict Gn, unsigned logn, fpr *tmp)
+{
+	size_t n, hn;
+	fpr *t, *z, *g0, *g1;
+
+	n = MKN(logn);
+	hn = n >> 1;
+	t = tmp;
+	z = t + n;
+
+	Zf(poly_add_muladj_fft)(t, F, G, f, g, logn);
+	Zf(poly_invnorm2_fft)(z, f, g, logn);
+	Zf(poly_mul_autoadj_fft)(t, z, logn);
+
+	// inverting an autoadj polynomial:
+	for (size_t u = 0; u < n/2; u++)
+		z[u] = fpr_inv(z[u]),
+		z[u + n/2] = fpr_zero;
+
+	// t = (F adj(f) + G adj(g)) / (f adj(f) + g adj(g))
+	// z = f adj(f) + g adj(g)
+
+	// Execute Babai with Gram-matrix z, target t, and put the result in z.
+	g0 = z + n;
+	g1 = g0 + hn;
+
+	Zf(poly_split_fft)(g0, g1, z, logn);
+
+	// currently, t is the target
+	Zf(poly_split_fft)(z, z + hn, t, logn);
+	ffBabai_inner(t, t + hn, g0, g1, z, z + hn, logn - 1, tmp + 3*n);
+	Zf(poly_merge_fft)(z, t, t + hn, logn);
+	// currently, z is the result
+
+	// modify F and Fn:
+	memcpy(t, z, n * sizeof *z);
+	Zf(poly_mul_fft)(t, f, logn);
+	Zf(poly_sub)(F, t, logn); // F -= z*f
+	Zf(iFFT)(t, logn);
+	for (size_t u = 0; u < n; u++) 
+		Fn[u] -= fpr_rint(t[u]);
+
+	// modify G and Gn:
+	memcpy(t, z, n * sizeof *z);
+	Zf(poly_mul_fft)(t, g, logn);
+	Zf(poly_sub)(G, t, logn); // G -= z*f
+	Zf(iFFT)(t, logn);
+	for (size_t u = 0; u < n; u++) 
+		Gn[u] -= fpr_rint(t[u]);
+
+	/*
+	// If we want to print what we subtracted:
+	Zf(iFFT)(z, logn);
+	printf("z = ");
+	for (size_t u = 0; u < n; u++) printf("%d ", fpr_rint(z[u]));
+	printf("\n"); */
+}
+
+// TODO: test this code

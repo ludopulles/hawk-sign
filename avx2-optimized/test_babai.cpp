@@ -57,49 +57,49 @@ void print_int16(int16_t *p, size_t logn) {
 
 
 // Huffman Encoding:
+#define MAX_Q10 (4096)
+#define MAXLEN_Q10 (56)
 struct {
-	uint16_t a[4096][2]; // { left child, right child }
-	uint16_t p[4096]; // parent
-	const size_t max_len = 21; // max path in the tree
+	uint16_t a[2*MAX_Q10][2]; // { left child, right child }
+	uint16_t p[2*MAX_Q10]; // parent
 } huffman_tree;
 
 void create_huffman_tree() {
-	float freq[4096], sigma = 512;
-	int len[4096];
-	for (int x = 0; x < 2048; x++)
-		freq[2048 + x] = exp((float)-x * x / (2.0 * sigma * sigma)),
-		len[2048 + x] = 0;
+	float freq[2*MAX_Q10], sigma = 512;
+	int len[2*MAX_Q10];
+	for (int x = 0; x < MAX_Q10; x++)
+		freq[MAX_Q10 + x] = exp((float)-x * x / (2.0 * sigma * sigma)),
+		len[MAX_Q10 + x] = 0;
 
 	// construct the tree
-	for (uint16_t node = 2048; --node >= 1; ) {
+	for (uint16_t node = MAX_Q10; --node >= 1; ) {
 		// find 2 nodes with smallest frequencies
-		uint16_t *ptr = huffman_tree.a[node];
-		ptr[0] = ptr[1] = 0;
-		for (uint16_t idx = node; ++idx < 4096; ) {
+		uint16_t l = 0, r = 0;
+		for (uint16_t idx = node; ++idx < 2*MAX_Q10; ) {
 			if (freq[idx] < 0) continue;
-			if (!ptr[0] || freq[idx] < freq[ptr[0]])
-				ptr[1] = ptr[0], ptr[0] = idx;
-			else if (!ptr[1] || freq[idx] < freq[ptr[1]])
-				ptr[1] = idx;
+			if (!l || freq[idx] < freq[l])
+				r = l, l = idx;
+			else if (!r || freq[idx] < freq[r])
+				r = idx;
 		}
 		// hide frequency
-		huffman_tree.p[ptr[0]] = huffman_tree.p[ptr[1]] = node;
-		freq[node] = freq[ptr[0]] + freq[ptr[1]];
-		freq[ptr[0]] = -1;
-		freq[ptr[1]] = -1;
-		len[node] = 1 + len[ptr[0]];
-		if (1 + len[ptr[1]] > len[node])
-			len[node] = 1 + len[ptr[1]];
+		freq[node] = freq[l] + freq[r];
+		freq[l] = freq[r] = -1;
+		len[node] = 1 + (len[l] > len[r] ? len[l] : len[r]);
+		huffman_tree.p[l] = huffman_tree.p[r] = node;
+		huffman_tree.a[node][0] = l;
+		huffman_tree.a[node][1] = r;
 	}
+	assert(len[1] <= MAXLEN_Q10 && "Longest path is longer than expected!");
 }
 
 size_t Zf(huffman_encode)(void *out, size_t max_out_len, const int16_t *x, unsigned logn) {
 	uint8_t *buf = (uint8_t *)out;
 	size_t n = MKN(logn), u, v = 0;
-	uint8_t acc = 0, acc_len = 0, steps[huffman_tree.max_len];
+	uint8_t acc = 0, acc_len = 0, steps[MAXLEN_Q10];
 
 	for (u = 0; u < n; u ++)
-		if (x[u] < -2047 || x[u] > 2047) return 0;
+		if (x[u] <= -MAX_Q10 || x[u] >= MAX_Q10) return 0;
 	for (u = 0; u < n; u ++) {
 		// Get sign and absolute value of next integer; push the sign bit.
 		acc <<= 1;
@@ -107,7 +107,7 @@ size_t Zf(huffman_encode)(void *out, size_t max_out_len, const int16_t *x, unsig
 		if (t < 0) t = -t, acc |= 1;
 
 		size_t nsteps = 0;
-		for (int16_t idx = 2048 + t; idx > 1; ) {
+		for (int16_t idx = MAX_Q10 + t; idx > 1; ) {
 			int16_t next_idx = huffman_tree.p[idx];
 			steps[nsteps++] = huffman_tree.a[next_idx][1] == idx ? 1 : 0;
 			idx = next_idx;
@@ -340,11 +340,39 @@ size_t bitreverse(size_t num, size_t logn) {
 // =============================================================================
 const size_t logn = 9, n = MKN(logn);
 
-void nearest_plane(int8_t *f, int8_t *g, int8_t *F, int8_t *G)
+void nearest_plane(const int8_t *f, const int8_t *g, int8_t *F, int8_t *G)
 {
+	int8_t F_orig[n], G_orig[n];
+	fpr tree[(logn - 1)*n/2], tmp[11*n]; // TODO lower 11
+
 	float Btilde[2*n][n], invnorm[n], dot;
 	// B = Btilde * mu
 	size_t REVi[n];
+
+
+	memcpy(F_orig, F, sizeof F_orig);
+	memcpy(G_orig, G, sizeof G_orig);
+
+	// ffBabai(f, g, F_orig, G_orig, logn, tree, tmp);
+	Zf(ffStraightBabai)(f, g, F_orig, G_orig, logn, tmp);
+
+	int sqn = 0;
+	for (size_t u = 0; u < n; u++)
+		sqn += F[u]*F[u] + G[u]*G[u];
+	printf("Square norm %d\n", sqn);
+
+	printf("F, G (ffBabai) = \n");
+	sqn = 0;
+	for (size_t u = 0; u < n; u++)
+		printf("%d ", F_orig[u]), sqn += F_orig[u]*F_orig[u];
+	printf("\n");
+	for (size_t u = 0; u < n; u++)
+		printf("%d ", G_orig[u]), sqn += G_orig[u]*G_orig[u];
+	printf("\n");
+	printf("Square norm %d\n", sqn);
+
+
+
 	for (size_t i = 0; i < n; i++)
 		REVi[i] = bitreverse(i, logn);
 
@@ -377,6 +405,7 @@ void nearest_plane(int8_t *f, int8_t *g, int8_t *F, int8_t *G)
 		invnorm[i] = 1.0 / invnorm[i];
 	}
 
+	int x[n];
 	// Do Babai's algorithm with F, G as target
 	for (size_t i = n; i --> 0; ) {
 		dot = 0.0;
@@ -384,6 +413,8 @@ void nearest_plane(int8_t *f, int8_t *g, int8_t *F, int8_t *G)
 			dot += F[k] * Btilde[k  ][i]
 				 + G[k] * Btilde[k+n][i];
 		int xtake = round(dot * invnorm[i]);
+
+		x[REVi[i]] = xtake;
 		// subtract (fx^i, gx^i) from (F, G)
 		if (xtake == 0) continue;
 
@@ -395,6 +426,20 @@ void nearest_plane(int8_t *f, int8_t *g, int8_t *F, int8_t *G)
 		for (size_t k = n - rev_i; k < n; k++)
 			F[rev_i+k-n] += xtake * f[k], G[rev_i+k-n] += xtake * g[k];
 	}
+
+	printf("x = ");
+	for (size_t u = 0; u < n; u++) printf("%d ", x[u]);
+	printf("\n");
+	printf("F, G = \n");
+	sqn = 0;
+	for (size_t u = 0; u < n; u++)
+		printf("%d ", F[u]), sqn += F[u] * F[u];
+	printf("\n");
+	for (size_t u = 0; u < n; u++)
+		printf("%d ", G[u]), sqn += G[u] * G[u];
+	printf("\n");
+	printf("Square norm %d\n", sqn);
+	exit(1);
 }
 
 struct WorkerResult {
@@ -423,7 +468,11 @@ struct WorkerResult {
 
 WorkerResult measure_keygen(fpr isigma_kg)
 {
-	uint8_t b[28 << logn]; // 14 kB temporary memory, 17.5 kB total
+	union {
+		uint8_t b[28*512]; // 14 kB temporary memory, 17.5 kB total
+		uint64_t dummy_i64;
+		fpr dummy_fpr;
+	} tmp;
 	int8_t f[n], g[n], F[n], G[n];
 	fpr q00[n], q10[n], q11[n];
 	int16_t q00i[n], q10i[n];
@@ -447,7 +496,7 @@ WorkerResult measure_keygen(fpr isigma_kg)
 	// gettimeofday(&t0, NULL);
 	for (int _ = 0; _ < n_repetitions; _++) {
 		// Generate key pair.
-		Zf(keygen)(&sc, f, g, F, G, q00, q10, q11, logn, b, isigma_kg);
+		Zf(keygen)(&sc, f, g, F, G, q00, q10, q11, logn, tmp.b, isigma_kg);
 
 		int8_t Fp[n], Gp[n];
 		memcpy(Fp, F, sizeof F);
@@ -578,6 +627,7 @@ int main(int argc, char **argv)
 	struct timeval tv;
 	gettimeofday(&tv, NULL);
 	unsigned seed = 1000000 * tv.tv_sec + tv.tv_usec;
+	// seed = 2784228632;
 	printf("Seed: %u\n", seed);
 	srand(seed);
 
@@ -585,7 +635,7 @@ int main(int argc, char **argv)
 
 	create_huffman_tree();
 
-	const int nthreads = 4;
+	const int nthreads = 1;
 	if (nthreads == 1) {
 		work();
 	} else {
