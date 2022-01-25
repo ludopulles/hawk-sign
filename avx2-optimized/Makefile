@@ -5,7 +5,8 @@
 
 
 CC = c99
-CFLAGS = -W -Wall -Wshadow -O2 -mavx2
+CFLAGS = -W -Wall -Wshadow -O3 -march=native
+# CFLAGS = -W -Wall -Wshadow -O2 -mavx2
 # CFLAGS = -W -Wall -Wshadow -g -fsanitize=address,undefined
 LD = $(CC)
 LDFLAGS = $(CFLAGS)
@@ -17,13 +18,13 @@ OBJ = build/fft.o build/ffo.o build/fpr.o build/keygen.o build/rng.o build/sampl
 
 HEAD = fpr.h inner.h
 
-all: build build/main build/test_keygen build/test_sign build/config_fg build/config_FG build/test_babai
+all: build build/main build/test_keygen build/test_sign build/config_fg build/config_FG build/test_babai build/test_enum
 
 build:
 	-mkdir build
 
 clean:
-	-rm -f $(OBJ) build/main.o build/main build/test_keygen build/test_keygen.o build/test_sign build/test_sign.o build/config_fg build/config_fg.o build/config_FG build/config_FG.o build/test_babai build/test_babai.o
+	-rm -f $(OBJ) build/main.o build/main build/test_keygen build/test_keygen.o build/test_sign build/test_sign.o build/config_fg build/config_fg.o build/config_FG build/config_FG.o build/test_babai build/test_babai.o build/test_enum build/test_enum.o
 
 
 build/main: main.c build/main.o $(OBJ)
@@ -43,6 +44,9 @@ build/config_FG: config_FG.c build/config_FG.o $(OBJ)
 
 build/test_babai: test_babai.cpp build/test_babai.o $(OBJ)
 	$(CPP) $(CPPFLAGS) -o build/test_babai build/test_babai.o $(OBJ) $(LIBS)
+
+build/test_enum: test_enum.cpp build/test_enum.o $(OBJ)
+	$(CPP) $(CPPFLAGS) -o build/test_enum build/test_enum.o $(OBJ) $(LIBS)
 
 build/fft.o: fft.c $(HEAD)
 	$(CC) $(CFLAGS) -c -o build/fft.o fft.c
@@ -81,3 +85,6 @@ build/config_FG.o: config_FG.c
 	
 build/test_babai.o: test_babai.cpp
 	$(CPP) $(CFLAGS) -c -o build/test_babai.o test_babai.cpp
+
+build/test_enum.o: test_enum.cpp
+	$(CPP) $(CFLAGS) -c -o build/test_enum.o test_enum.cpp

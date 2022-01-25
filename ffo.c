@@ -278,7 +278,10 @@ Zf(ffBabai)(const int8_t *restrict f, const int8_t *restrict g,
 /* =======================================================================
  * Do straight Babai, if you build the tree once for every Babai call,
  * so building tree is not more efficient.
+ * tmp[] requires a size of at least 6 2^logn fpr values.
  */
+// TODO: make this method use less memory, the result (z0, z1) can
+// probably be stored in (t0, t1).
 static void
 ffBabai_inner(
 	fpr *restrict z0, fpr *restrict z1,
@@ -351,79 +354,7 @@ ffBabai_inner(
 	Zf(poly_merge_fft)(z0, tmp, tmp + hn, logn);
 }
 
-void
-Zf(ffStraightBabai)(const int8_t *restrict f, const int8_t *restrict g,
-	int8_t *restrict F, int8_t *restrict G,
-	unsigned logn, fpr *restrict tmp)
-{
-	size_t n, hn;
-	fpr *t, *z, *_f, *_g, *_F, *_G, *g0, *g1, *t0, *t1;
-
-	n = MKN(logn);
-	hn = n >> 1;
-
-	t = tmp;
-	z = t + n;
-	_f = z + n;
-	_g = _f + n;
-	_F = _g + n;
-	_G = _F + n;
-	tmp += 6*n;
-
-	smallints_to_fpr(_f, f, logn);
-	smallints_to_fpr(_g, g, logn);
-	smallints_to_fpr(_F, F, logn);
-	smallints_to_fpr(_G, G, logn);
-	Zf(FFT)(_f, logn);
-	Zf(FFT)(_g, logn);
-	Zf(FFT)(_F, logn);
-	Zf(FFT)(_G, logn);
-
-	// calculate (F adj(f) + G adj(g)) / (f adj(f) + g adj(g))
-	Zf(poly_add_muladj_fft)(t, _F, _G, _f, _g, logn);
-	Zf(poly_invnorm2_fft)(z, _f, _g, logn);
-	Zf(poly_mul_autoadj_fft)(t, z, logn);
-
-	// inverting an autoadj polynomial:
-	for (size_t u = 0; u < n/2; u++)
-		z[u] = fpr_inv(z[u]),
-		z[u + n/2] = fpr_zero;
-
-	// Execute Babai with Gram-matrix z, target t, and put the result in z.
-	// ffLDL_fft(tree, z, logn, tmp);
-	// ffNearestPlane(z, tree, t, logn, tmp);
-	// {
-	g0 = tmp;
-	g1 = g0 + hn;
-	t0 = g1 + hn;
-	t1 = t0 + hn;
-	tmp += 2*n;
-
-	Zf(poly_split_fft)(g0, g1, z, logn);
-	Zf(poly_split_fft)(t0, t1, t, logn);
-
-	ffBabai_inner(t, t + hn, g0, g1, t0, t1, logn - 1, tmp);
-	Zf(poly_merge_fft)(z, t, t + hn, logn);
-	// }
-
-	/* memcpy(_F, z, n * sizeof(fpr));
-	Zf(iFFT)(_F, logn);
-	printf("z = ");
-	for (size_t u = 0; u < n; u++) printf("%d ", fpr_rint(_F[u]));
-	printf("\n"); */
-
-	Zf(poly_mul_fft)(_f, z, logn);
-	Zf(poly_mul_fft)(_g, z, logn);
-	Zf(iFFT)(_f, logn);
-	Zf(iFFT)(_g, logn);
-	// subtract (f,g) from (F,G)
-
-	for (size_t u = 0; u < n; u++) {
-		F[u] -= fpr_rint(_f[u]);
-		G[u] -= fpr_rint(_g[u]);
-	}
-}
-
+// tmp[] requires a size of at least 6 2^logn fpr values.
 void
 Zf(ffBabai_reduce)(const fpr *restrict f, const fpr *restrict g,
 	fpr *restrict F, fpr *restrict G, int8_t *restrict Fn,
@@ -436,23 +367,23 @@ Zf(ffBabai_reduce)(const fpr *restrict f, const fpr *restrict g,
 	hn = n >> 1;
 	t = tmp;
 	z = t + n;
+	g0 = z + n;
+	g1 = g0 + hn;
 
 	Zf(poly_add_muladj_fft)(t, F, G, f, g, logn);
 	Zf(poly_invnorm2_fft)(z, f, g, logn);
 	Zf(poly_mul_autoadj_fft)(t, z, logn);
 
 	// inverting an autoadj polynomial:
-	for (size_t u = 0; u < n/2; u++)
-		z[u] = fpr_inv(z[u]),
-		z[u + n/2] = fpr_zero;
+	for (size_t u = 0; u < hn; u++)
+		z[u] = fpr_inv(z[u]);
+	for (size_t u = hn; u < n; u++)
+		z[u] = fpr_zero;
 
 	// t = (F adj(f) + G adj(g)) / (f adj(f) + g adj(g))
 	// z = f adj(f) + g adj(g)
 
 	// Execute Babai with Gram-matrix z, target t, and put the result in z.
-	g0 = z + n;
-	g1 = g0 + hn;
-
 	Zf(poly_split_fft)(g0, g1, z, logn);
 
 	// currently, t is the target
@@ -477,12 +408,41 @@ Zf(ffBabai_reduce)(const fpr *restrict f, const fpr *restrict g,
 	for (size_t u = 0; u < n; u++) 
 		Gn[u] -= fpr_rint(t[u]);
 
-	/*
+/*
 	// If we want to print what we subtracted:
 	Zf(iFFT)(z, logn);
 	printf("z = ");
 	for (size_t u = 0; u < n; u++) printf("%d ", fpr_rint(z[u]));
 	printf("\n"); */
+}
+
+// tmp[] requires a size of at least 10 2^logn fpr values.
+void
+Zf(ffStraightBabai)(const int8_t *restrict f, const int8_t *restrict g,
+	int8_t *restrict F, int8_t *restrict G,
+	unsigned logn, fpr *restrict tmp)
+{
+	size_t n;
+	fpr *_f, *_g, *_F, *_G;
+
+	n = MKN(logn);
+
+	_f = tmp;
+	_g = _f + n;
+	_F = _g + n;
+	_G = _F + n;
+
+	smallints_to_fpr(_f, f, logn);
+	smallints_to_fpr(_g, g, logn);
+	smallints_to_fpr(_F, F, logn);
+	smallints_to_fpr(_G, G, logn);
+
+	Zf(FFT)(_f, logn);
+	Zf(FFT)(_g, logn);
+	Zf(FFT)(_F, logn);
+	Zf(FFT)(_G, logn);
+
+	Zf(ffBabai_reduce)(_f, _g, _F, _G, F, G, logn, tmp + 4*n);
 }
 
 // TODO: test this code

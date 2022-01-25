@@ -47,6 +47,13 @@ unsigned sqnorm(int8_t *p, size_t logn) {
 	return res;
 }
 
+unsigned sqnorm16(int16_t *p, size_t logn) {
+	unsigned res = 0;
+	for (size_t u = 0, n = MKN(logn); u < n; u ++)
+		res += (unsigned)p[u] * p[u];
+	return res;
+}
+
 void print_int16(int16_t *p, size_t logn) {
 	for (size_t u = 0, n = MKN(logn); u < n; u ++) {
 		if (u) printf(" ");
@@ -331,6 +338,8 @@ Zf(encode_q10)(void *out, size_t max_out_len, const int16_t *x, unsigned logn, c
 	return v;
 }
 
+
+
 size_t bitreverse(size_t num, size_t logn) {
 	return logn == 1 ? num : (bitreverse(num / 2, logn - 1) | ((num & 1) << (logn - 1)));
 }
@@ -339,73 +348,6 @@ size_t bitreverse(size_t num, size_t logn) {
 // | TESTING CODE                                                              |
 // =============================================================================
 const size_t logn = 9, n = MKN(logn);
-
-void nearest_plane(const int8_t *f, const int8_t *g, int8_t *F, int8_t *G)
-{
-	fpr tmp[10*n]; // TODO lower 10
-
-	// This does exactly the same as below, but MUCH faster
-	Zf(ffStraightBabai)(f, g, F, G, logn, tmp);
-/*
-	float Btilde[2*n][n], invnorm[n], dot;
-	// B = Btilde * mu
-	size_t REVi[n];
-
-	for (size_t i = 0; i < n; i++)
-		REVi[i] = bitreverse(i, logn);
-
-	for (size_t i = 0; i < n; i++) {
-		size_t rev_i = REVi[i];
-		// multiply (f, g)^T by X^i
-		// put in the ith column of Btilde
-		for (size_t j = 0; i + j < n; j++) Btilde[i+j  ][rev_i] =  f[j];
-		for (size_t j = n - i; j < n; j++) Btilde[i+j-n][rev_i] = -f[j];
-		for (size_t j = 0; i + j < n; j++) Btilde[i+j+n][rev_i] =  g[j];
-		for (size_t j = n - i; j < n; j++) Btilde[i+j  ][rev_i] = -g[j];
-	}
-
-	// now orthogonalize, O(n^3)
-	for (size_t i = 0; i < n; i++) {
-		for (size_t j = 0; j < i; j++) {
-			// mu_{ji} = <b_i, b_j> / <b_j, b_j>,
-			dot = 0.0;
-			for (size_t k = 0; k < n+n; k++)
-				dot += Btilde[k][i] * Btilde[k][j];
-			dot *= invnorm[j];
-			// b_i -= mu_{ji} b_j
-			for (size_t k = 0; k < n+n; k++)
-				Btilde[k][i] -= dot * Btilde[k][j];
-		}
-
-		invnorm[i] = 0.0;
-		for (size_t k = 0; k < n+n; k++)
-			invnorm[i] += Btilde[k][i] * Btilde[k][i];
-		invnorm[i] = 1.0 / invnorm[i];
-	}
-
-	int x[n];
-	// Do Babai's algorithm with F, G as target
-	for (size_t i = n; i --> 0; ) {
-		dot = 0.0;
-		for (size_t k = 0; k < n; k++)
-			dot += F[k] * Btilde[k  ][i]
-				 + G[k] * Btilde[k+n][i];
-		int xtake = round(dot * invnorm[i]);
-
-		x[REVi[i]] = xtake;
-		// subtract (fx^i, gx^i) from (F, G)
-		if (xtake == 0) continue;
-
-		// Btilde[i] corresponds to (f,g)[rev_i]
-		int rev_i = REVi[i];
-		for (size_t k = 0; rev_i + k < n; k++)
-			F[rev_i + k] -= xtake * f[k], G[rev_i + k] -= xtake * g[k];
-		// Use X^n = -1!
-		for (size_t k = n - rev_i; k < n; k++)
-			F[rev_i+k-n] += xtake * f[k], G[rev_i+k-n] += xtake * g[k];
-	}
-*/
-}
 
 struct WorkerResult
 {
@@ -424,9 +366,83 @@ struct WorkerResult
 	}
 };
 
+void
+do_enumeration(const int8_t *f, const int8_t *g, int8_t *F, int8_t *G, const fpr *q00, fpr *q10, const int16_t *q00i, int16_t *q10i)
+{
+	constexpr int NP = 10, STEPS = 1'000;
+	int16_t newq10[n];
+	int pos[NP], add[NP];
+	for (int i = (NP-1)*STEPS; i --> 0; ) {
+		// Try to modify q10 at NP points
+		memcpy(newq10, q10i, sizeof newq10);
+		int np = 2 + i/STEPS;
+		for (int it = np; it --> 0; ) {
+			pos[it] = rand() % n;
+			add[it] = rand() % 2;
+
+			for (size_t j = 0; j < n - pos[it]; j++)
+				newq10[pos[it]+j  ] += add[it] ? q00i[j] : -q00i[j];
+			for (size_t j = n - pos[it]; j < n; j++)
+				newq10[pos[it]+j-n] += add[it] ? -q00i[j] : q00i[j];
+		}
+
+		if (sqnorm16(newq10, logn) < sqnorm16(q10i, logn)) {
+			// printf("Improvement (%d): %d ==> %d\n", np, sqnorm16(q10i, logn), sqnorm16(newq10, logn));
+			for (size_t it = np; it --> 0; ) {
+				for (size_t j = 0; j < n - pos[it]; j++) {
+					F[pos[it]+j  ] += add[it] ? f[j] : -f[j];
+					G[pos[it]+j  ] += add[it] ? g[j] : -g[j];
+					q10[pos[it]+j  ] = fpr_add(q10[pos[it]+j  ], add[it] ? q00[j] : fpr_neg(q00[j]));
+					q10i[pos[it]+j  ] += add[it] ? q00i[j] : -q00i[j];
+				}
+				for (size_t j = n - pos[it]; j < n; j++) {
+					F[pos[it]+j-n] += add[it] ? -f[j] : f[j];
+					G[pos[it]+j-n] += add[it] ? -g[j] : g[j];
+					q10[pos[it]+j-n] = fpr_add(q10[pos[it]+j-n], add[it] ? fpr_neg(q00[j]) : q00[j]);
+					q10i[pos[it]+j-n] += add[it] ? -q00i[j] : q00i[j];
+				}
+			}
+		}
+	}
+
+	// bruteforce optimising last position
+	int lp = n-1, p = 0;
+	while (p != lp) {
+		for (add[0] = 0; add[0] < 2; add[0]++) {
+improveq10:
+			memcpy(newq10, q10i, sizeof newq10);
+			for (size_t j = 0; j < n - p; j++)
+				newq10[p+j  ] += add[0] ? q00i[j] : -q00i[j];
+			for (size_t j = n - p; j < n; j++)
+				newq10[p+j-n] += add[0] ? -q00i[j] : q00i[j];
+
+			if (sqnorm16(newq10, logn) < sqnorm16(q10i, logn)) {
+				printf("Improvement (1, %d): %d ==> %d\n", p, sqnorm16(q10i, logn), sqnorm16(newq10, logn));
+				lp = p;
+
+				for (size_t j = 0; j < n - p; j++) {
+					F[p+j  ] += add[0] ? f[j] : -f[j];
+					G[p+j  ] += add[0] ? g[j] : -g[j];
+					q10[p+j  ] = fpr_add(q10[p+j  ], add[0] ? q00[j] : fpr_neg(q00[j]));
+					q10i[p+j  ] += add[0] ? q00i[j] : -q00i[j];
+				}
+				for (size_t j = n - p; j < n; j++) {
+					F[p+j-n] += add[0] ? -f[j] : f[j];
+					G[p+j-n] += add[0] ? -g[j] : g[j];
+					q10[p+j-n] = fpr_add(q10[p+j-n], add[0] ? fpr_neg(q00[j]) : q00[j]);
+					q10i[p+j-n] += add[0] ? -q00i[j] : q00i[j];
+				}
+				// repeat this position
+				goto improveq10;
+			}
+		}
+		if (++p == n) p = 0;
+	}
+}
+
 WorkerResult measure_keygen(fpr isigma_kg)
 {
-	union {
+	union { // use union to ensure alignment
 		uint8_t b[28*512]; // 14 kB temporary memory, 17.5 kB total
 		uint64_t dummy_i64;
 		fpr dummy_fpr;
@@ -437,10 +453,13 @@ WorkerResult measure_keygen(fpr isigma_kg)
 	unsigned char seed[48];
 	inner_shake256_context sc;
 
+	fpr tmp_babai[10*n]; // 40kB
+
+	// This does exactly the same as below, but MUCH faster
 	fpr rt1[n], rt2[n], rt3[n], rt4[n];
 
 	struct timeval t0, t1;
-	const int n_repetitions = 25000;
+	const int n_repetitions = 1;
 
 	WorkerResult result;
 
@@ -457,23 +476,25 @@ WorkerResult measure_keygen(fpr isigma_kg)
 
 		result.num_iters++;
 
+		Zf(iFFT)(q00, logn);
 		Zf(iFFT)(q10, logn);
+		fpr_to_int16(q00i, q00, logn);
 		fpr_to_int16(q10i, q10, logn);
-		result.encodeB += Zf(encode_q10)(NULL, 0, q10i, logn, 4095, 8);
-		result.huffmanB += Zf(huffman_encode)(NULL, 0, q10i, logn);
 
-		int8_t Fp[n], Gp[n];
-		memcpy(Fp, F, sizeof F);
-		memcpy(Gp, G, sizeof G);
-		// now try to optimize Fp, Gp with babai.
+		size_t eq10 = Zf(encode_q10)(NULL, 0, q10i, logn, 4095, 8);
+		size_t hq10 = Zf(huffman_encode)(NULL, 0, q10i, logn);
+		printf("Size before: %zu, %zu\n", eq10, hq10);
+		result.encodeB += eq10;
+		result.huffmanB += hq10;
 
-		nearest_plane(f, g, Fp, Gp);
+		// now try to optimize F, G with babai.
+		Zf(ffStraightBabai)(f, g, F, G, logn, tmp_babai);
 
 		// Calculate q10 (in FFT representation)
 		poly_small_to_fp(rt1, f, logn);
 		poly_small_to_fp(rt2, g, logn);
-		poly_small_to_fp(rt3, Fp, logn);
-		poly_small_to_fp(rt4, Gp, logn);
+		poly_small_to_fp(rt3, F, logn);
+		poly_small_to_fp(rt4, G, logn);
 		Zf(FFT)(rt1, logn); // g
 		Zf(FFT)(rt2, logn); // F
 		Zf(FFT)(rt3, logn); // G
@@ -484,8 +505,17 @@ WorkerResult measure_keygen(fpr isigma_kg)
 		Zf(iFFT)(q10, logn);
 		fpr_to_int16(q10i, q10, logn);
 
-		result.encodeBB += Zf(encode_q10)(NULL, 0, q10i, logn, 2047, 8);
-		result.huffmanBB += Zf(huffman_encode)(NULL, 0, q10i, logn);
+		size_t epq10 = Zf(encode_q10)(NULL, 0, q10i, logn, 2047, 8);
+		size_t hpq10 = Zf(huffman_encode)(NULL, 0, q10i, logn);
+		printf("Size after:  %zu, %zu\n", epq10, hpq10);
+		result.encodeBB += epq10;
+		result.huffmanBB += hpq10;
+
+		do_enumeration(f, g, F, G, q00, q10, q00i, q10i);
+
+		epq10 = Zf(encode_q10)(NULL, 0, q10i, logn, 2047, 8);
+		hpq10 = Zf(huffman_encode)(NULL, 0, q10i, logn);
+		printf("Size after:  %zu, %zu\n", epq10, hpq10);
 	}
 
 	gettimeofday(&t1, NULL);
@@ -528,7 +558,7 @@ int main(int argc, char **argv)
 
 	create_huffman_tree();
 
-	const int nthreads = 4;
+	const int nthreads = 1;
 	if (nthreads == 1) {
 		work();
 	} else {
