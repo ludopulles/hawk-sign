@@ -276,147 +276,133 @@ Zf(ffBabai)(const int8_t *restrict f, const int8_t *restrict g,
 }
 
 /* =======================================================================
- * Do straight Babai, if you build the tree once for every Babai call,
- * so building tree is not more efficient.
- * tmp[] requires a size of at least 6 2^logn fpr values.
+ * Run Babai's nearest plane algorithm directly with the Gram matrix q00
+ * of a single basis element (f,g).
+ * Assumes t, g are both of length 2^logn
+ *
+ * tmp[] requires a size of at least 2 2^logn fpr values.
  */
-// TODO: make this method use less memory, the result (z0, z1) can
-// probably be stored in (t0, t1).
 static void
-ffBabai_inner(
-	fpr *restrict z0, fpr *restrict z1,
-	fpr *restrict g0, fpr *restrict g1,
-	fpr *restrict t0, fpr *restrict t1,
-	unsigned logn, fpr *restrict tmp)
+ffBabai_inner(fpr *restrict t, fpr *restrict g, unsigned logn, fpr *restrict tmp)
 {
 	size_t n, hn;
-	fpr *d11, *l10;
 
 	/*
-	 * Normal end of recursion is for logn == 0.
+	 * Normal end of recursion is for logn == 1.
 	 * Inline the last two recursion levels to get better performance here.
 	 */
-	if (logn == 0) {
+	if (logn == 1) {
 		/*
-		 * Simple rounding when n=1, since Z[\zeta] = Z[i] has two orthogonal
+		 * Simple rounding when n=2, since Z[\zeta] = Z[i] has two orthogonal
 		 * basis vectors so Babai == simple rounding in this case.
 		 */
-		z0[0] = fpr_of(fpr_rint(t0[0]));
-		z1[0] = fpr_of(fpr_rint(t1[0]));
+		t[0] = fpr_of(fpr_rint(t[0]));
+		t[1] = fpr_of(fpr_rint(t[1]));
 		return;
 	}
 
 	n = MKN(logn);
 	hn = n >> 1;
 
-	d11 = tmp;
-	l10 = d11 + n;
-	tmp += 2*n;
+	Zf(poly_split_fft)(tmp, tmp + hn, g, logn);
+	Zf(poly_split_fft)(g, g + hn, t, logn);
+	// Memory layout: t: t; g: t_0, t_1; tmp: g_0, g_1.
 
 	/*
-	 * The LDL decomposition yields L and the diagonal of D. Note that d00 = g0.
+	 * The LDL decomposition yields L and the diagonal of D. Note that D_00 = g_0.
 	 */
-	Zf(poly_LDLmv_fft)(d11, l10, g0, g1, g0, logn);
+	Zf(poly_LDLmv_fft)(t + hn, t, tmp, tmp + hn, tmp, logn - 1);
+	// Memory layout: t: L_10, D_11; g: t_0, t_1; tmp: g_0 = D_00, g_1.
+
+	memcpy(tmp + hn, g + hn, hn * sizeof *t);
+	// Memory layout: t: L_10, D_11; g: t_0, t_1; tmp: g_0 = D_00, t_1.
 
 	/*
-	 * Split d00 (currently in g0) and d11 (currently in tmp). We
-	 * reuse g0 and g1 as temporary storage spaces:
-	 *   d00 splits into g1, g1+hn
-	 *   d11 splits into g0, g0+hn
+	 * First recursive invocation: target is t_1 and gram matrix is D_11.
 	 */
-	Zf(poly_split_fft)(g1, g1 + hn, g0, logn);
-	Zf(poly_split_fft)(g0, g0 + hn, d11, logn);
+	ffBabai_inner(g + hn, t + hn, logn - 1, tmp + n);
+	// Memory layout: t: L_10, ???; g: t_0, z_1; tmp: g_0 = D_00, t_1.
 
 	/*
-	 * Each split result is the first row of a new auto-adjoint
-	 * quasicyclic matrix for the next recursive step.
-	 * We split t1 into z1 (reused as temporary storage), then do
-	 * the recursive invocation, with output in tmp. We finally
-	 * merge back into z1.
+	 * Compute t'_0 = t_0 + (t_1 - z_1) * L_{10}, and put this value in t_0
 	 */
-	Zf(poly_split_fft)(z1, z1 + hn, t1, logn);
-	ffBabai_inner(tmp, tmp + hn, g0, g0 + hn, z1, z1 + hn, logn - 1, tmp + n);
-	Zf(poly_merge_fft)(z1, tmp, tmp + hn, logn);
+	Zf(poly_sub)(tmp + hn, g + hn, logn - 1);
+	Zf(poly_mul_fft)(tmp + hn, t, logn - 1);
+	Zf(poly_add)(g, tmp + hn, logn - 1);
+	// Memory layout: t: L_10, ???; g: t'_0, z_1; tmp: g_0 = D_00, (t_1-z_1)*L_10
 
 	/*
-	 * Compute tb0 = t0 + (t1 - z1) * L. Value tb0 ends up in tmp[].
+	 * Second recursive invocation: target is t'_0 and gram matrix is D_00.
 	 */
-	memcpy(tmp, t1, n * sizeof *t1);
-	Zf(poly_sub)(tmp, z1, logn);
-	Zf(poly_mul_fft)(tmp, l10, logn);
-	Zf(poly_add)(tmp, t0, logn);
+	ffBabai_inner(g, tmp, logn - 1, tmp + n);
+	// Memory layout: t: L_10, ???; g: z_0, z_1; tmp: ???
 
-	/*
-	 * Second recursive invocation.
-	 */
-	Zf(poly_split_fft)(z0, z0 + hn, tmp, logn);
-	ffBabai_inner(tmp, tmp + hn, g1, g1 + hn, z0, z0 + hn, logn - 1, tmp + n);
-	Zf(poly_merge_fft)(z0, tmp, tmp + hn, logn);
+	Zf(poly_merge_fft)(t, g, g + hn, logn);
+	// Memory layout: t: z; g: z_0, z_1; tmp: ???
+
+	// ffBabai_inner(z, g1, g1 + hn, tmp, logn - 1, tmp + n);
+	// Zf(poly_split_fft)(z0, z0 + hn, tmp, logn);
+	// ffBabai_inner(tmp, tmp + hn, g1, g1 + hn, z0, z0 + hn, logn - 1, tmp + n);
+	// Zf(poly_merge_fft)(z0, tmp, tmp + hn, logn);
 }
 
-// tmp[] requires a size of at least 6 2^logn fpr values.
+// tmp[] requires a size of at least 4 2^logn fpr values, so 32 2^logn bytes.
 void
 Zf(ffBabai_reduce)(const fpr *restrict f, const fpr *restrict g,
 	fpr *restrict F, fpr *restrict G, int8_t *restrict Fn,
 	int8_t *restrict Gn, unsigned logn, fpr *tmp)
 {
-	size_t n, hn;
-	fpr *t, *z, *g0, *g1;
+	size_t n, hn, u;
+	fpr *t, *q;
 
 	n = MKN(logn);
 	hn = n >> 1;
 	t = tmp;
-	z = t + n;
-	g0 = z + n;
-	g1 = g0 + hn;
+	q = t + n;
 
 	Zf(poly_add_muladj_fft)(t, F, G, f, g, logn);
-	Zf(poly_invnorm2_fft)(z, f, g, logn);
-	Zf(poly_mul_autoadj_fft)(t, z, logn);
+	Zf(poly_invnorm2_fft)(q, f, g, logn);
+	Zf(poly_mul_autoadj_fft)(t, q, logn);
 
-	// inverting an autoadj polynomial:
-	for (size_t u = 0; u < hn; u++)
-		z[u] = fpr_inv(z[u]);
-	for (size_t u = hn; u < n; u++)
-		z[u] = fpr_zero;
+	// Since q is self-adjoint, invert real part
+	for (u = 0; u < hn; u++)
+		q[u] = fpr_inv(q[u]);
+	// Alternative:
+	// Zf(poly_add_muladj_fft)(q, f, g, f, g, logn);
 
-	// t = (F adj(f) + G adj(g)) / (f adj(f) + g adj(g))
-	// z = f adj(f) + g adj(g)
+	/**
+	 * Now we have the target t and Gram matrix q:
+	 * t = (F adj(f) + G adj(g)) / (f adj(f) + g adj(g))
+	 * q = f adj(f) + g adj(g)
+	 */
 
-	// Execute Babai with Gram-matrix z, target t, and put the result in z.
-	Zf(poly_split_fft)(g0, g1, z, logn);
-
-	// currently, t is the target
-	Zf(poly_split_fft)(z, z + hn, t, logn);
-	ffBabai_inner(t, t + hn, g0, g1, z, z + hn, logn - 1, tmp + 3*n);
-	Zf(poly_merge_fft)(z, t, t + hn, logn);
-	// currently, z is the result
+	// Execute Babai with Gram-matrix q, target t, and put the result in t.
+	ffBabai_inner(t, q, logn, tmp + 2*n);
 
 	// modify F and Fn:
-	memcpy(t, z, n * sizeof *z);
-	Zf(poly_mul_fft)(t, f, logn);
-	Zf(poly_sub)(F, t, logn); // F -= z*f
-	Zf(iFFT)(t, logn);
-	for (size_t u = 0; u < n; u++) 
-		Fn[u] -= fpr_rint(t[u]);
+	memcpy(q, t, n * sizeof *t);
+	Zf(poly_mul_fft)(q, f, logn);
+	Zf(poly_sub)(F, q, logn); // F -= k*f
+	Zf(iFFT)(q, logn);
+	for (u = 0; u < n; u++)
+		Fn[u] -= fpr_rint(q[u]);
 
 	// modify G and Gn:
-	memcpy(t, z, n * sizeof *z);
-	Zf(poly_mul_fft)(t, g, logn);
-	Zf(poly_sub)(G, t, logn); // G -= z*f
-	Zf(iFFT)(t, logn);
-	for (size_t u = 0; u < n; u++) 
-		Gn[u] -= fpr_rint(t[u]);
+	memcpy(q, t, n * sizeof *t);
+	Zf(poly_mul_fft)(q, g, logn);
+	Zf(poly_sub)(G, q, logn); // G -= k*f
+	Zf(iFFT)(q, logn);
+	for (u = 0; u < n; u++)
+		Gn[u] -= fpr_rint(q[u]);
 
-/*
-	// If we want to print what we subtracted:
-	Zf(iFFT)(z, logn);
+/*	// If we want to print what we subtracted:
+	Zf(iFFT)(t, logn);
 	printf("z = ");
-	for (size_t u = 0; u < n; u++) printf("%d ", fpr_rint(z[u]));
+	for (u = 0; u < n; u++) printf("%d ", fpr_rint(t[u]));
 	printf("\n"); */
 }
 
-// tmp[] requires a size of at least 10 2^logn fpr values.
+// tmp[] requires a size of at least 8 2^logn fpr values, so 64 2^logn bytes.
 void
 Zf(ffStraightBabai)(const int8_t *restrict f, const int8_t *restrict g,
 	int8_t *restrict F, int8_t *restrict G,
@@ -444,5 +430,3 @@ Zf(ffStraightBabai)(const int8_t *restrict f, const int8_t *restrict g,
 
 	Zf(ffBabai_reduce)(_f, _g, _F, _G, F, G, logn, tmp + 4*n);
 }
-
-// TODO: test this code

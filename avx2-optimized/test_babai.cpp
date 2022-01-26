@@ -342,7 +342,7 @@ const size_t logn = 9, n = MKN(logn);
 
 void nearest_plane(const int8_t *f, const int8_t *g, int8_t *F, int8_t *G)
 {
-	fpr tmp[10*n]; // TODO lower 10
+	fpr tmp[8*n];
 
 	// This does exactly the same as below, but MUCH faster
 	Zf(ffStraightBabai)(f, g, F, G, logn, tmp);
