@@ -87,7 +87,7 @@ Zf(verify)(const int8_t *restrict hm,
 		t2[u] = fpr_of(hm[u] & 1);
 	}
 
-	// Compute s0 = h%2 + 2 round(-q10 s1 / (2 q00))
+	// Compute s0 = h%2 + 2 round(-q10 s1 / (2 q00) - h%2)
 	Zf(FFT)(t0, logn);
 	Zf(FFT)(t2, logn);
 	// copy s1 for later.
