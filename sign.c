@@ -667,8 +667,9 @@ Zf(inner_do_sign)(void *samp_ctx, int16_t *restrict s1,
 	 * There is a small probability for a large enough verification margin
 	 * that the norm of the gaussian (x0, x1) is too large.
 	 */
-	if (!is_short(x0, x1, bound, logn))
+	if (!is_short(x0, x1, bound, logn)) {
 		return 0;
+	}
 
 	/*
 	 * Get the signature corresponding to that tiny vector, i.e.
@@ -746,8 +747,9 @@ Zf(inner_do_complete_sign)(void *samp_ctx,
 	 * There is a small probability for a large enough verification margin
 	 * that the norm of the gaussian (x0, x1) is too large.
 	 */
-	if (!is_short(x0, x1, bound, logn))
+	if (!is_short(x0, x1, bound, logn)) {
 		return 0;
+	}
 
 	/*
 	 * Get the signature corresponding to that tiny vector, i.e.

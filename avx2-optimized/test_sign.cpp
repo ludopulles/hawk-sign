@@ -1,4 +1,5 @@
 #include <cassert>
+#include <climits>
 #include <cstdio>
 #include <vector>
 #include <atomic>
@@ -19,6 +20,21 @@ extern "C" {
 void randombytes(unsigned char *x, unsigned long long xlen) {
 	for (; xlen -- > 0; ++x)
 		*x = ((unsigned char) rand());
+}
+
+void random_hash(int8_t *h, unsigned logn) {
+	assert(RAND_MAX == INT_MAX); // rand() should generate 31 random bits
+	int x = rand();
+	size_t RAND_BITS = 31, rand_bits = RAND_BITS;
+	for (size_t u = MKN(logn); u -- > 0; ) {
+		if (rand_bits == 0) {
+			x = rand();
+			rand_bits = RAND_BITS;
+		}
+		h[u] = (x & 1);
+		x >>= 1;
+		rand_bits--;
+	}
 }
 
 long long time_diff(const struct timeval *begin, const struct timeval *end) {
@@ -147,7 +163,7 @@ WorkerResult measure_signatures(fpr isigma_kg, fpr isigma_sig, uint32_t bound) {
 	fpr q00[n], q10[n], q11[n];
 	unsigned char seed[48];
 	inner_shake256_context sc;
-	const int n_repetitions = 1000;
+	const int n_repetitions = 250;
 
 	// Initialize a RNG.
 	randombytes(seed, sizeof seed);
@@ -163,7 +179,7 @@ WorkerResult measure_signatures(fpr isigma_kg, fpr isigma_sig, uint32_t bound) {
 		Zf(keygen)(&sc, f, g, F, G, q00, q10, q11, isigma_kg, logn, b);
 
 		// make a signature of a random message...
-		randombytes((unsigned char *)h, sizeof h);
+		random_hash(h, logn);
 
 		// Compute the signature.
 		Zf(complete_sign)(&sc, s0, s1, f, g, F, G, h, isigma_sig, bound, logn, b);
@@ -171,13 +187,13 @@ WorkerResult measure_signatures(fpr isigma_kg, fpr isigma_sig, uint32_t bound) {
 		printf("%zu ", Zf(comp_encode)(NULL, 0, s1, logn));
 		fflush(stdout);
 
-		if (!Zf(complete_verify)(h, s0, s1, q00, q10, q11, logn, bound, b))
+		if (!Zf(complete_verify)(h, s0, s1, q00, q10, q11, bound, logn, b))
 			result.num_invalid++;
 
-		if (!Zf(verify)(h, reconstructed_s0, s1, q00, q10, q11, logn, bound, b))
+		if (!Zf(verify)(h, reconstructed_s0, s1, q00, q10, q11, bound, logn, b))
 			result.num_babai_fail++;
 		else
-			assert(Zf(complete_verify)(h, reconstructed_s0, s1, q00, q10, q11, logn, bound, b));
+			assert(Zf(complete_verify)(h, reconstructed_s0, s1, q00, q10, q11, bound, logn, b));
 
 		for (size_t u = 0; u < n; u++) {
 			if (s0[u] != reconstructed_s0[u]) {
@@ -193,7 +209,7 @@ std::atomic<int> tot_signed(0), tot_invalid(0), tot_babai_fail(0), tot_sig_diffe
 
 constexpr fpr sigma_kg  = { v: 1.425 };
 constexpr fpr sigma_sig = { v: 1.292 };
-constexpr fpr verif_margin = { v: sigma_kg.v / sigma_sig.v };
+constexpr fpr verif_margin = { v: 1.1 };
 
 uint32_t getbound() {
 	return fpr_floor(fpr_mul(fpr_sqr(fpr_mul(verif_margin, fpr_double(sigma_sig))), fpr_double(fpr_of(n))));
@@ -230,6 +246,7 @@ int main() {
 		}
 	}
 
+	printf("\n");
 	printf("# Signatures signed:      %d\n", static_cast<int>(tot_signed));
 	printf("# Signatures invalid:     %d\n", static_cast<int>(tot_invalid));
 	printf("# Babai roundings failed: %d\n", static_cast<int>(tot_babai_fail));
