@@ -472,7 +472,7 @@ WorkerResult measure_keygen(fpr isigma_kg)
 	gettimeofday(&t0, NULL);
 	for (int _ = 0; _ < n_repetitions; _++) {
 		// Generate key pair.
-		Zf(keygen)(&sc, f, g, F, G, q00, q10, q11, logn, tmp.b, isigma_kg);
+		Zf(keygen)(&sc, f, g, F, G, q00, q10, q11, isigma_kg, logn, tmp.b);
 
 		result.num_iters++;
 
@@ -545,7 +545,7 @@ void work() {
 }
 
 
-int main(int argc, char **argv)
+int main()
 {
 	// set seed
 	struct timeval tv;

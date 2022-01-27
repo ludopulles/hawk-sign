@@ -43,7 +43,7 @@ void to_sage16(const char *varname, const int16_t *f, unsigned logn) {
 // =============================================================================
 const size_t logn = 9, n = MKN(logn);
 
-void benchmark(fpr isigma_kg, fpr isigma_sig) {
+void benchmark(fpr isigma_kg, fpr isigma_sig, uint32_t bound) {
 	union {
 		uint8_t b[28 * 512];
 		uint64_t dummy_u64;
@@ -67,7 +67,7 @@ void benchmark(fpr isigma_kg, fpr isigma_sig) {
 	gettimeofday(&t0, NULL);
 
 	// Generate key pair.
-	Zf(keygen)(&sc, f, g, F, G, q00, q10, q11, logn, tmp.b, isigma_kg);
+	Zf(keygen)(&sc, f, g, F, G, q00, q10, q11, isigma_kg, logn, tmp.b);
 
 	gettimeofday(&t1, NULL);
 	printf("Key generation took %lld microseconds\n", time_diff(&t0, &t1));
@@ -82,7 +82,7 @@ void benchmark(fpr isigma_kg, fpr isigma_sig) {
 		randombytes((unsigned char *)h, sizeof h);
 
 		// Compute the signature.
-		Zf(sign)(&sc, sig, f, g, h, logn, isigma_sig, tmp.b);
+		Zf(sign)(&sc, sig, f, g, h, isigma_sig, bound, logn, tmp.b);
 	}
 
 	gettimeofday(&t1, NULL);
@@ -90,7 +90,7 @@ void benchmark(fpr isigma_kg, fpr isigma_sig) {
 	printf("Lilipu sign/s = %.1f\n", sign_ps);
 }
 
-void test_valid_signature(fpr isigma_kg, fpr isigma_sig, fpr verif_bound) {
+void test_valid_signature(fpr isigma_kg, fpr isigma_sig, uint32_t bound) {
 	union {
 		uint8_t b[42 * 1024];
 		uint64_t dummy_u64;
@@ -109,7 +109,7 @@ void test_valid_signature(fpr isigma_kg, fpr isigma_sig, fpr verif_bound) {
 	inner_shake256_flip(&sc);
 
 	// Generate key pair.
-	Zf(keygen)(&sc, f, g, F, G, q00, q10, q11, logn, tmp.b, isigma_kg);
+	Zf(keygen)(&sc, f, g, F, G, q00, q10, q11, isigma_kg, logn, tmp.b);
 
 	for (int rep = 0; rep < 1000; rep++) {
 		// make a signature of a random message...
@@ -117,14 +117,14 @@ void test_valid_signature(fpr isigma_kg, fpr isigma_sig, fpr verif_bound) {
 		// to_sage16("h", (int16_t *)h, logn);
 
 		// Compute the signature.
-		Zf(sign)(&sc, sig, f, g, h, logn, isigma_sig, tmp.b);
+		Zf(sign)(&sc, sig, f, g, h, isigma_sig, bound, logn, tmp.b);
 		// to_sage16("s1", sig, logn);
 
-		assert(Zf(verify)(h, s0, sig, q00, q10, q11, logn, verif_bound, tmp.b));
+		assert(Zf(verify)(h, s0, sig, q00, q10, q11, bound, logn, tmp.b));
 		// randombytes((unsigned char *)sig, sizeof sig);
 		for (size_t u = 0; u < n; u ++)
 			sig[u] = 0;
-		assert(!Zf(verify)(h, s0, sig, q00, q10, q11, logn, verif_bound, tmp.b));
+		assert(!Zf(verify)(h, s0, sig, q00, q10, q11, bound, logn, tmp.b));
 	}
 
 	printf("Valid signatures were signed.\n");
@@ -134,7 +134,7 @@ void test_valid_signature(fpr isigma_kg, fpr isigma_sig, fpr verif_bound) {
 
 // try to find a forgery, put answer in s1
 int try_forge(int16_t *s0, int16_t *s1, const fpr *q00, const fpr *q10, const fpr *q11,
-	const int8_t *hm, const fpr verif_bound, uint8_t *tmp)
+	const int8_t *hm, uint32_t bound, uint8_t *tmp)
 {
 	size_t u;
 	int16_t s0p[1024], s1p[1024];
@@ -148,7 +148,7 @@ int try_forge(int16_t *s0, int16_t *s1, const fpr *q00, const fpr *q10, const fp
 	for (u = 0; u < n; u ++)
 		s1[u] = 0;
 
-	if (Zf(verify)(hm, s0, s1, q00, q10, q11, logn, verif_bound, tmp))
+	if (Zf(verify)(hm, s0, s1, q00, q10, q11, bound, logn, tmp))
 		return 1; // we are done
 
 	unsigned char seed[48];
@@ -195,19 +195,13 @@ int try_forge(int16_t *s0, int16_t *s1, const fpr *q00, const fpr *q10, const fp
 		trace = fpr_zero;
 		for (u = 0; u < n/2; u ++)
 			trace = fpr_add(trace, t1[u]);
-
-		// note: only n/2 embeddings are stored,
-		// the others are simply the conjugate embeddings.
-		// TODO: this can be optimized in the verif_bound, cancelling with 2 in (2d).
 		trace = fpr_double(trace);
-
-		// Signature is valid if and only if `v` is short enough and s2%2 == 0 (<=> s1mod2 = 0).
-		if (fpr_lt(trace, verif_bound)) {
+		if (fpr_lt(trace, fpr_of(bound * n))) {
 			memcpy(s1, s1p, sizeof s1p);
 			return 1; // we are done
 		}
 #ifdef AVX2
-		printf("Nope, trace = %.2f\tvs %.2f.\n", trace.v, verif_bound.v);
+		printf("Nope, trace = %.2f\tvs %d.\n", trace.v, bound * n);
 		printf("s1p = ");
 		for (u = 0; u < n; u++) printf("%d,", s1p[u]);
 		printf("\n");
@@ -215,7 +209,7 @@ int try_forge(int16_t *s0, int16_t *s1, const fpr *q00, const fpr *q10, const fp
 	}
 }
 
-void test_forge_signature(fpr isigma_kg, fpr isigma_sig, fpr verif_bound) {
+void test_forge_signature(fpr isigma_kg, fpr isigma_sig, uint32_t bound) {
 	union {
 		uint8_t b[42 * 1024];
 		uint64_t dummy_u64;
@@ -236,23 +230,23 @@ void test_forge_signature(fpr isigma_kg, fpr isigma_sig, fpr verif_bound) {
 	inner_shake256_flip(&sc);
 
 	// Generate key pair.
-	Zf(keygen)(&sc, f, g, F, G, q00, q10, q11, logn, tmp.b, isigma_kg);
+	Zf(keygen)(&sc, f, g, F, G, q00, q10, q11, isigma_kg, logn, tmp.b);
 
 	// generate random message
 	randombytes((unsigned char *)h, sizeof h);
 	// to_sage16("h", (int16_t *)h, logn);
 
-	Zf(sign)(&sc, sig, f, g, h, logn, isigma_sig, tmp.b);
+	Zf(sign)(&sc, sig, f, g, h, isigma_sig, bound, logn, tmp.b);
 	printf("s1 = ");
 	for (size_t u = 0; u < n; u++) printf("%d,", sig[u]);
 	printf("\n");
 	// to_sage16("s1", sig, logn);
 
 	// try to forge a signature for 'h', and put result in s0
-	res = try_forge(s0, sig, q00, q10, q11, h, verif_bound, tmp.b);
+	res = try_forge(s0, sig, q00, q10, q11, h, bound, tmp.b);
 	assert(res);
 
-	assert(!Zf(verify)(h, s0, sig, q00, q10, q11, logn, verif_bound, tmp.b));
+	assert(!Zf(verify)(h, s0, sig, q00, q10, q11, bound, logn, tmp.b));
 	printf("No forgery found.\n");
 }
 
@@ -272,7 +266,8 @@ int main() {
 	// Here, the vector (x0, x1) \in Z^{2d} is sampled from a Discrete Gaussian with sigma equal to 2*sigma_sig
 	// and lattice coset (h%2) + 2Z^{2d}, so it has a SQUARED norm of around ~(2sigma_sig)^2 * 2d.
 	// Using trace(s Q s^H) = trace(x x^H) = ||x||^2 [K:\QQ] = ||x||^2 d, we arrive at the verif_bound.
-	const fpr verif_bound = fpr_mul(fpr_sqr(fpr_mul(verif_margin, fpr_double(sigma_sig))), fpr_double(fpr_sqr(fpr_of(n))));
+	uint32_t bound = fpr_floor(fpr_mul(fpr_double(fpr_of(n)),
+		fpr_sqr(fpr_mul(verif_margin, fpr_double(sigma_sig)))));
 
 	// verif_margin = sigma_kg/sigma_sig:
 	// fail probability < 0.00003
@@ -284,7 +279,7 @@ int main() {
 #ifdef __AVX2__
 	const fpr sigma_FALCON = fpr_sqrt(fpr_div(fpr_of(117*117*12289), fpr_of(100*100*2*n))); // 1.17 √(q/2n)
 	printf("Sigma: %.3f vs %.3f of falcon\n", sigma_kg.v, sigma_FALCON.v);
-	printf("Verif margin: %.2f, bound: %.2f\n", verif_margin.v, verif_bound.v);
+	printf("Verif margin: %.2f, bound: %u\n", verif_margin.v, bound);
 #else
 #endif
 
@@ -295,9 +290,9 @@ int main() {
 	srand(seed);
 	assert(valid_sigma(sigma_kg) && valid_sigma(sigma_sig));
 
-	// test_forge_signature(fpr_inv(sigma_kg), fpr_inv(sigma_sig), verif_bound);
-	benchmark(fpr_inv(sigma_kg), fpr_inv(sigma_sig));
+	// test_forge_signature(fpr_inv(sigma_kg), fpr_inv(sigma_sig), bound);
+	benchmark(fpr_inv(sigma_kg), fpr_inv(sigma_sig), bound);
 
-	test_valid_signature(fpr_inv(sigma_kg), fpr_inv(sigma_sig), verif_bound);
+	test_valid_signature(fpr_inv(sigma_kg), fpr_inv(sigma_sig), bound);
 	return 0;
 }

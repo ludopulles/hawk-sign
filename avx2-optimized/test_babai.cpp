@@ -433,7 +433,7 @@ WorkerResult measure_keygen(fpr isigma_kg)
 	} tmp;
 	int8_t f[n], g[n], F[n], G[n];
 	fpr q00[n], q10[n], q11[n];
-	int16_t q00i[n], q10i[n];
+	int16_t q10i[n];
 	unsigned char seed[48];
 	inner_shake256_context sc;
 
@@ -453,7 +453,7 @@ WorkerResult measure_keygen(fpr isigma_kg)
 	gettimeofday(&t0, NULL);
 	for (int _ = 0; _ < n_repetitions; _++) {
 		// Generate key pair.
-		Zf(keygen)(&sc, f, g, F, G, q00, q10, q11, logn, tmp.b, isigma_kg);
+		Zf(keygen)(&sc, f, g, F, G, q00, q10, q11, isigma_kg, logn, tmp.b);
 
 		result.num_iters++;
 
@@ -515,7 +515,7 @@ void work() {
 }
 
 
-int main(int argc, char **argv)
+int main()
 {
 	// set seed
 	struct timeval tv;

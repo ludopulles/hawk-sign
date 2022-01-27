@@ -1,5 +1,5 @@
 /*
- * Falcon key pair generation.
+ * Hawk key pair generation.
  *
  * ==========================(LICENSE BEGIN)============================
  *
@@ -3901,7 +3901,7 @@ Zf(keygen)(inner_shake256_context *rng,
 	int8_t *restrict f, int8_t *restrict g, // secret key
 	int8_t *restrict F, int8_t *restrict G, // secret key
 	fpr *restrict q00, fpr *restrict q10, fpr *restrict q11, // public key
-	unsigned logn, uint8_t *restrict tmp, fpr isigma_kg)
+	fpr isigma_kg, unsigned logn, uint8_t *restrict tmp)
 {
 	/*
 	 * Algorithm is the following:

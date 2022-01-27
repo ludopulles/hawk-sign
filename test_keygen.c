@@ -543,10 +543,10 @@ void measure_keygen(fpr isigma_kg) {
 		tot_c10 += pubkey_sz_cq10;
 		// continue;
 
-		size_t pubkey_sz_c = pubkey_sz_cq00 + pubkey_sz_cq10;
+		/* size_t pubkey_sz_c = pubkey_sz_cq00 + pubkey_sz_cq10;
 		size_t pubkey_sz_h = pubkey_sz_hq00 + pubkey_sz_hq10;
 
-		/* printf("Public key size (bits): \t%zu (%zu + %zu) vs %zu (%zu + %zu)\n",
+		printf("Public key size (bits): \t%zu (%zu + %zu) vs %zu (%zu + %zu)\n",
 			pubkey_sz_c, pubkey_sz_cq00, pubkey_sz_cq10,
 			pubkey_sz_h, pubkey_sz_hq00, pubkey_sz_hq10); */
 

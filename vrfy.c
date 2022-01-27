@@ -68,7 +68,7 @@ int
 Zf(verify)(const int8_t *restrict hm,
 	int16_t *restrict s0, const int16_t *restrict s1,
 	const fpr *restrict q00, const fpr *restrict q10, const fpr *restrict q11,
-	unsigned logn, const fpr verif_bound, uint8_t *restrict tmp)
+	uint32_t bound, unsigned logn, uint8_t *restrict tmp)
 {
 	size_t u, n;
 	fpr *t0, *t1, *t2, *t3, trace;
@@ -140,7 +140,7 @@ Zf(verify)(const int8_t *restrict hm,
 	/*
 	 * Signature is valid if and only if `v` is short enough.
 	 */
-	return fpr_lt(trace, verif_bound);
+	return fpr_lt(trace, fpr_of(bound * n));
 }
 
 
@@ -150,7 +150,7 @@ int
 Zf(complete_verify)(const int8_t *restrict hm,
 	const int16_t *restrict s0, const int16_t *restrict s1,
 	const fpr *restrict q00, const fpr *restrict q10, const fpr *restrict q11,
-	unsigned logn, const fpr verif_bound, uint8_t *restrict tmp)
+	uint32_t bound, unsigned logn, uint8_t *restrict tmp)
 {
 	size_t u, n;
 	fpr *t0, *t1, *t2, *t3, trace;
@@ -195,11 +195,11 @@ Zf(complete_verify)(const int8_t *restrict hm,
 	// note: only n/2 embeddings are stored,
 	// the others are simply the conjugate embeddings.
 	trace = fpr_double(trace);
+
 	/*
-	 * Signature is valid if and only if
-	 * `v` is short enough
+	 * Signature is valid if and only if `Tr(s* Q s) / n = Tr(x* x)/ <= bound`.
 	 */
-	return fpr_lt(trace, verif_bound);
+	return fpr_lt(trace, fpr_of(bound * n));
 }
 
 

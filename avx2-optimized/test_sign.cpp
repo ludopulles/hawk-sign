@@ -140,7 +140,7 @@ struct WorkerResult {
 	WorkerResult() =default;
 };
 
-WorkerResult measure_signatures(fpr isigma_kg, fpr isigma_sig, fpr verif_bound) {
+WorkerResult measure_signatures(fpr isigma_kg, fpr isigma_sig, uint32_t bound) {
 	uint8_t b[42 << logn];
 	int8_t f[n], g[n], F[n], G[n], h[n];
 	int16_t s0[n], reconstructed_s0[n], s1[n];
@@ -160,24 +160,24 @@ WorkerResult measure_signatures(fpr isigma_kg, fpr isigma_sig, fpr verif_bound) 
 
 	for (int rep = 0; rep < n_repetitions; rep++) {
 		// Generate key pair.
-		Zf(keygen)(&sc, f, g, F, G, q00, q10, q11, logn, b, isigma_kg);
+		Zf(keygen)(&sc, f, g, F, G, q00, q10, q11, isigma_kg, logn, b);
 
 		// make a signature of a random message...
 		randombytes((unsigned char *)h, sizeof h);
 
 		// Compute the signature.
-		Zf(complete_sign)(&sc, s0, s1, f, g, F, G, h, logn, isigma_sig, b);
+		Zf(complete_sign)(&sc, s0, s1, f, g, F, G, h, isigma_sig, bound, logn, b);
 
 		printf("%zu ", Zf(comp_encode)(NULL, 0, s1, logn));
 		fflush(stdout);
 
-		if (!Zf(complete_verify)(h, s0, s1, q00, q10, q11, logn, verif_bound, b))
+		if (!Zf(complete_verify)(h, s0, s1, q00, q10, q11, logn, bound, b))
 			result.num_invalid++;
 
-		if (!Zf(verify)(h, reconstructed_s0, s1, q00, q10, q11, logn, verif_bound, b))
+		if (!Zf(verify)(h, reconstructed_s0, s1, q00, q10, q11, logn, bound, b))
 			result.num_babai_fail++;
 		else
-			assert(Zf(complete_verify)(h, reconstructed_s0, s1, q00, q10, q11, logn, verif_bound, b));
+			assert(Zf(complete_verify)(h, reconstructed_s0, s1, q00, q10, q11, logn, bound, b));
 
 		for (size_t u = 0; u < n; u++) {
 			if (s0[u] != reconstructed_s0[u]) {
@@ -195,12 +195,12 @@ constexpr fpr sigma_kg  = { v: 1.425 };
 constexpr fpr sigma_sig = { v: 1.292 };
 constexpr fpr verif_margin = { v: sigma_kg.v / sigma_sig.v };
 
-fpr getverif_bound() {
-	return fpr_mul(fpr_sqr(fpr_mul(verif_margin, fpr_double(sigma_sig))), fpr_double(fpr_sqr(fpr_of(n))));
+uint32_t getbound() {
+	return fpr_floor(fpr_mul(fpr_sqr(fpr_mul(verif_margin, fpr_double(sigma_sig))), fpr_double(fpr_of(n))));
 }
 
 void work() {
-	WorkerResult result = measure_signatures(fpr_inv(sigma_kg), fpr_inv(sigma_sig), getverif_bound());
+	WorkerResult result = measure_signatures(fpr_inv(sigma_kg), fpr_inv(sigma_sig), getbound());
 
 	tot_signed += result.num_signed;
 	tot_invalid += result.num_invalid;

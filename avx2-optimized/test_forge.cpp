@@ -48,14 +48,14 @@ long long time_diff(const struct timeval *begin, const struct timeval *end) {
 // =============================================================================
 const size_t logn = 9, n = MKN(logn);
 
-void find_forgeries(fpr isigma_kg, fpr isigma_sig, fpr verif_bound)
+void find_forgeries(fpr isigma_kg, fpr isigma_sig, uint32_t bound)
 {
 	union { // use union to ensure alignment
 		uint8_t b[42*512];
 		uint64_t dummy_i64;
 		fpr dummy_fpr;
 	} tmp;
-	int8_t f[n], g[n], F[n], G[n], h[n], h2[n];
+	int8_t f[n], g[n], F[n], G[n], h[n]; // h2[n];
 	fpr q00[n], q10[n], q11[n];
 	int16_t s0[n], s1[n];
 	unsigned char seed[48];
@@ -68,20 +68,23 @@ void find_forgeries(fpr isigma_kg, fpr isigma_sig, fpr verif_bound)
 	inner_shake256_flip(&sc);
 
 	// Generate key pair.
-	Zf(keygen)(&sc, f, g, F, G, q00, q10, q11, logn, tmp.b, isigma_kg);
+	Zf(keygen)(&sc, f, g, F, G, q00, q10, q11, isigma_kg, logn, tmp.b);
 
-	// make a signature of a random message...
-	random_hash(h, logn);
+	for (int rep = 0; rep < 1000; rep++) {
+		// make a signature of a random message...
+		random_hash(h, logn);
 
-	// Compute the signature.
-	Zf(sign)(&sc, s1, f, g, h, logn, isigma_sig, tmp.b);
-	assert(Zf(verify)(h, s0, s1, q00, q10, q11, logn, verif_bound, tmp.b));
+		// Compute the signature.
+		Zf(sign)(&sc, s1, f, g, h, isigma_sig, bound, logn, tmp.b);
+		assert(Zf(verify)(h, s0, s1, q00, q10, q11, bound, logn, tmp.b));
+	}
+	exit(1);
 
 	int nreps = 0, nworks = 0;
 	for (size_t i = 0; i < n; i++) {
 		h[i] ^= 1; // change some bytes of h
 		nreps++;
-		nworks += Zf(verify)(h, s0, s1, q00, q10, q11, logn, verif_bound, tmp.b);
+		nworks += Zf(verify)(h, s0, s1, q00, q10, q11, bound, logn, tmp.b);
 		h[i] ^= 1; // restore
 	}
 	for (size_t i = 0; i < n; i++) {
@@ -89,7 +92,7 @@ void find_forgeries(fpr isigma_kg, fpr isigma_sig, fpr verif_bound)
 		for (size_t j = 0; j < i; j++) {
 			h[j] ^= 1; // change a bit of h
 			nreps++;
-			nworks += Zf(verify)(h, s0, s1, q00, q10, q11, logn, verif_bound, tmp.b);
+			nworks += Zf(verify)(h, s0, s1, q00, q10, q11, bound, logn, tmp.b);
 			h[j] ^= 1; // restore
 		}
 		h[i] ^= 1; // restore
@@ -100,7 +103,7 @@ void find_forgeries(fpr isigma_kg, fpr isigma_sig, fpr verif_bound)
 		random_hash(h2, logn);
 
 		nreps++;
-		nworks += Zf(verify)(h2, s0, s1, q00, q10, q11, logn, verif_bound, tmp.b);
+		nworks += Zf(verify)(h2, s0, s1, q00, q10, q11, bound, logn, tmp.b);
 	} //*/
 	printf("Succesful signatures found: %d / %d\n", nworks, nreps);
 	printf("All went succesful!\n");
@@ -116,7 +119,7 @@ constexpr fpr sigma_kg  = { v: 1.425 };
 constexpr fpr sigma_sig = { v: 1.292 };
 constexpr fpr verif_margin = { v: 1.1 }; // sigma_kg.v / sigma_sig.v };
 
-int main(int argc, char **argv)
+int main()
 {
 	// set seed
 	struct timeval tv;
@@ -127,11 +130,11 @@ int main(int argc, char **argv)
 
 	assert(valid_sigma(sigma_kg));
 
-	// dimension = 2n, trace normalization also gives a factor of n.
-	// (verif_margin 2 sigma_sig)^2 * 2 n^2
-	const fpr verif_bound = fpr_mul(fpr_sqr(fpr_mul(verif_margin, fpr_double(sigma_sig))), fpr_double(fpr_sqr(fpr_of(n))));
+	// expected l_2 norm of a Gaussian of std.dev. 2sigma_sig and dimension 2n is 2 sigma_sig √2n
+	// (verif_margin * 2 * sigma_sig)^2 * 2n
+	uint32_t bound = fpr_floor(fpr_mul(fpr_sqr(fpr_mul(verif_margin, fpr_double(sigma_sig))), fpr_double(fpr_of(n))));
 
-	find_forgeries(fpr_inv(sigma_kg), fpr_inv(sigma_sig), verif_bound);
+	find_forgeries(fpr_inv(sigma_kg), fpr_inv(sigma_sig), bound);
 	return 0;
 }
 

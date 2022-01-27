@@ -718,7 +718,7 @@ Zf(keygen)(inner_shake256_context *rng,
 	int8_t *restrict f, int8_t *restrict g, // secret key
 	int8_t *restrict F, int8_t *restrict G, // secret key
 	fpr *restrict q00, fpr *restrict q10, fpr *restrict q11, // public key
-	unsigned logn, uint8_t *restrict tmp, fpr isigma_kg);
+	fpr isigma_kg, unsigned logn, uint8_t *restrict tmp);
 
 /* ==================================================================== */
 /*
@@ -737,8 +737,8 @@ Zf(keygen)(inner_shake256_context *rng,
 void
 Zf(sign)(inner_shake256_context *rng, int16_t *restrict sig,
 	const int8_t *restrict f, const int8_t *restrict g,
-	const int8_t *restrict hm, unsigned logn, fpr isigma_sig,
-	uint8_t *restrict tmp);
+	const int8_t *restrict hm, fpr isigma_sig, uint32_t bound,
+	unsigned logn, uint8_t *restrict tmp);
 
 /*
  * Computes a whole signature (s0, s1) instead of only s1 as is done in
@@ -749,8 +749,8 @@ Zf(complete_sign)(inner_shake256_context *rng,
 	int16_t *restrict s0, int16_t *restrict s1,
 	const int8_t *restrict f, const int8_t *restrict g,
 	const int8_t *restrict F, const int8_t *restrict G,
-	const int8_t *restrict hm, unsigned logn, fpr isigma_sig,
-	uint8_t *restrict tmp);
+	const int8_t *restrict hm, fpr isigma_sig, uint32_t bound,
+	unsigned logn, uint8_t *restrict tmp);
 
 /* ==================================================================== */
 /*
@@ -766,8 +766,8 @@ Zf(complete_sign)(inner_shake256_context *rng,
  *     value (s0 s1) Q (s0 s1)^T.
  * s1: buffer of length n, containing the signature
  * q00, q10, q11: represents the matrix Q = [[q00, q10^T], [q10, q11]].
- * verif_bound: if a signature (s0, s1) has Tr((s0 s1) Q (s0 s1)^T) smaller than
- *              this bound, the signature is accepted.
+ * bound: if Tr((s0 s1) Q (s0 s1)^T)/n <= bound holds for a signature
+ *        (s0, s1), the signature is accepted.
  *
  * Note: q00, q11 are self adjoint.
  * tmp: buffer for intermediate values, of size >= 32*512 = 16384 bytes.
@@ -776,7 +776,7 @@ int
 Zf(verify)(const int8_t *restrict hm,
 	int16_t *restrict s0, const int16_t *restrict s1,
 	const fpr *restrict q00, const fpr *restrict q10, const fpr *restrict q11,
-	unsigned logn, const fpr verif_bound, uint8_t *restrict tmp);
+	uint32_t bound, unsigned logn, uint8_t *restrict tmp);
 
 /**
  * Similar to Zf(verify), except that it takes (s0, s1) as signature, and 
@@ -786,6 +786,6 @@ int
 Zf(complete_verify)(const int8_t *restrict hm,
 	const int16_t *restrict s0, const int16_t *restrict s1,
 	const fpr *restrict q00, const fpr *restrict q10, const fpr *restrict q11,
-	unsigned logn, const fpr verif_bound, uint8_t *restrict tmp);
+	uint32_t bound, unsigned logn, uint8_t *restrict tmp);
 
 #endif
