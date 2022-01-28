@@ -369,7 +369,7 @@ struct WorkerResult
 void
 do_enumeration(const int8_t *f, const int8_t *g, int8_t *F, int8_t *G, const fpr *q00, fpr *q10, const int16_t *q00i, int16_t *q10i)
 {
-	constexpr int NP = 10, STEPS = 1'000;
+	constexpr int NP = 10, STEPS = 10'000;
 	int16_t newq10[n];
 	int pos[NP], add[NP];
 	for (int i = (NP-1)*STEPS; i --> 0; ) {

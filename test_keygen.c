@@ -58,10 +58,10 @@ struct {
 } huffman_tree_q10;
 
 void init_huffman_trees() {
-	float freq[2*MAX_Q10], sigma = 45.75;
+	float freq[2*MAX_Q10];
 	int len[2*MAX_Q10];
 
-#define BUILD_TREE(T, N, L)                                              \
+#define BUILD_TREE(T, N, L, sigma)                                       \
 	/* calculate PDF of normal distribution */                           \
 	memset(len, 0, sizeof len);                                          \
 	for (int x = 0; x < N; x++)                                          \
@@ -71,7 +71,7 @@ void init_huffman_trees() {
 	for (uint16_t node = N; --node >= 1; ) {                             \
 		/* find 2 nodes with smallest frequencies */                     \
 		uint16_t l = 0, r = 0;                                           \
-		for (uint16_t idx = node; ++idx < 2*N; ) {                       \
+		for (uint16_t idx = 2*N-1; idx > node; --idx) {                  \
 			if (freq[idx] < 0) continue;                                 \
 			if (!l || freq[idx] < freq[l]) r = l, l = idx;               \
 			else if (!r || freq[idx] < freq[r]) r = idx;                 \
@@ -81,15 +81,32 @@ void init_huffman_trees() {
 		freq[l] = freq[r] = -1;                                          \
 		len[node] = 1 + (len[l] > len[r] ? len[l] : len[r]);             \
 		T.p[l] = T.p[r] = node;                                          \
-		T.a[node][0] = l;                                                \
-		T.a[node][1] = r;                                                \
+		T.a[node][0] = r;                                                \
+		T.a[node][1] = l;                                                \
 	}                                                                    \
 	assert(len[1] <= L && "Longest codeword is too long!");              \
 	if (len[1] != L) printf("Longest codeword has length %d\n", len[1]) // ;
 
-	BUILD_TREE(huffman_tree_q00, MAX_Q00, MAXLEN_Q00);
-	sigma = 512.0;
-	BUILD_TREE(huffman_tree_q10, MAX_Q10, MAXLEN_Q10);
+	BUILD_TREE(huffman_tree_q00, MAX_Q00, MAXLEN_Q00, 45.75);
+	BUILD_TREE(huffman_tree_q10, MAX_Q10, MAXLEN_Q10, 512.0);
+
+#define DEBUG_TREE(T, N, L) \
+	for (uint16_t x = 0; x < N; x++) { \
+		size_t steps = 0; \
+		memset(len, 0, sizeof len); \
+		for (int16_t idx = x + N; idx > 1; ) { \
+			int16_t next_idx = T.p[idx]; \
+			len[steps++] = T.a[next_idx][1] == idx ? 1 : 0; \
+			idx = next_idx; \
+		} \
+		assert(steps <= L); \
+		printf("%d: ", x); \
+		while (steps --> 0) printf("%d", len[steps]); \
+		printf("\n"); \
+	}
+
+	DEBUG_TREE(huffman_tree_q00, MAX_Q00, MAXLEN_Q00);
+	DEBUG_TREE(huffman_tree_q10, MAX_Q10, MAXLEN_Q10);
 }
 
 size_t Zf(huffman_encode_q00)(void *out, size_t max_out_len, const int16_t *x, unsigned logn) {
@@ -566,11 +583,11 @@ void measure_keygen(fpr isigma_kg) {
 	// This requires catching failed attempts
 	printf("Probability failure: %.2f%%\n", 100.0 * fails / n_repetitions);
 
-	printf("Type |  Total\n");
-	printf("hq00 | %6zu\n", tot_h00);
-	printf("cq00 | %6zu\n", tot_c00);
-	printf("hq10 | %6zu\n", tot_h10);
-	printf("cq10 | %6zu\n", tot_c10);
+	printf("Type | avg #bits\n");
+	printf("hq00 | %.1f\n", (double) tot_h00 / n_repetitions);
+	printf("cq00 | %.1f\n", (double) tot_c00 / n_repetitions);
+	printf("hq10 | %.1f\n", (double) tot_h10 / n_repetitions);
+	printf("cq10 | %.1f\n", (double) tot_c10 / n_repetitions);
 
 /*
 	// Gather statistics
@@ -596,6 +613,7 @@ int main() {
 	srand(seed);
 
 	init_huffman_trees();
+	return 0;
 
 	const fpr sigma_kg  = fpr_div(fpr_of(1425), fpr_of(1000));
 	assert(valid_sigma(sigma_kg));
