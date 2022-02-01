@@ -3969,7 +3969,7 @@ Zf(keygen)(inner_shake256_context *rng,
 
 		// Optional: do Babai reduction here on (F,G) w.r.t (f,g).
 		// TODO: really do this
-		// Zf(ffBabai_reduce)(q00, rt1, q11, rt2, F, G, logn, rt2 + n);
+		Zf(ffBabai_reduce)(q00, rt1, q11, rt2, F, G, logn, rt2 + n);
 
 		// q10 = F*adj(f) + G*adj(g)
 		Zf(poly_add_muladj_fft)(q10, q11, rt2, q00, rt1, logn);

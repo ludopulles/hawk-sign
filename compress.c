@@ -29,6 +29,8 @@
  * @author   Thomas Pornin <thomas.pornin@nccgroup.com>
  */
 
+#include "math.h"
+
 #include "inner.h"
 
 

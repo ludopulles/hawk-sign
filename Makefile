@@ -5,10 +5,10 @@
 CC = c99
 CFLAGS = -W -Wall -Wshadow -O2
 LD = c99
-LDFLAGS = 
+LDFLAGS = -W -Wall -Wshadow -O2 -lm
 LIBS = 
 
-OBJ = build/fft.o build/fpr.o build/keygen.o build/rng.o build/sampler.o build/shake.o build/sign.o build/vrfy.o
+OBJ = build/compress.o build/fft.o build/ffo.o build/fpr.o build/keygen.o build/rng.o build/sampler.o build/shake.o build/sign.o build/vrfy.o
 
 HEAD = fpr.h inner.h
 
@@ -18,17 +18,21 @@ build:
 	-mkdir build
 
 clean:
-	-rm -f $(OBJ) build/main.o build/main
+	-rm -f $(OBJ) build/main.o build/main build/generate.o build/generate
 
 
 build/main: build/main.o $(OBJ)
-	$(CC) $(CFLAGS) -o build/main build/main.o $(OBJ) $(LIBS)
+	$(LD) $(LDFLAGS) -o build/main build/main.o $(OBJ) $(LIBS)
 
 build/generate: build/generate.o $(OBJ)
-	$(CC) $(CFLAGS) -o build/generate build/generate.o $(OBJ) $(LIBS)
+	$(LD) $(LDFLAGS) -o build/generate build/generate.o $(OBJ) $(LIBS)
 
+build/compress.o: compress.c $(HEAD)
+	$(CC) $(CFLAGS) -c -o build/compress.o compress.c
 build/fft.o: fft.c $(HEAD)
 	$(CC) $(CFLAGS) -c -o build/fft.o fft.c
+build/ffo.o: ffo.c $(HEAD)
+	$(CC) $(CFLAGS) -c -o build/ffo.o ffo.c
 build/fpr.o: fpr.c $(HEAD)
 	$(CC) $(CFLAGS) -c -o build/fpr.o fpr.c
 build/keygen.o: keygen.c $(HEAD)
