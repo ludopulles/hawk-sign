@@ -59,7 +59,7 @@ int main(int argc, char **argv) {
 	inner_shake256_flip(&sc);
 
 	// Generate key pair.
-	Zf(keygen)(&sc, f, g, F, G, q00, q10, q11, logn, b, fpr_inv(sigma_kg));
+	Zf(keygen)(&sc, f, g, F, G, q00, q10, q11, fpr_inv(sigma_kg), logn, b);
 
 	// Output secret key (f, g, F, G)
 	output_poly(f, logn);
