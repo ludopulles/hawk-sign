@@ -404,6 +404,29 @@ int Zf(gaussian0_sampler)(prng *p);
 
 /* ==================================================================== */
 /*
+ * Coding & decoding (compress.c)
+ */
+
+size_t
+Zf(encode_pubkey)(void *out, size_t max_out_len,
+	const int16_t *q00, const int16_t *q10, unsigned logn);
+
+size_t
+Zf(decode_pubkey)(int16_t *q00, int16_t *q10,
+	const void *in, size_t max_in_len, unsigned logn);
+
+size_t
+Zf(encode_sig_huffman)(
+	void *out, size_t max_out_len,
+	const int16_t *x, unsigned logn);
+
+size_t
+Zf(encode_sig)(
+	void *out, size_t max_out_len,
+	const int16_t *x, unsigned logn, size_t lo_bits);
+
+/* ==================================================================== */
+/*
  * FFT (fft.c).
  *
  * A real polynomial is represented as an array of N 'fpr' elements. The

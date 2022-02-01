@@ -152,6 +152,7 @@ struct WorkerResult {
 	int num_invalid;
 	int num_babai_fail;
 	int num_sig_differ;
+	int sig_failed;
 
 	WorkerResult() =default;
 };
@@ -174,6 +175,7 @@ WorkerResult measure_signatures(fpr isigma_kg, fpr isigma_sig, uint32_t bound) {
 	WorkerResult result;
 	result.num_signed = n_repetitions;
 
+	uint16_t maxVal = 0;
 	for (int rep = 0; rep < n_repetitions; rep++) {
 		// Generate key pair.
 		Zf(keygen)(&sc, f, g, F, G, q00, q10, q11, isigma_kg, logn, b);
@@ -184,7 +186,13 @@ WorkerResult measure_signatures(fpr isigma_kg, fpr isigma_sig, uint32_t bound) {
 		// Compute the signature.
 		Zf(complete_sign)(&sc, s0, s1, f, g, F, G, h, isigma_sig, bound, logn, b);
 
-		printf("%zu ", Zf(comp_encode)(NULL, 0, s1, logn));
+		size_t sig_sz = Zf(comp_encode)(NULL, 0, s1, logn);
+		if (sig_sz == 0)
+			result.sig_failed++;
+		for (size_t u = 0; u < n; u++) {
+			if (abs(s1[u]) > maxVal) maxVal = abs(s1[u]);
+		}
+		printf("%u %zu\n", maxVal, sig_sz);
 		fflush(stdout);
 
 		if (!Zf(complete_verify)(h, s0, s1, q00, q10, q11, bound, logn, b))
@@ -205,7 +213,8 @@ WorkerResult measure_signatures(fpr isigma_kg, fpr isigma_sig, uint32_t bound) {
 	return result;
 }
 
-std::atomic<int> tot_signed(0), tot_invalid(0), tot_babai_fail(0), tot_sig_differ(0);
+std::atomic<int> tot_signed(0), tot_invalid(0), tot_babai_fail(0),
+	tot_sig_differ(0), tot_sig_failed(0);
 
 constexpr fpr sigma_kg  = { v: 1.425 };
 constexpr fpr sigma_sig = { v: 1.292 };
@@ -221,7 +230,8 @@ void work() {
 	tot_signed += result.num_signed;
 	tot_invalid += result.num_invalid;
 	tot_babai_fail += result.num_babai_fail;
-	tot_sig_differ += result.num_sig_differ;;
+	tot_sig_differ += result.num_sig_differ;
+	tot_sig_failed += result.sig_failed;
 }
 
 int main() {
@@ -251,6 +261,7 @@ int main() {
 	printf("# Signatures invalid:     %d\n", static_cast<int>(tot_invalid));
 	printf("# Babai roundings failed: %d\n", static_cast<int>(tot_babai_fail));
 	printf("# Babai != original s0:   %d\n", static_cast<int>(tot_sig_differ));
+	printf("# Sig. coding failed:     %d\n", static_cast<int>(tot_sig_failed));
 
 	return 0;
 }
