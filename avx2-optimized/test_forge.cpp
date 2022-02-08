@@ -26,12 +26,12 @@ void randombytes(unsigned char *x, unsigned long long xlen) {
 
 void random_hash(int8_t *h, unsigned logn) {
 	assert(RAND_MAX == INT_MAX); // rand() should generate 31 random bits
-	int x = rand();
-	size_t RAND_BITS = 31, rand_bits = RAND_BITS;
+	int x = 0;
+	size_t rand_bits = 0;
 	for (size_t u = MKN(logn); u -- > 0; ) {
 		if (rand_bits == 0) {
 			x = rand();
-			rand_bits = RAND_BITS;
+			rand_bits = 31;
 		}
 		h[u] = (x & 1);
 		x >>= 1;
@@ -51,7 +51,7 @@ const size_t logn = 9, n = MKN(logn);
 void find_forgeries(fpr isigma_kg, fpr isigma_sig, uint32_t bound)
 {
 	union { // use union to ensure alignment
-		uint8_t b[42*512];
+		uint8_t b[48*512];
 		uint64_t dummy_i64;
 		fpr dummy_fpr;
 	} tmp;
@@ -70,15 +70,14 @@ void find_forgeries(fpr isigma_kg, fpr isigma_sig, uint32_t bound)
 	// Generate key pair.
 	Zf(keygen)(&sc, f, g, F, G, q00, q10, q11, isigma_kg, logn, tmp.b);
 
-	for (int rep = 0; rep < 1000; rep++) {
-		// make a signature of a random message...
-		random_hash(h, logn);
+	// make a signature of a random message...
+	random_hash(h, logn);
 
-		// Compute the signature.
-		Zf(sign)(&sc, s1, f, g, h, isigma_sig, bound, logn, tmp.b);
-		assert(Zf(verify)(h, s0, s1, q00, q10, q11, bound, logn, tmp.b));
-	}
-	exit(1);
+	// Compute the signature.
+	// Zf(complete_sign)(&sc, s0, s1, f, g, F, G, h, isigma_sig, bound, logn, tmp.b);
+	// assert(Zf(complete_verify)(h, s0, s1, q00, q10, q11, bound, logn, tmp.b));
+	Zf(sign)(&sc, s1, f, g, h, isigma_sig, bound, logn, tmp.b);
+	assert(Zf(verify)(h, s0, s1, q00, q10, q11, bound, logn, tmp.b));
 
 	int nreps = 0, nworks = 0;
 	for (size_t i = 0; i < n; i++) {
