@@ -1,4 +1,4 @@
-// g++ build/ffo.o build/fft.o build/fpr.o build/keygen.o build/rng.o build/sampler.o build/shake.o build/sign.o build/vrfy.o generateCVP.cpp
+// g++ build/ffo.o build/fft.o build/fpr.o build/keygen.o build/rng.o build/sampler.o build/shake.o build/sign.o build/vrfy.o generateCVP.cpp -lgmp -lfplll
 #include <assert.h>
 #include <stdio.h>
 // x86_64 specific:
@@ -14,7 +14,6 @@ extern "C" {
 
 using namespace std;
 using namespace fplll;
-
 
 // Simple randomness generator:
 void randombytes(unsigned char *x, unsigned long long xlen) {
@@ -37,6 +36,16 @@ void output_poly(int8_t *p, int logn) {
 	}
 	printf("\n");
 }
+
+void norm2(int8_t *f, int8_t *g, size_t logn) {
+	unsigned res = 0;
+	for (size_t u = 0; u < MKN(logn); u++) {
+		res += (unsigned) f[u] * f[u];
+		res += (unsigned) g[u] * g[u];
+	}
+	printf("Norm: %u\n", res);
+}
+
 
 int main(int argc, char **argv) {
 	uint8_t b[28 * 512];
@@ -78,6 +87,8 @@ int main(int argc, char **argv) {
 	output_poly(F, logn);
 	output_poly(G, logn);
 
+	norm2(f, g, logn);
+	norm2(F, G, logn);
 
 	size_t n = MKN(logn);
 	ZZ_mat<mpz_t> m(n, 2*n);
@@ -117,15 +128,17 @@ const char *const RED_STATUS_STR[RED_STATUS_MAX] = {
 
 
 	int status;
-	status = lll_reduction(m, LLL_DEF_DELTA, LLL_DEF_ETA, LM_WRAPPER, FT_DEFAULT, 0, LLL_DEFAULT);
-	cerr << "Status LLL: " << RED_STATUS_STR[status] << endl;
-	if (status != RED_SUCCESS)
+	status = lll_reduction(m, LLL_DEF_DELTA, LLL_DEF_ETA, LM_PROVED, FT_DEFAULT, 0, LLL_DEFAULT);
+	if (status != RED_SUCCESS) {
+		cerr << "Status LLL: " << RED_STATUS_STR[status] << endl;
 		return status;
+	}
 
-	status = fplll::closest_vector(m, target, sol_coord, CVPM_FAST, CVP_VERBOSE);
-	cerr << "Status CVP: " << RED_STATUS_STR[status] << endl;
-	if (status != RED_SUCCESS)
+	status = fplll::closest_vector(m, target, sol_coord, CVPM_PROVED, CVP_DEFAULT);
+	if (status != RED_SUCCESS) {
+		cerr << "Status CVP: " << RED_STATUS_STR[status] << endl;
 		return status;
+	}
 
 	for (size_t v = 0; v < n; v++) {
 		cout << "(" << sol_coord[v] << "," << sol_coord[n+v] << ")";
@@ -133,13 +146,21 @@ const char *const RED_STATUS_STR[RED_STATUS_MAX] = {
 	cout << endl;
 
 	int8_t newF[512], newG[512];
+	memcpy(newF, F, sizeof newF);
+	memcpy(newG, G, sizeof newG);
 	for (size_t v = 0; v < n; v++) {
-		newF[v] = F[v] - (int) sol_coord[v].get_si();
-		newG[v] = G[v] - (int) sol_coord[n + v].get_si();
+		int x = sol_coord[v].get_si();
+		if (x == 0) continue;
+		// subtract the CVP from (F,G)
+		for (size_t i = 0; i < n; i++) {
+			newF[i] -= x * m(v, i).get_si();
+			newG[i] -= x * m(v, i + n).get_si();
+		}
 	}
 
 	output_poly(newF, logn);
 	output_poly(newG, logn);
 
+	norm2(newF, newG, logn);
 	return 0;
 }
