@@ -155,7 +155,7 @@ Zf(verify)(const int8_t *restrict hm,
 	Zf(iFFT)(t0, logn);
 
 	for (u = 0; u < n; u ++) {
-		s0[u] = fpr_rint(fpr_half(t0[u]));
+		s0[u] = fpr_rint(t0[u]);
 	}
 
 	return Zf(complete_verify)(hm, s0, s1, q00, q10, q11, bound, logn, tmp);
