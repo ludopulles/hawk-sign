@@ -176,7 +176,7 @@ int main() {
 	
 	double avg_h = (double) tot.sz_h / tot.num_huf;
 	double std_h = (double) tot.sz_hsq / tot.num_huf - avg_h * avg_h;
-	printf("Huffman: %.2f (std %.2f), fails %d\n", avg_h, std_h, tot.num_huf_fail);
+	printf("Huffman: %.2f (std %.2f), fails %lld\n", avg_h, std_h, tot.num_huf_fail);
 
 	return 0;
 }

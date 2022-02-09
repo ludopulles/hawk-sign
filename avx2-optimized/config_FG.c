@@ -640,10 +640,10 @@ void sample_FG(inner_shake256_context *rng, int8_t *f, int8_t *g,
 	 * NTRU equation solver requires it).
 	 */
 	while (1) {
-sample:
 		// Normal sampling. We use a fast PRNG seeded from our SHAKE context ('rng').
 		sampler_context spc;
 		void *samp_ctx;
+sample:
 		spc.sigma_min = fpr_sigma_min[logn];
 		Zf(prng_init)(&spc.p, rng);
 		samp_ctx = &spc;

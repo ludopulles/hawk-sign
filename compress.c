@@ -69,32 +69,25 @@ init_huffman_trees() {
 
 	float freq[2*MAX_Q10];
 	uint16_t u, l, r, v;
-	/* int len[2*MAX_Q10]; */
 
 #define BUILD_TREE(T, N, sigma)                                          \
 	/* calculate PDF of normal distribution */                           \
-	/* memset(len, 0, sizeof len); */                                    \
-	for (u = 0; u < N; u++) {                                            \
+	for (u = 0; u < N; u++)                                              \
 		freq[N + u] = exp((float)-u * u / (2.0 * sigma * sigma));        \
-    }                                                                    \
 	/* construct the tree */                                             \
 	for (u = N; --u >= 1; ) {                                            \
-		/* find 2 nodes with smallest frequencies */                     \
-		l = r = 0;                                                       \
+		l = r = 0; /* find 2 nodes with smallest frequencies */          \
 		for (v = 2*N; --v > u; ) {                                       \
-			if (freq[v] < 0) continue;                                   \
+			if (freq[v] < 0) continue; /* v is already used */           \
 			if (!l || freq[v] < freq[l]) r = l, l = v;                   \
 			else if (!r || freq[v] < freq[r]) r = v;                     \
 		}                                                                \
 		freq[u] = freq[l] + freq[r];                                     \
-		/* hide frequency */                                             \
-		freq[l] = freq[r] = -1;                                          \
-		/* len[node] = 1 + (len[l] > len[r] ? len[l] : len[r]); */       \
+		freq[l] = freq[r] = -1; /* mark l and r as used */               \
 		T.p[l] = T.p[r] = u;                                             \
 		T.a[u][0] = r;                                                   \
 		T.a[u][1] = l;                                                   \
-	}                                                                    \
-	/* printf("Longest codeword has length %d\n", len[1]); */
+	}
 
 	BUILD_TREE(tree_q00, MAX_Q00, 45.75);
 	BUILD_TREE(tree_q10, MAX_Q10, 512.0);
@@ -311,7 +304,7 @@ Zf(decode_pubkey)(int16_t *q00, int16_t *q10,
 	 * Since q00 is self-adjoint, we can recover q00[n / 2] ... q00[n - 1]
 	 * now.
 	 */
-	q00[n/2] = 0U;
+	q00[n/2] = 0;
 	for (u = n/2 + 1; u < n; u ++)
 		q00[u] = -q00[n - u];
 
@@ -389,15 +382,6 @@ Zf(encode_sig_huffman)(
 	v = 0;
 	acc = acc_len = 0;
 
-	/*
-	 * The first value of q00 is of the order sigma_kg^2 2d,
-	 * but definitely << 8d when sigma_kg = 1.425, by the standard
-	 * Laurent-Massart bound [1].
-	 * Here, be lazy and print the whole of x[0].
-	 *
-	 * [1] en.wikipedia.org/wiki/Chi-squared_distribution#Concentration
-	 */
-
 	init_huffman_trees();
 
 	for (u = 0; u < n; u ++)
@@ -452,9 +436,6 @@ Zf(encode_sig)(
 
 	n = (size_t)1 << logn;
 	buf = (uint8_t *)out;
-
-	init_huffman_trees();
-	// TODO: use Huffman tree
 
 	/*
 	 * Make sure that all values are within the -511..+511 range.
