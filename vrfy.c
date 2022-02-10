@@ -112,14 +112,16 @@ Zf(complete_verify)(const int8_t *restrict hm,
 		trace = fpr_add(trace, t1[u]);
 	}
 
-	// note: only n/2 embeddings are stored,
-	// the others are simply the conjugate embeddings.
+	/*
+	 * Note: only n/2 embeddings are stored, because they come in pairs.
+	 */
 	trace = fpr_double(trace);
 
 	/*
-	 * Signature is valid if and only if `Tr(s* Q s) / n = Tr(x* x)/ <= bound`.
+	 * Signature is valid if and only if
+	 *     `Tr(s* Q s) / n (=Tr(x^* x)/n = sum_i x_i^2) <= bound`.
 	 */
-	return fpr_lt(trace, fpr_of(bound * n));
+	return (uint32_t)fpr_rint(fpr_div(trace, fpr_of(n))) <= bound;
 }
 
 int

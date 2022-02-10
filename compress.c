@@ -427,11 +427,10 @@ size_t
 Zf(encode_sig)(
 	void *out, size_t max_out_len,
 	const int16_t *x, unsigned logn, size_t lo_bits)
-	// TODO: hardcode lo_bits with the best possible value
 {
 	uint8_t *buf;
 	size_t n, u, v;
-	uint32_t acc;
+	uint64_t acc;
 	unsigned acc_len;
 
 	n = (size_t)1 << logn;
@@ -440,30 +439,19 @@ Zf(encode_sig)(
 	/*
 	 * Make sure that all values are within the -511..+511 range.
 	 */
-	for (u = 0; u < n; u ++) {
-		if (x[u] <= -512 || x[u] >= 512) {
-			return 0;
-		}
-	}
+	for (u = 0; u < n; u ++)
+		if (x[u] <= -512 || x[u] >= 512) return 0;
 
 	acc = 0;
 	acc_len = 0;
 	v = 0;
 	for (u = 0; u < n; u ++) {
-		int t;
 		unsigned w;
-
 		/*
-		 * Get sign and absolute value of next integer; push the
-		 * sign bit.
+		 * Push sign bit
 		 */
-		acc <<= 1;
-		t = x[u];
-		if (t < 0) {
-			t = -t;
-			acc |= 1;
-		}
-		w = (unsigned)t;
+		acc = (acc << 1) | ((uint16_t)x[u] >> 15);
+		w = (unsigned)(x[u] < 0 ? (-x[u] - 1) : x[u]);
 
 		/*
 		 * Push the lowest `lo_bits` bits of the absolute value.
@@ -473,23 +461,21 @@ Zf(encode_sig)(
 		w >>= lo_bits;
 		acc_len += lo_bits + 1;
 
-		if (acc_len + w + 1 >= 32) {
-			// There will be an overflow
-			return 0;
-		}
 		/*
-		 * TODO: fix the numbers here.
-		 *
-		 * Push as many zeros as necessary, then a one. Since the
-		 * absolute value is at most 2047, w can only range up to
-		 * 15 at this point, thus we will add at most 16 bits
-		 * here. With the 8 bits above and possibly up to 7 bits
-		 * from previous iterations, we may go up to 31 bits, which
-		 * will fit in the accumulator, which is an uint32_t.
+		 * TODO: assume lo_bits = 5 in the thing below.
+		 * Push as many zeros as necessary, then a one. Since the absolute
+		 * value is at most 511, w can only range up to 15 at this point,
+		 * thus we will add at most 16 bits here. With the 6 bits above
+		 * and possibly up to 7 bits from previous iterations, we may go
+		 * up to 29 bits, which will fit in the accumulator, which is an
+		 * uint32_t.
 		 */
 		acc <<= (w + 1);
 		acc |= 1;
 		acc_len += w + 1;
+
+		// TODO: remove when this check cannot fail anymore.
+		if (acc_len >= 64) return 0; // There is an overflow
 
 		/*
 		 * Produce all full bytes.
@@ -519,7 +505,6 @@ Zf(encode_sig)(
 		v ++;
 	}
 
-	if (lo_bits == 5 && v >= 530) return 0;
 	return v;
 }
 
