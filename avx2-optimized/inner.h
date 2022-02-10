@@ -479,6 +479,11 @@ int Zf(gaussian0_sampler)(prng *p);
  */
 
 size_t
+Zf(encode_seckey)(void *out, size_t max_out_len,
+	const int8_t *f, const int8_t *g, const int8_t *F, const int8_t *G,
+	unsigned logn);
+
+size_t
 Zf(encode_pubkey)(void *out, size_t max_out_len,
 	const int16_t *q00, const int16_t *q10, unsigned logn);
 

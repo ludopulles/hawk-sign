@@ -522,3 +522,104 @@ Zf(encode_sig)(
 	if (lo_bits == 5 && v >= 530) return 0;
 	return v;
 }
+
+static size_t
+poly_enc(uint8_t *buf, size_t max_out_len, uint64_t acc,
+	size_t acc_len, size_t v, const int8_t *x, unsigned logn,
+	size_t lo_bits)
+{
+	size_t n, u;
+
+	n = MKN(logn);
+	for (u = 0; u < n; u ++) {
+		unsigned w;
+		/*
+		 * Push sign bit
+		 */
+		acc = (acc << 1) | ((uint8_t)x[u] >> 7);
+		w = (unsigned)(x[u] < 0 ? (-x[u] - 1) : x[u]);
+
+		/*
+		 * Push the lowest `lo_bits` bits of |x[u]|.
+		 */
+		acc <<= lo_bits;
+		acc |= w & ((1U << lo_bits) - 1);
+		w >>= lo_bits;
+		acc_len += lo_bits + 1;
+
+		if (acc_len + w + 1 > 64) return 0;
+
+		/*
+		 * TODO: fix the numbers in this documentation.
+		 *
+		 * Push as many zeros as necessary, then a one. Since the
+		 * absolute value is at most 2047, w can only range up to
+		 * 15 at this point, thus we will add at most 16 bits
+		 * here. With the 8 bits above and possibly up to 7 bits
+		 * from previous iterations, we may go up to 31 bits, which
+		 * will fit in the accumulator, which is an uint64_t.
+		 */
+		acc <<= (w + 1);
+		acc |= 1;
+		acc_len += w + 1;
+
+		/*
+		 * Produce all full bytes.
+		 */
+		while (acc_len >= 8) {
+			acc_len -= 8;
+			if (buf != NULL) {
+				if (v >= max_out_len) {
+					return 0;
+				}
+				buf[v] = (uint8_t)(acc >> acc_len);
+			}
+			v ++;
+		}
+	}
+	return v;
+}
+
+/*
+ * Optimal choice for sigma_pk = 1.425 is lo_bits_fg = 0, lo_bits_FG = 2
+ * Results in |sk| = 1037.2 ± 10.7 bytes, for n=512.
+ */
+size_t
+Zf(encode_seckey)(
+	void *out, size_t max_out_len,
+	const int8_t *f, const int8_t *g,
+	const int8_t *F, const int8_t *G,
+	unsigned logn)
+{
+	uint8_t *buf;
+	size_t v, acc_len;
+	uint64_t acc;
+
+	buf = (uint8_t *)out;
+	acc = 0;
+	acc_len = 0;
+
+	v = poly_enc(buf, max_out_len, acc, acc_len, 0, f, logn, 0);
+	if (v == 0) return 0;
+	v = poly_enc(buf, max_out_len, acc, acc_len, v, g, logn, 0);
+	if (v == 0) return 0;
+	v = poly_enc(buf, max_out_len, acc, acc_len, v, F, logn, 2);
+	if (v == 0) return 0;
+	v = poly_enc(buf, max_out_len, acc, acc_len, v, G, logn, 2);
+	if (v == 0) return 0;
+
+	/*
+	 * Flush remaining bits (if any).
+	 */
+	if (acc_len > 0) {
+		if (buf != NULL) {
+			if (v >= max_out_len) {
+				return 0;
+			}
+			buf[v] = (uint8_t)(acc << (8 - acc_len));
+		}
+		v ++;
+	}
+
+	return v;
+}
