@@ -4,29 +4,31 @@
 
 CC = c99
 CFLAGS = -W -Wall -Wshadow -O2
-LD = c99
-LDFLAGS = -W -Wall -Wshadow -O2 -lm
-LIBS = 
+LIBS = -lm
 
 OBJ = build/compress.o build/fft.o build/ffo.o build/fpr.o build/keygen.o build/rng.o build/sampler.o build/shake.o build/sign.o build/vrfy.o
+PROGS = bin/main bin/generate
 
 HEAD = fpr.h inner.h
 
-all: build build/main build/generate
+all: build bin $(PROGS)
 
 build:
-	-mkdir build
+	-mkdir -p build
+bin:
+	-mkdir -p bin
 
 clean:
-	-rm -f $(OBJ) build/main.o build/main build/generate.o build/generate
+	-rm -f $(OBJ) $(PROGS)
 
+# Binaries:
+bin/main: main.c $(OBJ)
+	$(CC) $(CFLAGS) -o bin/main $(OBJ) main.c $(LIBS)
 
-build/main: build/main.o $(OBJ)
-	$(LD) $(LDFLAGS) -o build/main build/main.o $(OBJ) $(LIBS)
+bin/generate: generate.c $(OBJ)
+	$(CC) $(CFLAGS) -o bin/generate $(OBJ) generate.c $(LIBS)
 
-build/generate: build/generate.o $(OBJ)
-	$(LD) $(LDFLAGS) -o build/generate build/generate.o $(OBJ) $(LIBS)
-
+# Object files:
 build/compress.o: compress.c $(HEAD)
 	$(CC) $(CFLAGS) -c -o build/compress.o compress.c
 build/fft.o: fft.c $(HEAD)
@@ -47,10 +49,3 @@ build/sign.o: sign.c $(HEAD)
 	$(CC) $(CFLAGS) -c -o build/sign.o sign.c
 build/vrfy.o: vrfy.c $(HEAD)
 	$(CC) $(CFLAGS) -c -o build/vrfy.o vrfy.c
-
-
-build/main.o: main.c $(HEAD)
-	$(CC) $(CFLAGS) -c -o build/main.o main.c
-
-build/generate.o: generate.c $(HEAD)
-	$(CC) $(CFLAGS) -c -o build/generate.o generate.c

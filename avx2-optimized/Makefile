@@ -1,59 +1,54 @@
 # This Makefile compiles the implementation in this directory.
-
 .POSIX:
-
-
 
 CC = c99
 #CFLAGS = -W -Wall -Wshadow -O3 -march=native
 CFLAGS = -W -Wall -Wshadow -O2 -mavx2
 #CFLAGS = -W -Wall -Wshadow -g -fsanitize=address,undefined
-LD = $(CC)
-LDFLAGS = $(CFLAGS)
 LIBS = -lpthread -lm
 CXX = g++
 CXXFLAGS = --std=c++11 $(CFLAGS)
 
 OBJ = build/compress.o build/fft.o build/ffo.o build/fpr.o build/keygen.o build/rng.o build/sampler.o build/shake.o build/sign.o build/vrfy.o
+PROGS = bin/main bin/test_keygen bin/test_sign bin/config_fg bin/config_FG bin/test_babai bin/test_enum bin/test_forge bin/test_compress_sig
 
 HEAD = fpr.h inner.h
 
-all: build build/main build/test_keygen build/test_sign build/config_fg build/config_FG build/test_babai build/test_enum build/test_forge build/test_compress_sig
+all: build bin $(PROGS)
 
 build:
-	-mkdir build
+	-mkdir -p build
+bin:
+	-mkdir -p bin
 
 clean:
-	-rm -f $(OBJ) build/main.o build/main build/test_keygen build/test_keygen.o build/test_sign build/test_sign.o build/config_fg build/config_fg.o build/config_FG build/config_FG.o build/test_babai build/test_babai.o build/test_enum build/test_enum.o build/test_forge build/test_forge.o build/test_compress_sig build/test_compress_sig.o
+	-rm -f $(OBJ) $(PROGS)
 
+# Binaries:
 
-build/main: main.c build/main.o $(OBJ)
-	$(LD) $(LDFLAGS) -o build/main build/main.o $(OBJ) $(LIBS)
+# C
+bin/main: main.c $(OBJ)
+	$(CC) $(CFLAGS) -o bin/main $(OBJ) main.c $(LIBS)
+bin/test_keygen: test_keygen.c $(OBJ)
+	$(CC) $(CFLAGS) -o bin/test_keygen $(filter-out build/keygen.o,$(OBJ)) test_keygen.c $(LIBS)
+bin/config_fg: config_fg.c $(OBJ)
+	$(CC) $(CFLAGS) -o bin/config_fg $(filter-out build/keygen.o,$(OBJ)) config_fg.c $(LIBS)
+bin/config_FG: config_FG.c $(OBJ)
+	$(CC) $(CFLAGS) -o bin/config_FG $(filter-out build/keygen.o,$(OBJ)) config_FG.c $(LIBS)
 
-build/test_keygen: test_keygen.c build/test_keygen.o $(OBJ)
-	$(LD) $(LDFLAGS) -o build/test_keygen build/test_keygen.o $(filter-out build/keygen.o,$(OBJ)) $(LIBS)
+# C++
+bin/test_sign: test_sign.cpp $(OBJ)
+	$(CXX) $(CXXFLAGS) -o bin/test_sign $(OBJ) test_sign.cpp $(LIBS)
+bin/test_babai: test_babai.cpp $(OBJ)
+	$(CXX) $(CXXFLAGS) -o bin/test_babai $(OBJ) test_babai.cpp $(LIBS)
+bin/test_enum: test_enum.cpp $(OBJ)
+	$(CXX) $(CXXFLAGS) -o bin/test_enum $(OBJ) test_enum.cpp $(LIBS)
+bin/test_forge: test_forge.cpp $(OBJ)
+	$(CXX) $(CXXFLAGS) -o bin/test_forge $(OBJ) test_forge.cpp $(LIBS)
+bin/test_compress_sig: test_compress_sig.cpp $(OBJ)
+	$(CXX) $(CXXFLAGS) -o bin/test_compress_sig $(OBJ) test_compress_sig.cpp $(LIBS)
 
-build/test_sign: test_sign.cpp build/test_sign.o $(OBJ)
-	$(CXX) $(CXXFLAGS) -o build/test_sign build/test_sign.o $(OBJ) $(LIBS)
-
-build/config_fg: config_fg.c build/config_fg.o $(OBJ)
-	$(LD) $(LDFLAGS) -o build/config_fg build/config_fg.o $(filter-out build/keygen.o,$(OBJ)) $(LIBS)
-
-build/config_FG: config_FG.c build/config_FG.o $(OBJ)
-	$(LD) $(LDFLAGS) -o build/config_FG build/config_FG.o $(filter-out build/keygen.o,$(OBJ)) $(LIBS)
-
-build/test_babai: test_babai.cpp build/test_babai.o $(OBJ)
-	$(CXX) $(CXXFLAGS) -o build/test_babai build/test_babai.o $(OBJ) $(LIBS)
-
-build/test_enum: test_enum.cpp build/test_enum.o $(OBJ)
-	$(CXX) $(CXXFLAGS) -o build/test_enum build/test_enum.o $(OBJ) $(LIBS)
-
-build/test_forge: test_forge.cpp build/test_forge.o $(OBJ)
-	$(CXX) $(CXXFLAGS) -o build/test_forge build/test_forge.o $(OBJ) $(LIBS)
-
-build/test_compress_sig: test_compress_sig.cpp build/test_compress_sig.o $(OBJ)
-	$(CXX) $(CXXFLAGS) -o build/test_compress_sig build/test_compress_sig.o $(OBJ) $(LIBS)
-
+# Object files:
 build/compress.o: compress.c $(HEAD)
 	$(CC) $(CFLAGS) -c -o build/compress.o compress.c
 build/fft.o: fft.c $(HEAD)
@@ -75,30 +70,3 @@ build/sign.o: sign.c $(HEAD)
 build/vrfy.o: vrfy.c $(HEAD)
 	$(CC) $(CFLAGS) -c -o build/vrfy.o vrfy.c
 
-
-build/main.o: main.c
-	$(CC) $(CFLAGS) -c -o build/main.o main.c
-
-build/test_keygen.o: test_keygen.c
-	$(CC) $(CFLAGS) -c -o build/test_keygen.o test_keygen.c
-
-build/test_sign.o: test_sign.cpp
-	$(CXX) $(CXXFLAGS) -c -o build/test_sign.o test_sign.cpp
-
-build/config_fg.o: config_fg.c
-	$(CC) $(CFLAGS) -c -o build/config_fg.o config_fg.c
-
-build/config_FG.o: config_FG.c
-	$(CC) $(CFLAGS) -c -o build/config_FG.o config_FG.c
-	
-build/test_babai.o: test_babai.cpp
-	$(CXX) $(CFLAGS) -c -o build/test_babai.o test_babai.cpp
-
-build/test_enum.o: test_enum.cpp
-	$(CXX) $(CFLAGS) -c -o build/test_enum.o test_enum.cpp
-
-build/test_forge.o: test_forge.cpp
-	$(CXX) $(CFLAGS) -c -o build/test_forge.o test_forge.cpp
-
-build/test_compress_sig.o: test_compress_sig.cpp
-	$(CXX) $(CFLAGS) -c -o build/test_compress_sig.o test_compress_sig.cpp
