@@ -720,6 +720,12 @@ Zf(ffBabai_reduce)(const fpr *restrict f, const fpr *restrict g,
 	fpr *restrict F, fpr *restrict G, int8_t *restrict Fn,
 	int8_t *restrict Gn, unsigned logn, fpr *tmp);
 
+void
+Zf(ffBabai_recover_s0)(const int8_t *restrict hm,
+	int16_t *restrict s0, const int16_t *restrict s1,
+	const fpr *restrict q00, const fpr *restrict q10,
+	unsigned logn, fpr *restrict tmp);
+
 /* ==================================================================== */
 /*
  * Key pair generation.

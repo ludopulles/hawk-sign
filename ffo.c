@@ -430,3 +430,33 @@ Zf(ffStraightBabai)(const int8_t *restrict f, const int8_t *restrict g,
 
 	Zf(ffBabai_reduce)(_f, _g, _F, _G, F, G, logn, tmp + 4*n);
 }
+
+void
+Zf(ffBabai_recover_s0)(const int8_t *restrict hm,
+	int16_t *restrict s0, const int16_t *restrict s1,
+	const fpr *restrict q00, const fpr *restrict q10,
+	unsigned logn, fpr *restrict tmp)
+{
+	size_t n, u;
+
+	n = MKN(logn);
+	for (u = 0; u < n; u ++) {
+		tmp[u] = fpr_of(s1[u]);
+		tmp[u + n] = fpr_of(hm[u] & 1);
+	}
+	Zf(FFT)(tmp, logn);
+	Zf(FFT)(tmp + n, logn);
+	Zf(poly_mul_fft)(tmp, q10, logn);
+	Zf(poly_div_fft)(tmp, q00, logn);
+
+	Zf(poly_mulconst)(tmp + n, fpr_onehalf, logn); // h/2
+	Zf(poly_add)(tmp, tmp + n, logn); // tmp = s1 q10/q00 + (h%2)/2
+
+	memcpy(tmp + n, q00, n * sizeof(fpr));
+	// Run Babai with Gram-matrix q00, target tmp, and store result in s.
+	ffBabai_inner(tmp, tmp + n, logn, tmp + 2*n);
+	Zf(iFFT)(tmp, logn);
+	for (u = 0; u < n; u ++) {
+		s0[u] = -fpr_rint(tmp[u]);
+	}
+}
