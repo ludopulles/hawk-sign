@@ -16,6 +16,8 @@ extern "C" {
 	#include "inner.h"
 }
 
+typedef long long ll;
+
 // Simple randomness generator:
 void randombytes(unsigned char *x, unsigned long long xlen) {
 	for (; xlen -- > 0; ++x)
@@ -44,7 +46,7 @@ long long time_diff(const struct timeval *begin, const struct timeval *end) {
 // =============================================================================
 // | TESTING CODE                                                              |
 // =============================================================================
-constexpr size_t logn = 7, n = MKN(logn);
+constexpr size_t logn = 9, n = MKN(logn);
 
 void output_poly(int16_t *x)
 {
@@ -55,19 +57,18 @@ void output_poly(int16_t *x)
 }
 
 struct WorkerResult {
-	int iters;
-	int babai_fail;
-	int sig_differ;
-	int sig_failed;
+	ll iters, babai_fail, sig_fail, sigsize, sqsigsize, maxsigsz;
 
 	WorkerResult() : iters(0), babai_fail(0),
-		sig_differ(0), sig_failed(0) {}
+		sig_fail(0), sigsize(0), sqsigsize(0), maxsigsz(0) {}
 
 	void combine(const WorkerResult &res) {
 		iters += res.iters;
 		babai_fail += res.babai_fail;
-		sig_differ += res.sig_differ;
-		sig_failed += res.sig_failed;
+		sig_fail += res.sig_fail;
+		sigsize += res.sigsize;
+		sqsigsize += res.sqsigsize;
+		maxsigsz = std::max(maxsigsz, res.maxsigsz);
 	}
 };
 
@@ -78,7 +79,7 @@ WorkerResult measure_signatures(fpr isigma_kg, fpr isigma_sig, uint32_t bound) {
 	fpr q00[n], q10[n], q11[n];
 	unsigned char seed[48];
 	inner_shake256_context sc;
-	const int n_repetitions = 1024 * 64;
+	const int n_repetitions = 1024 * 16;
 
 	// Initialize a RNG.
 	randombytes(seed, sizeof seed);
@@ -99,13 +100,19 @@ WorkerResult measure_signatures(fpr isigma_kg, fpr isigma_sig, uint32_t bound) {
 		random_hash(h, logn);
 
 		// Compute the signature.
-		Zf(complete_sign)(&sc, s0, s1, f, g, F, G, h, isigma_sig, bound, logn, b);
+		// Zf(complete_sign)(&sc, s0, s1, f, g, F, G, h, isigma_sig, bound, logn, b);
+		Zf(sign)(&sc, s1, f, g, h, isigma_sig, bound, logn, b);
 
 		if (!Zf(verify)(h, recs0, s1, q00, q10, q11, bound, logn, b))
 			result.babai_fail++;
 		size_t sig_sz = Zf(encode_sig)(NULL, 0, s1, logn, 5);
-		if (sig_sz == 0)
-			result.sig_failed++;
+		if (sig_sz == 0) {
+			result.sig_fail++;
+		} else {
+			result.sigsize += sig_sz;
+			result.sqsigsize += sig_sz * sig_sz;
+			result.maxsigsz = std::max(result.maxsigsz, (ll) sig_sz);
+		}
 	}
 	return result;
 }
@@ -145,10 +152,14 @@ int main() {
 	for (int i = 0; i < nthreads-1; i++) pool[i]->join(), delete pool[i];
 
 	printf("\n");
-	printf("# Signatures signed:      %d\n", tot.iters);
-	printf("# Babai roundings failed: %d\n", tot.babai_fail);
-	printf("# Babai != original s0:   %d\n", tot.sig_differ);
-	printf("# Sig. coding failed:     %d\n", tot.sig_failed);
+	printf("# Signatures signed:      %lld\n", tot.iters);
+	printf("# Babai roundings failed: %lld\n", tot.babai_fail);
+	printf("# Sig. coding failed:     %lld\n", tot.sig_fail);
+
+	ll nsigs = tot.iters - tot.sig_fail;
+	double avg_sz = (double)tot.sigsize / nsigs;
+	double std_sz = (double)tot.sqsigsize / nsigs - avg_sz * avg_sz;
+	printf("# Average sig. size = %.2f (± %.2f) and <= %lld\n", avg_sz, std_sz, tot.maxsigsz);
 
 	return 0;
 }
