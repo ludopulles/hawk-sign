@@ -57,10 +57,10 @@ void output_poly(int16_t *x)
 }
 
 struct WorkerResult {
-	ll iters, babai_fail, sig_fail, sigsize, sqsigsize, maxsigsz;
+	ll iters, babai_fail, sig_fail, sigsize, sqsigsize, minsigsz, maxsigsz;
 
 	WorkerResult() : iters(0), babai_fail(0),
-		sig_fail(0), sigsize(0), sqsigsize(0), maxsigsz(0) {}
+		sig_fail(0), sigsize(0), sqsigsize(0), minsigsz(INT_MAX), maxsigsz(0) {}
 
 	void combine(const WorkerResult &res) {
 		iters += res.iters;
@@ -68,6 +68,7 @@ struct WorkerResult {
 		sig_fail += res.sig_fail;
 		sigsize += res.sigsize;
 		sqsigsize += res.sqsigsize;
+		minsigsz = std::min(minsigsz, res.minsigsz);
 		maxsigsz = std::max(maxsigsz, res.maxsigsz);
 	}
 };
@@ -111,6 +112,7 @@ WorkerResult measure_signatures(fpr isigma_kg, fpr isigma_sig, uint32_t bound) {
 		} else {
 			result.sigsize += sig_sz;
 			result.sqsigsize += sig_sz * sig_sz;
+			result.minsigsz = std::min(result.minsigsz, (ll) sig_sz);
 			result.maxsigsz = std::max(result.maxsigsz, (ll) sig_sz);
 		}
 	}
@@ -159,7 +161,7 @@ int main() {
 	ll nsigs = tot.iters - tot.sig_fail;
 	double avg_sz = (double)tot.sigsize / nsigs;
 	double std_sz = (double)tot.sqsigsize / nsigs - avg_sz * avg_sz;
-	printf("# Average sig. size = %.2f (± %.2f) and <= %lld\n", avg_sz, std_sz, tot.maxsigsz);
+	printf("# Average sig. size = %.2f (± %.2f) and \\in [%lld, %lld]\n", avg_sz, std_sz, tot.minsigsz, tot.maxsigsz);
 
 	return 0;
 }
