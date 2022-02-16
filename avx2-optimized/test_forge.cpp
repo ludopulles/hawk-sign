@@ -77,13 +77,13 @@ void find_forgeries(fpr isigma_kg, fpr isigma_sig, uint32_t bound)
 	// Zf(complete_sign)(&sc, s0, s1, f, g, F, G, h, isigma_sig, bound, logn, tmp.b);
 	// assert(Zf(complete_verify)(h, s0, s1, q00, q10, q11, bound, logn, tmp.b));
 	Zf(sign)(&sc, s1, f, g, h, isigma_sig, bound, logn, tmp.b);
-	assert(Zf(verify)(h, s0, s1, q00, q10, q11, bound, logn, tmp.b));
+	assert(Zf(verify_nearest_plane)(h, s0, s1, q00, q10, q11, bound, logn, tmp.b));
 
 	int nreps = 0, nworks = 0;
 	for (size_t i = 0; i < n; i++) {
 		h[i] ^= 1; // change some bytes of h
 		nreps++;
-		nworks += Zf(verify)(h, s0, s1, q00, q10, q11, bound, logn, tmp.b);
+		nworks += Zf(verify_nearest_plane)(h, s0, s1, q00, q10, q11, bound, logn, tmp.b);
 		h[i] ^= 1; // restore
 	}
 	for (size_t i = 0; i < n; i++) {
@@ -91,7 +91,7 @@ void find_forgeries(fpr isigma_kg, fpr isigma_sig, uint32_t bound)
 		for (size_t j = 0; j < i; j++) {
 			h[j] ^= 1; // change a bit of h
 			nreps++;
-			nworks += Zf(verify)(h, s0, s1, q00, q10, q11, bound, logn, tmp.b);
+			nworks += Zf(verify_nearest_plane)(h, s0, s1, q00, q10, q11, bound, logn, tmp.b);
 			h[j] ^= 1; // restore
 		}
 		h[i] ^= 1; // restore
@@ -102,7 +102,7 @@ void find_forgeries(fpr isigma_kg, fpr isigma_sig, uint32_t bound)
 		random_hash(h2, logn);
 
 		nreps++;
-		nworks += Zf(verify)(h2, s0, s1, q00, q10, q11, bound, logn, tmp.b);
+		nworks += Zf(verify_nearest_plane)(h2, s0, s1, q00, q10, q11, bound, logn, tmp.b);
 	} //*/
 	printf("Succesful signatures found: %d / %d\n", nworks, nreps);
 	printf("All went succesful!\n");

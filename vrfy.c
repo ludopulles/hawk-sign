@@ -116,16 +116,60 @@ Zf(complete_verify)(const int8_t *restrict hm,
 	 * Note: only n/2 embeddings are stored, because they come in pairs.
 	 */
 	trace = fpr_double(trace);
+	/*
+	 * Renormalize, so we get the norm of (s0, s1) w.r.t Q.
+	 */
+	trace = fpr_div(trace, fpr_of(n));
 
 	/*
 	 * Signature is valid if and only if
 	 *     `Tr(s* Q s) / n (=Tr(x^* x)/n = sum_i x_i^2) <= bound`.
+	 * Note: check whether the norm is actually storable in a uint32_t.
 	 */
-	return (uint32_t)fpr_rint(fpr_div(trace, fpr_of(n))) <= bound;
+	return fpr_lt(fpr_zero, trace) && fpr_lt(trace, fpr_ptwo31m1)
+		&& (uint32_t)fpr_rint(trace) <= bound;
 }
 
 int
-Zf(verify)(const int8_t *restrict hm,
+Zf(verify_simple_rounding)(const int8_t *restrict hm,
+	int16_t *restrict s0, const int16_t *restrict s1,
+	const fpr *restrict q00, const fpr *restrict q10, const fpr *restrict q11,
+	uint32_t bound, unsigned logn, uint8_t *restrict tmp)
+{
+	size_t u, n;
+	fpr *t0, *t1;
+
+	n = MKN(logn);
+	t0 = (fpr *)tmp;
+	t1 = t0 + n;
+
+	for (u = 0; u < n; u ++) {
+		t0[u] = fpr_of(s1[u]);
+	}
+	for (u = 0; u < n; u ++) {
+		t1[u] = fpr_half(fpr_of(hm[u] & 1)); // (h%2) / 2
+	}
+
+	// Compute s0 = - round(s1 q10 / q00 + (h%2) / 2)
+	Zf(FFT)(t0, logn);
+	Zf(FFT)(t1, logn);
+
+	Zf(poly_mul_fft)(t0, q10, logn); // q10 s1
+	// Note: q00 is self adjoint
+	Zf(poly_div_autoadj_fft)(t0, q00, logn); // s1 q10/q00
+	Zf(poly_add)(t0, t1, logn); // s1 q10/q00 + h%2
+	Zf(poly_mulconst)(t0, fpr_neg(fpr_onehalf), logn); // s1 q10/q00 + (h%2) / 2
+	Zf(iFFT)(t0, logn);
+
+	for (u = 0; u < n; u ++) {
+		s0[u] = -fpr_rint(t0[u]);
+	}
+
+	return Zf(complete_verify)(hm, s0, s1, q00, q10, q11, bound, logn, tmp);
+}
+
+int
+Zf(verify_nearest_plane)(const int8_t *restrict hm,
 	int16_t *restrict s0, const int16_t *restrict s1,
 	const fpr *restrict q00, const fpr *restrict q10, const fpr *restrict q11,
 	uint32_t bound, unsigned logn, uint8_t *restrict tmp)

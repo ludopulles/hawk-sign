@@ -104,7 +104,7 @@ WorkerResult measure_signatures(fpr isigma_kg, fpr isigma_sig, uint32_t bound) {
 		// Zf(complete_sign)(&sc, s0, s1, f, g, F, G, h, isigma_sig, bound, logn, b);
 		Zf(sign)(&sc, s1, f, g, h, isigma_sig, bound, logn, b);
 
-		if (!Zf(verify)(h, recs0, s1, q00, q10, q11, bound, logn, b))
+		if (!Zf(verify_nearest_plane)(h, recs0, s1, q00, q10, q11, bound, logn, b))
 			result.babai_fail++;
 		size_t sig_sz = Zf(encode_sig)(NULL, 0, s1, logn, 5);
 		if (sig_sz == 0) {

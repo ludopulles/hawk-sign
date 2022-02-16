@@ -120,11 +120,11 @@ void test_valid_signature(fpr isigma_kg, fpr isigma_sig, uint32_t bound) {
 		Zf(sign)(&sc, sig, f, g, h, isigma_sig, bound, logn, tmp.b);
 		// to_sage16("s1", sig, logn);
 
-		assert(Zf(verify)(h, s0, sig, q00, q10, q11, bound, logn, tmp.b));
+		assert(Zf(verify_nearest_plane)(h, s0, sig, q00, q10, q11, bound, logn, tmp.b));
 		// randombytes((unsigned char *)sig, sizeof sig);
 		for (size_t u = 0; u < n; u ++)
 			sig[u] = 0;
-		assert(!Zf(verify)(h, s0, sig, q00, q10, q11, bound, logn, tmp.b));
+		assert(!Zf(verify_nearest_plane)(h, s0, sig, q00, q10, q11, bound, logn, tmp.b));
 	}
 
 	printf("Valid signatures were signed.\n");
@@ -148,7 +148,7 @@ int try_forge(int16_t *s0, int16_t *s1, const fpr *q00, const fpr *q10, const fp
 	for (u = 0; u < n; u ++)
 		s1[u] = 0;
 
-	if (Zf(verify)(hm, s0, s1, q00, q10, q11, bound, logn, tmp))
+	if (Zf(verify_nearest_plane)(hm, s0, s1, q00, q10, q11, bound, logn, tmp))
 		return 1; // we are done
 
 	unsigned char seed[48];
@@ -246,7 +246,7 @@ void test_forge_signature(fpr isigma_kg, fpr isigma_sig, uint32_t bound) {
 	res = try_forge(s0, sig, q00, q10, q11, h, bound, tmp.b);
 	assert(res);
 
-	assert(!Zf(verify)(h, s0, sig, q00, q10, q11, bound, logn, tmp.b));
+	assert(!Zf(verify_nearest_plane)(h, s0, sig, q00, q10, q11, bound, logn, tmp.b));
 	printf("No forgery found.\n");
 }
 
