@@ -527,36 +527,6 @@ mq_poly_montymul_ntt(uint16_t *f, const uint16_t *g, unsigned logn)
 /* =================================================================== */
 
 /*
- * Adapted from Falcon's common.c.
- *
- * Tell whether a given vector (2N coordinates, in two halves) is
- * acceptable as a signature. This compares the appropriate norm of the
- * vector with the acceptance bound. Returned value is 1 on success
- * (vector is short enough to be acceptable), 0 otherwise.
- */
-static int
-is_short(const int8_t *x0, const int8_t *x1, uint32_t bound,
-	unsigned logn) {
-	/*
-	 * We use the l2-norm. Code below uses only 32-bit operations to
-	 * compute the square of the norm, since the max value is
-	 * 2^logn * 128^2 <= 2^23 (when logn <= 9).
-	 */
-	size_t n, u;
-	int32_t norm, z;
-
-	n = MKN(logn);
-	norm = 0;
-	for (u = 0; u < n; u ++) {
-		z = (int32_t) x0[u];
-		norm += z * z;
-		z = (int32_t) x1[u];
-		norm += z * z;
-	}
-	return (uint32_t) norm <= bound;
-}
-
-/*
  * Convert an integer polynomial (with small values) into the
  * representation with complex numbers.
  */
@@ -573,11 +543,11 @@ smallints_to_fpr(fpr *r, const int8_t *t, unsigned logn)
 
 /*
  * Calculate (f*g) mod (2, phi) and store the result (mod 2) in fg.
- * tmp must be of size at least 2n.
+ * Note: tmp must have a size of at least 4n bytes.
  */
 static void
 Zf(mulmod2)(int8_t *restrict ab, const int8_t *restrict a,
-		const int8_t *restrict b, unsigned logn, uint16_t *tmp)
+		const int8_t *restrict b, unsigned logn, uint8_t *restrict tmp)
 {
 	size_t n, u;
 
@@ -596,7 +566,7 @@ Zf(mulmod2)(int8_t *restrict ab, const int8_t *restrict a,
 	} else {
 		uint16_t *at, *bt;
 
-		at = tmp;
+		at = (uint16_t *)tmp;
 		bt = at + n;
 
 		for (u = 0; u < n; u ++) {
@@ -618,6 +588,56 @@ Zf(mulmod2)(int8_t *restrict ab, const int8_t *restrict a,
 			ab[u] = (at[u] ^ (uint16_t)((Q >> 1) - at[u]) >> 15) & 1;
 		}
 	}
+}
+
+/*
+ * Sample a vector (x0, x1) that is congruent to (h*f, h*g) modulo 2 from
+ * a Discrete Gaussian with lattice coset 2Z^{2n} + (h*f, h*g) and
+ * standard deviation 1/isigma_sig.
+ * Returns whether or not (x0, x1) has a squared l2-norm less than bound.
+ * Note: tmp must have a size of at least 4n bytes.
+ */
+static int
+sample_short(void *samp_ctx, int8_t *restrict x0, int8_t *restrict x1,
+	const int8_t *restrict f, const int8_t *restrict g,
+	const int8_t *restrict hm, fpr isigma_sig, uint32_t bound,
+	unsigned logn, uint8_t *restrict tmp)
+{
+	size_t n, u;
+	int32_t norm, z;
+
+	n = MKN(logn);
+	norm = 0;
+
+	/*
+	 * Set the target vector to [hm, 0] * B (hm is the hashed message).
+	 */
+	Zf(mulmod2)(x0, f, hm, logn, tmp);
+	Zf(mulmod2)(x1, g, hm, logn, tmp);
+
+	/*
+	 * Sample and write the result in (x0,x1). Gaussian smoothing is used
+	 * to not reveal information on the secret basis.
+	 */
+	for (u = 0; u < n; u ++) {
+		z = 2*Zf(sampler)(samp_ctx, fpr_half(fpr_of(x0[u])), isigma_sig) - (x0[u]);
+		x0[u] = (int8_t) z;
+		norm += z*z;
+	}
+	for (u = 0; u < n; u ++) {
+		z = 2*Zf(sampler)(samp_ctx, fpr_half(fpr_of(x1[u])), isigma_sig) - (x1[u]);
+		x1[u] = (int8_t) z;
+		norm += z*z;
+	}
+
+	/*
+	 * Test whether the l2-norm of (x0, x1) is below the given bound. The
+	 * code below uses only 32-bit operations to compute the squared norm,
+	 * since the max. value is 2n * 128^2 <= 2^24 (when logn <= 9).
+	 * For a large enough verification margin, it is unlikely that the
+	 * norm of the gaussian (x0, x1) is too large.
+	 */
+	return (uint32_t)norm <= bound;
 }
 
 /*
@@ -643,31 +663,8 @@ Zf(inner_do_sign)(void *samp_ctx, int16_t *restrict s1,
 	x0 = (int8_t *)(t2 + n);
 	x1 = x0 + n;
 
-	/*
-	 * Set the target vector to [hm, 0] * B (hm is the hashed message).
-	 */
-	Zf(mulmod2)(x0, f, hm, logn, (uint16_t *)t0);
-	Zf(mulmod2)(x1, g, hm, logn, (uint16_t *)t0);
-
-	/*
-	 * Apply sampling; result is written over (x0,x1).
-	 * Perform Gaussian smoothing to not reveal information on the secret
-	 * basis.
-	 */
-	for (u = 0; u < n; u ++) {
-		x0[u] = 2*Zf(sampler)(samp_ctx, fpr_half(fpr_of(x0[u])),
-			isigma_sig) - (x0[u]);
-	}
-	for (u = 0; u < n; u ++) {
-		x1[u] = 2*Zf(sampler)(samp_ctx, fpr_half(fpr_of(x1[u])),
-			isigma_sig) - (x1[u]);
-	}
-
-	/*
-	 * There is a small probability for a large enough verification margin
-	 * that the norm of the gaussian (x0, x1) is too large.
-	 */
-	if (!is_short(x0, x1, bound, logn)) {
+	if (!sample_short(samp_ctx, x0, x1, f, g, hm, isigma_sig, bound, logn,
+			tmp)) {
 		return 0;
 	}
 
@@ -690,6 +687,79 @@ Zf(inner_do_sign)(void *samp_ctx, int16_t *restrict s1,
 	Zf(iFFT)(t0, logn);
 	for (u = 0; u < n; u ++) {
 		s1[u] = (int16_t)fpr_rint(t0[u]);
+		// shouldn't happen, except when FFT had rounding issues
+		if (s1[u] & 1) return 0;
+		s1[u] /= 2;
+	}
+
+	return 1;
+}
+
+/*
+ * Compute a signature: the signature contains two vectors, s0 and s1.
+ * The s0 vector is not returned.
+ *
+ * tmp must have room for at least 40 * 2^logn bytes
+ */
+static int
+Zf(inner_do_guaranteed_sign)(void *samp_ctx, int16_t *restrict s1,
+	const int8_t *restrict f, const int8_t *restrict g,
+	const fpr *restrict q00, const int8_t *restrict hm, fpr isigma_sig,
+	uint32_t bound, unsigned logn, uint8_t *restrict tmp)
+{
+	size_t n, u;
+	int8_t *x0, *x1;
+	fpr *tf, *tg, *tx0, *tx1, *terr;
+
+	n = MKN(logn);
+	tf = (fpr *)tmp;
+	tg = tf + n;
+	tx0 = tg + n;
+	tx1 = tx0 + n;
+	terr = tx1 + n;
+
+	x0 = (int8_t *)tmp;
+	x1 = x0 + n;
+
+	if (!sample_short(samp_ctx, x0, x1, f, g, hm, isigma_sig, bound, logn,
+			(uint8_t*)(x1 + n))) {
+		return 0;
+	}
+
+	/*
+	 * Get the signature corresponding to that tiny vector, i.e.
+	 * s = x * B^{-1}. Thus s0 = x0 G - x1 F and s1 = -x0 g + x1 f.
+	 */
+	smallints_to_fpr(tx0, x0, logn);
+	smallints_to_fpr(tx1, x1, logn);
+	// Now override x0, x1:
+	smallints_to_fpr(tf, f, logn);
+	smallints_to_fpr(tg, g, logn);
+
+	Zf(FFT)(tx0, logn);
+	Zf(FFT)(tx1, logn);
+	Zf(FFT)(tf, logn);
+	Zf(FFT)(tg, logn);
+
+	Zf(poly_add_muladj_fft)(terr, tx0, tx1, tf, tg, logn);
+	Zf(poly_div_autoadj_fft)(terr, q00, logn);
+	// err = (f^* x0 + g^* x1) / q00
+	Zf(iFFT)(terr, logn);
+
+	// If err is not in (-.5,.5)^n, simple rounding will fail
+	for (u = 0; u < n; u++) {
+		// if (fpr_rint(terr[u])) return 0;
+		if (!(fpr_lt(fpr_neg(fpr_onehalf), terr[u])
+			&& fpr_lt(terr[u], fpr_onehalf))) return 0;
+	}
+
+	Zf(poly_mul_fft)(tf, tx1, logn);
+	Zf(poly_mul_fft)(tg, tx0, logn);
+	Zf(poly_sub)(tf, tg, logn); // s1 = x1 f - x0 g.
+
+	Zf(iFFT)(tf, logn);
+	for (u = 0; u < n; u ++) {
+		s1[u] = (int16_t)fpr_rint(tf[u]);
 		// shouldn't happen, except when FFT had rounding issues
 		if (s1[u] & 1) return 0;
 		s1[u] /= 2;
@@ -724,30 +794,8 @@ Zf(inner_do_complete_sign)(void *samp_ctx,
 	x0 = (int8_t *)(t4 + n);
 	x1 = x0 + n;
 
-	/*
-	 * Set the target vector to [hm, 0] * B (hm is the hashed message).
-	 */
-	Zf(mulmod2)(x0, f, hm, logn, (uint16_t *)t0);
-	Zf(mulmod2)(x1, g, hm, logn, (uint16_t *)t0);
-
-	/*
-	 * Apply sampling; result is written over (x0,x1).
-	 * Perform Gaussian smoothing to not reveal information on the secret basis.
-	 */
-	for (u = 0; u < n; u ++) {
-		x0[u] = 2*Zf(sampler)(samp_ctx, fpr_half(fpr_of(x0[u])),
-			isigma_sig) - (x0[u]);
-	}
-	for (u = 0; u < n; u ++) {
-		x1[u] = 2*Zf(sampler)(samp_ctx, fpr_half(fpr_of(x1[u])),
-			isigma_sig) - (x1[u]);
-	}
-
-	/*
-	 * There is a small probability for a large enough verification margin
-	 * that the norm of the gaussian (x0, x1) is too large.
-	 */
-	if (!is_short(x0, x1, bound, logn)) {
+	if (!sample_short(samp_ctx, x0, x1, f, g, hm, isigma_sig, bound, logn,
+			tmp)) {
 		return 0;
 	}
 
@@ -755,7 +803,6 @@ Zf(inner_do_complete_sign)(void *samp_ctx,
 	 * Get the signature corresponding to that tiny vector, i.e.
 	 * s = x * B^{-1}. Thus s0 = x0 G - x1 F and s1 = -x0 g + x1 f.
 	 */
-
 	smallints_to_fpr(t0, G, logn);
 	smallints_to_fpr(t1, f, logn);
 	smallints_to_fpr(t2, x0, logn);
@@ -813,18 +860,29 @@ Zf(sign)(inner_shake256_context *rng, int16_t *restrict sig,
 	spc.sigma_min = fpr_sigma_min[logn];
 	do {
 		/*
-		 * Signature produces short vectors s0 and s1. The signature is
-		 * acceptable only if Tr((s0,s1) Q (s0,s1)^H) is short.
-		 *
-		 * If the signature is acceptable, we return only s1. A value for s0
-		 * can be found with Babai's Nearest Plane Algorithm that gives a short
-		 * trace as above.
-		 *
-		 * We use a fast PRNG seeded from SHAKE context for gaussian sampling.
+		 * Use a fast PRNG for gaussian sampling.
 		 */
 		Zf(prng_init)(&spc.p, rng);
-	} while (!Zf(inner_do_sign)((void *)&spc, sig, f, g, hm, isigma_sig,
+	} while (!Zf(inner_do_sign)(&spc, sig, f, g, hm, isigma_sig,
 			bound, logn, tmp));
+}
+
+/* see inner.h */
+void
+Zf(guaranteed_sign)(inner_shake256_context *rng, int16_t *restrict sig,
+	const int8_t *restrict f, const int8_t *restrict g,
+	const fpr *restrict q00, const int8_t *restrict hm, fpr isigma_sig,
+	uint32_t bound, unsigned logn, uint8_t *restrict tmp)
+{
+	sampler_context spc;
+	spc.sigma_min = fpr_sigma_min[logn];
+	do {
+		/*
+		 * Use a fast PRNG for gaussian sampling.
+		 */
+		Zf(prng_init)(&spc.p, rng);
+	} while (!Zf(inner_do_guaranteed_sign)((void *)&spc, sig, f, g, q00, hm,
+			isigma_sig, bound, logn, tmp));
 }
 
 /* see inner.h */
@@ -840,17 +898,9 @@ Zf(complete_sign)(inner_shake256_context *rng,
 	spc.sigma_min = fpr_sigma_min[logn];
 	do {
 		/*
-		 * Signature produces short vectors s0 and s1. The signature is
-		 * acceptable only if Tr((s0,s1) Q (s0,s1)^H) is short.
-		 *
-		 * If the signature is acceptable, we return only s1. A value for s0
-		 * can be found with Babai's Nearest Plane Algorithm that gives a short
-		 * trace as above.
-		 *
-		 * We use a fast PRNG seeded from SHAKE context for gaussian sampling.
+		 * Use a fast PRNG for gaussian sampling.
 		 */
 		Zf(prng_init)(&spc.p, rng);
 	} while (!Zf(inner_do_complete_sign)((void *)&spc, s0, s1, f, g, F, G,
 			hm, isigma_sig, bound, logn, tmp));
 }
-

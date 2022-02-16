@@ -64,8 +64,7 @@ Zf(poly_add_autoadj_fft)(fpr *a, fpr *b, unsigned logn)
 
 /* =================================================================== */
 
-// Verifies a signature given by (s0, s1) instead of only s1, so it does not
-// have to reconstruct s0.
+/* see inner.h */
 int
 Zf(complete_verify)(const int8_t *restrict hm,
 	const int16_t *restrict s0, const int16_t *restrict s1,
@@ -130,6 +129,7 @@ Zf(complete_verify)(const int8_t *restrict hm,
 		&& (uint32_t)fpr_rint(trace) <= bound;
 }
 
+/* see inner.h */
 int
 Zf(verify_simple_rounding)(const int8_t *restrict hm,
 	int16_t *restrict s0, const int16_t *restrict s1,
@@ -168,6 +168,7 @@ Zf(verify_simple_rounding)(const int8_t *restrict hm,
 	return Zf(complete_verify)(hm, s0, s1, q00, q10, q11, bound, logn, tmp);
 }
 
+/* see inner.h */
 int
 Zf(verify_nearest_plane)(const int8_t *restrict hm,
 	int16_t *restrict s0, const int16_t *restrict s1,
