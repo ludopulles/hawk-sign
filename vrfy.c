@@ -87,6 +87,7 @@ Zf(complete_verify)(const int8_t *restrict hm,
 		t1[u] = fpr_of(2 * s1[u]);
 	}
 
+	// Takes 50% of time (2us of 4us):
 	Zf(FFT)(t0, logn);
 	Zf(FFT)(t1, logn);
 
@@ -137,32 +138,24 @@ Zf(verify_simple_rounding)(const int8_t *restrict hm,
 	uint32_t bound, unsigned logn, uint8_t *restrict tmp)
 {
 	size_t u, n;
-	fpr *t0, *t1;
+	fpr *t0, halfH;
 
 	n = MKN(logn);
 	t0 = (fpr *)tmp;
-	t1 = t0 + n;
 
 	for (u = 0; u < n; u ++) {
 		t0[u] = fpr_of(s1[u]);
 	}
-	for (u = 0; u < n; u ++) {
-		t1[u] = fpr_half(fpr_of(hm[u] & 1)); // (h%2) / 2
-	}
 
-	// Compute s0 = - round(s1 q10 / q00 + (h%2) / 2)
 	Zf(FFT)(t0, logn);
-	Zf(FFT)(t1, logn);
-
-	Zf(poly_mul_fft)(t0, q10, logn); // q10 s1
-	// Note: q00 is self adjoint
+	Zf(poly_mul_fft)(t0, q10, logn); // s1 q10
 	Zf(poly_div_autoadj_fft)(t0, q00, logn); // s1 q10/q00
-	Zf(poly_add)(t0, t1, logn); // s1 q10/q00 + h%2
-	Zf(poly_mulconst)(t0, fpr_neg(fpr_onehalf), logn); // s1 q10/q00 + (h%2) / 2
 	Zf(iFFT)(t0, logn);
 
+	// Recover s0 with s0 = -round(s1 q10 / q00 + (h%2) / 2)
 	for (u = 0; u < n; u ++) {
-		s0[u] = -fpr_rint(t0[u]);
+		halfH = fpr_half(fpr_of(hm[u] & 1)); // (h%2) / 2
+		s0[u] = -fpr_rint(fpr_add(t0[u], halfH));
 	}
 
 	return Zf(complete_verify)(hm, s0, s1, q00, q10, q11, bound, logn, tmp);
@@ -180,11 +173,36 @@ Zf(verify_nearest_plane)(const int8_t *restrict hm,
 	 * Reconstruct s0, by running Babai's NP algorithm with target
 	 *     -( s1 q10 / * q00 + h/2 ).
 	 */
-	Zf(ffBabai_recover_s0)(hm, s0, s1, q00, q10, logn, (fpr*)tmp);
+
+	size_t n, u;
+	fpr *t0, *t1;
+
+	n = MKN(logn);
+	t0 = (fpr *)tmp;
+	t1 = t0 + n;
+	for (u = 0; u < n; u ++) {
+		t0[u] = fpr_of(s1[u]);
+	}
+	for (u = 0; u < n; u ++) {
+		t1[u] = fpr_half(fpr_of(hm[u] & 1));
+	}
+
+	Zf(FFT)(t0, logn);
+	Zf(FFT)(t1, logn);
+	Zf(poly_mul_fft)(t0, q10, logn);
+	Zf(poly_div_fft)(t0, q00, logn);
+	Zf(poly_add)(t0, t1, logn); // t0 = s1 q10/q00 + (h%2)/2
+
+	memcpy(t1, q00, n * sizeof(fpr));
+	// Run Babai with target t0 and Gram-matrix q00.
+	Zf(ffNearestPlane_dyn)(t0, t1, logn, t1 + n);
+	Zf(iFFT)(t0, logn);
+	for (u = 0; u < n; u ++) {
+		s0[u] = -fpr_rint(t0[u]);
+	}
 
 	/**
 	 * Now run the casual verification.
 	 */
 	return Zf(complete_verify)(hm, s0, s1, q00, q10, q11, bound, logn, tmp);
 }
-

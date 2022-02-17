@@ -39,25 +39,6 @@
  */
 
 /*
- * Get the size of the LDL tree for an input with polynomials of size
- * 2^logn. The size is expressed in the number of elements.
- */
-static inline unsigned
-ffLDL_treesize(unsigned logn)
-{
-	/*
-	 * For logn = 0 (polynomials are constant), the tree is empty as the leaves
-	 * do not require any information to be stored. Otherwise, the tree node
-	 * has size 2^logn, and has two child trees for size logn-1 each. Thus,
-	 * treesize s() must fulfill these two relations:
-	 *
-	 *   s(0) = s(1) = 0
-	 *   s(logn) = (2^logn) + 2*s(logn-1)
-	 */
-	return (logn - 1) << logn;
-}
-
-/*
  * Inner function for ffLDL_fft(). It expects the matrix to be both
  * auto-adjoint and quasicyclic; also, it uses the source operands
  * as modifiable temporaries.
@@ -77,7 +58,7 @@ ffLDL_fft_inner(fpr *restrict tree,
 	n = MKN(logn);
 	hn = n >> 1;
 	tree0 = tree + n;
-	tree1 = tree + n + ffLDL_treesize(logn - 1);
+	tree1 = tree + n + LDL_TREESIZE(logn - 1);
 
 	/*
 	 * The LDL decomposition yields L (which is written in the tree)
@@ -125,13 +106,13 @@ Zf(ffLDL_fft)(fpr *restrict tree, const fpr *restrict q00, unsigned logn,
 }
 
 /*
- * Perform Fast Fourier Sampling for target vector t and LDL tree T.
+ * Perform Fast Fourier Nearest Plane for target vector t and LDL tree T.
  * tmp[] must have size for at least two polynomials of size 2^logn.
  */
 static void
 ffNearestPlane_inner(fpr *restrict z0, fpr *restrict z1,
-	const fpr *restrict tree, const fpr *restrict t0, const fpr *restrict t1,
-	unsigned logn, fpr *restrict tmp)
+	const fpr *restrict tree, const fpr *restrict t0,
+	const fpr *restrict t1, unsigned logn, fpr *restrict tmp)
 {
 	size_t n, hn;
 	const fpr *tree0, *tree1;
@@ -156,7 +137,7 @@ ffNearestPlane_inner(fpr *restrict z0, fpr *restrict z1,
 	n = MKN(logn);
 	hn = n >> 1;
 	tree0 = tree + n;
-	tree1 = tree + n + ffLDL_treesize(logn - 1);
+	tree1 = tree + n + LDL_TREESIZE(logn - 1);
 
 	/*
 	 * We split t1 into z1 (reused as temporary storage), then do
@@ -185,12 +166,9 @@ ffNearestPlane_inner(fpr *restrict z0, fpr *restrict z1,
 	Zf(poly_merge_fft)(z0, tmp, tmp + hn, logn);
 }
 
-/*
- * Perform Fast Fourier Sampling for target vector t and LDL tree T.
- * tmp[] must have size for at least two polynomials of size 2^logn.
- */
+/* see inner.h */
 void
-Zf(ffNearestPlane)(fpr *restrict z, const fpr *restrict tree,
+Zf(ffNearestPlane_tree)(fpr *restrict z, const fpr *restrict tree,
 	const fpr *restrict t, unsigned logn, fpr *restrict tmp)
 {
 	size_t n, hn;
@@ -209,81 +187,9 @@ Zf(ffNearestPlane)(fpr *restrict z, const fpr *restrict tree,
 	Zf(poly_merge_fft)(z, t0, t1, logn);
 }
 
-/*
- * Convert an integer polynomial (with small values) into the
- * representation with complex numbers.
- */
-static void
-smallints_to_fpr(fpr *r, const int8_t *t, unsigned logn)
-{
-	size_t n = MKN(logn), u;
-	for (u = 0; u < n; u ++) {
-		r[u] = fpr_of(t[u]);
-	}
-}
-
-
+/* see inner.h */
 void
-Zf(ffBabai)(const int8_t *restrict f, const int8_t *restrict g,
-	int8_t *restrict F, int8_t *restrict G, unsigned logn,
-	fpr *restrict tree, fpr *restrict tmp)
-{
-	size_t n = MKN(logn);
-
-	fpr *t = tmp, *z = t + n;
-	fpr *_f = z + n, *_g = _f + n;
-	fpr *_F = _g + n, *_G = _F + n;
-	tmp += 6*n;
-
-	smallints_to_fpr(_f, f, logn);
-	smallints_to_fpr(_g, g, logn);
-	smallints_to_fpr(_F, F, logn);
-	smallints_to_fpr(_G, G, logn);
-	Zf(FFT)(_f, logn);
-	Zf(FFT)(_g, logn);
-	Zf(FFT)(_F, logn);
-	Zf(FFT)(_G, logn);
-
-	// calculate (F adj(f) + G adj(g)) / (f adj(f) + g adj(g))
-	Zf(poly_add_muladj_fft)(t, _F, _G, _f, _g, logn);
-	Zf(poly_invnorm2_fft)(z, _f, _g, logn);
-	Zf(poly_mul_autoadj_fft)(t, z, logn);
-
-	// inverting an autoadj polynomial:
-	for (size_t u = 0; u < n/2; u++)
-		z[u] = fpr_inv(z[u]),
-		z[u + n/2] = fpr_zero;
-
-	Zf(ffLDL_fft)(tree, z, logn, tmp);
-	Zf(ffNearestPlane)(z, tree, t, logn, tmp);
-
-	/* memcpy(_F, z, n * sizeof(fpr));
-	Zf(iFFT)(_F, logn);
-	printf("z = ");
-	for (size_t u = 0; u < n; u++) printf("%d ", fpr_rint(_F[u]));
-	printf("\n"); */
-
-	Zf(poly_mul_fft)(_f, z, logn);
-	Zf(poly_mul_fft)(_g, z, logn);
-	Zf(iFFT)(_f, logn);
-	Zf(iFFT)(_g, logn);
-	// subtract (f,g) from (F,G)
-
-	for (size_t u = 0; u < n; u++) {
-		F[u] -= fpr_rint(_f[u]);
-		G[u] -= fpr_rint(_g[u]);
-	}
-}
-
-/* =======================================================================
- * Run Babai's nearest plane algorithm directly with the Gram matrix q00
- * of a single basis element (f,g).
- * Assumes t, g are both of length 2^logn
- *
- * tmp[] requires a size of at least 2 2^logn fpr values.
- */
-static void
-ffBabai_inner(fpr *restrict t, fpr *restrict g, unsigned logn, fpr *restrict tmp)
+Zf(ffNearestPlane_dyn)(fpr *restrict t, fpr *restrict g, unsigned logn, fpr *restrict tmp)
 {
 	size_t n, hn;
 
@@ -320,7 +226,7 @@ ffBabai_inner(fpr *restrict t, fpr *restrict g, unsigned logn, fpr *restrict tmp
 	/*
 	 * First recursive invocation: target is t_1 and gram matrix is D_11.
 	 */
-	ffBabai_inner(g + hn, t + hn, logn - 1, tmp + n);
+	Zf(ffNearestPlane_dyn)(g + hn, t + hn, logn - 1, tmp + n);
 	// Memory layout: t: L_10, ???; g: t_0, z_1; tmp: g_0 = D_00, t_1.
 
 	/*
@@ -334,19 +240,14 @@ ffBabai_inner(fpr *restrict t, fpr *restrict g, unsigned logn, fpr *restrict tmp
 	/*
 	 * Second recursive invocation: target is t'_0 and gram matrix is D_00.
 	 */
-	ffBabai_inner(g, tmp, logn - 1, tmp + n);
+	Zf(ffNearestPlane_dyn)(g, tmp, logn - 1, tmp + n);
 	// Memory layout: t: L_10, ???; g: z_0, z_1; tmp: ???
 
 	Zf(poly_merge_fft)(t, g, g + hn, logn);
 	// Memory layout: t: z; g: z_0, z_1; tmp: ???
-
-	// ffBabai_inner(z, g1, g1 + hn, tmp, logn - 1, tmp + n);
-	// Zf(poly_split_fft)(z0, z0 + hn, tmp, logn);
-	// ffBabai_inner(tmp, tmp + hn, g1, g1 + hn, z0, z0 + hn, logn - 1, tmp + n);
-	// Zf(poly_merge_fft)(z0, tmp, tmp + hn, logn);
 }
 
-// tmp[] requires a size of at least 4 2^logn fpr values, so 32 2^logn bytes.
+/* see inner.h */
 void
 Zf(ffBabai_reduce)(const fpr *restrict f, const fpr *restrict g,
 	fpr *restrict F, fpr *restrict G, int8_t *restrict Fn,
@@ -371,13 +272,11 @@ Zf(ffBabai_reduce)(const fpr *restrict f, const fpr *restrict g,
 	// Zf(poly_add_muladj_fft)(q, f, g, f, g, logn);
 
 	/**
-	 * Now we have the target t and Gram matrix q:
-	 * t = (F adj(f) + G adj(g)) / (f adj(f) + g adj(g))
-	 * q = f adj(f) + g adj(g)
+	 * Now execute Babai with target t and Gram matrix q, where
+	 *     t = (F adj(f) + G adj(g)) / (f adj(f) + g adj(g)),
+	 *     q = f adj(f) + g adj(g).
 	 */
-
-	// Execute Babai with Gram-matrix q, target t, and put the result in t.
-	ffBabai_inner(t, q, logn, tmp + 2*n);
+	Zf(ffNearestPlane_dyn)(t, q, logn, tmp + 2*n);
 
 	// modify F and Fn:
 	memcpy(q, t, n * sizeof *t);
@@ -394,69 +293,4 @@ Zf(ffBabai_reduce)(const fpr *restrict f, const fpr *restrict g,
 	Zf(iFFT)(q, logn);
 	for (u = 0; u < n; u++)
 		Gn[u] -= fpr_rint(q[u]);
-
-/*	// If we want to print what we subtracted:
-	Zf(iFFT)(t, logn);
-	printf("z = ");
-	for (u = 0; u < n; u++) printf("%d ", fpr_rint(t[u]));
-	printf("\n"); */
-}
-
-// tmp[] requires a size of at least 8 2^logn fpr values, so 64 2^logn bytes.
-void
-Zf(ffStraightBabai)(const int8_t *restrict f, const int8_t *restrict g,
-	int8_t *restrict F, int8_t *restrict G,
-	unsigned logn, fpr *restrict tmp)
-{
-	size_t n;
-	fpr *_f, *_g, *_F, *_G;
-
-	n = MKN(logn);
-
-	_f = tmp;
-	_g = _f + n;
-	_F = _g + n;
-	_G = _F + n;
-
-	smallints_to_fpr(_f, f, logn);
-	smallints_to_fpr(_g, g, logn);
-	smallints_to_fpr(_F, F, logn);
-	smallints_to_fpr(_G, G, logn);
-
-	Zf(FFT)(_f, logn);
-	Zf(FFT)(_g, logn);
-	Zf(FFT)(_F, logn);
-	Zf(FFT)(_G, logn);
-
-	Zf(ffBabai_reduce)(_f, _g, _F, _G, F, G, logn, tmp + 4*n);
-}
-
-void
-Zf(ffBabai_recover_s0)(const int8_t *restrict hm,
-	int16_t *restrict s0, const int16_t *restrict s1,
-	const fpr *restrict q00, const fpr *restrict q10,
-	unsigned logn, fpr *restrict tmp)
-{
-	size_t n, u;
-
-	n = MKN(logn);
-	for (u = 0; u < n; u ++) {
-		tmp[u] = fpr_of(s1[u]);
-		tmp[u + n] = fpr_of(hm[u] & 1);
-	}
-	Zf(FFT)(tmp, logn);
-	Zf(FFT)(tmp + n, logn);
-	Zf(poly_mul_fft)(tmp, q10, logn);
-	Zf(poly_div_fft)(tmp, q00, logn);
-
-	Zf(poly_mulconst)(tmp + n, fpr_onehalf, logn); // h/2
-	Zf(poly_add)(tmp, tmp + n, logn); // tmp = s1 q10/q00 + (h%2)/2
-
-	memcpy(tmp + n, q00, n * sizeof(fpr));
-	// Run Babai with Gram-matrix q00, target tmp, and store result in s.
-	ffBabai_inner(tmp, tmp + n, logn, tmp + 2*n);
-	Zf(iFFT)(tmp, logn);
-	for (u = 0; u < n; u ++) {
-		s0[u] = -fpr_rint(tmp[u]);
-	}
 }

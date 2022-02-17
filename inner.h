@@ -609,7 +609,16 @@ Zf(poly_add_autoadj_fft)(fpr *a, fpr *b, unsigned logn);
  */
 
 /*
- * Compute the ffLDL tree of an auto-adjoint q00 (in FFT representation).
+ * Number of elements (fpr) in the LDL tree for an input with polynomials
+ * of size 2^logn. Note that leaves do not store any information, nor does
+ * the root of the whole tree. As on any level i=1,..., logn-1 we have
+ * 2^logn elements, the total size is (logn-1) * 2^logn.
+ */
+#define LDL_TREESIZE(logn) (((logn) - 1) << (logn))
+
+/*
+ * Compute the ffLDL tree of an auto-adjoint q00 (in FFT representation),
+ * so one can use Zf(ffNearestPlane_tree)
  *
  * The "tree" array is filled with the computed tree, of size logn 2^logn
  * elements (see ffLDL_treesize()).
@@ -622,38 +631,33 @@ Zf(ffLDL_fft)(fpr *restrict tree, const fpr *restrict q00, unsigned logn,
 	fpr *restrict tmp);
 
 /*
- * Perform Fast Fourier Sampling for target vector t and LDL tree T.
- * tmp[] must have size for at least two polynomials of size 2^logn.
+ * Perform Fast Fourier Nearest Plane for target vector t and LDL tree T.
+ * Result is stored in z. Note: tmp[] must have space for at least two
+ * polynomials of size 2^logn.
  */
 void
-Zf(ffNearestPlane)(fpr *restrict z, const fpr *restrict tree,
+Zf(ffNearestPlane_tree)(fpr *restrict z, const fpr *restrict tree,
 	const fpr *restrict t, unsigned logn, fpr *restrict tmp);
 
+/**
+ * Dynamic version of Zf(ffNearestPlane_tree). The tree of Gram matrix g
+ * is calculated on the fly, and the return value is stored in t. Note: t
+ * and g get modified in this function. tmp[] must have space for at least
+ * 2 polynomials of size 2^logn.
+ */
 void
-Zf(ffBabai)(const int8_t *restrict f, const int8_t *restrict g,
-	int8_t *restrict F, int8_t *restrict G, unsigned logn,
-	fpr *restrict tree, fpr *restrict tmp);
-
-void
-Zf(ffStraightBabai)(const int8_t *restrict f, const int8_t *restrict g,
-	int8_t *restrict F, int8_t *restrict G,
-	unsigned logn, fpr *restrict tmp);
+Zf(ffNearestPlane_dyn)(fpr *restrict t, fpr *restrict g, unsigned logn,
+	fpr *restrict tmp);
 
 /*
- * Babai reduce (F, G) w.r.t (f,g) (all in FFT representation) and adjust
- * the result in Fn, Gn as well (in coefficient representation).
- * tmp[] must have size for at least 11 polynomials of size 2^logn.
+ * Babai reduce (F, G) w.r.t (f, g) (all in FFT representation) and adjust
+ * the result in Fn, Gn as well (in coefficient representation). Note:
+ * tmp[] must have space for at least 4 polynomials of size 2^logn.
  */
 void
 Zf(ffBabai_reduce)(const fpr *restrict f, const fpr *restrict g,
 	fpr *restrict F, fpr *restrict G, int8_t *restrict Fn,
 	int8_t *restrict Gn, unsigned logn, fpr *tmp);
-
-void
-Zf(ffBabai_recover_s0)(const int8_t *restrict hm,
-	int16_t *restrict s0, const int16_t *restrict s1,
-	const fpr *restrict q00, const fpr *restrict q10,
-	unsigned logn, fpr *restrict tmp);
 
 /* ==================================================================== */
 /*

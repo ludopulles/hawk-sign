@@ -453,10 +453,7 @@ WorkerResult measure_keygen(fpr isigma_kg)
 	unsigned char seed[48];
 	inner_shake256_context sc;
 
-	fpr tmp_babai[10*n]; // 40kB
-
-	// This does exactly the same as below, but MUCH faster
-	fpr rt1[n], rt2[n], rt3[n], rt4[n];
+	fpr tmp_babai[4*n], rt1[n], rt2[n], rt3[n], rt4[n];
 
 	struct timeval t0, t1;
 	const int n_repetitions = 1;
@@ -487,18 +484,17 @@ WorkerResult measure_keygen(fpr isigma_kg)
 		result.encodeB += eq10;
 		result.huffmanB += hq10;
 
-		// now try to optimize F, G with babai.
-		Zf(ffStraightBabai)(f, g, F, G, logn, tmp_babai);
-
-		// Calculate q10 (in FFT representation)
 		poly_small_to_fp(rt1, f, logn);
 		poly_small_to_fp(rt2, g, logn);
 		poly_small_to_fp(rt3, F, logn);
 		poly_small_to_fp(rt4, G, logn);
-		Zf(FFT)(rt1, logn); // g
-		Zf(FFT)(rt2, logn); // F
-		Zf(FFT)(rt3, logn); // G
-		Zf(FFT)(rt4, logn); // f
+		Zf(FFT)(rt1, logn); // f
+		Zf(FFT)(rt2, logn); // g
+		Zf(FFT)(rt3, logn); // F
+		Zf(FFT)(rt4, logn); // G
+
+		// now try to optimize F, G with babai.
+		Zf(ffBabai_reduce)(rt1, rt2, rt3, rt4, F, G, logn, tmp_babai);
 
 		// q10 = F*adj(f) + G*adj(g)
 		Zf(poly_add_muladj_fft)(q10, rt3, rt4, rt1, rt2, logn);
