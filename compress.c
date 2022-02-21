@@ -35,7 +35,7 @@
 
 
 #define MAX_Q00 (512) // ~6*sigma
-#define ENCODING_LEN_Q00 (96) // max path in the tree
+#define ENCODING_LEN_Q00 (52) // max path in the tree
 // #define MAX_Q10 (2048) // sufficient enough
 // #define ENCODING_LEN_Q10 (21) // max path in the tree
 #define MAX_Q10 (4096)
@@ -89,7 +89,7 @@ init_huffman_trees() {
 		T.a[u][1] = l;                                                   \
 	}
 
-	BUILD_TREE(tree_q00, MAX_Q00, 45.75);
+	BUILD_TREE(tree_q00, MAX_Q00, 64.00);
 	BUILD_TREE(tree_q10, MAX_Q10, 512.0);
 
 	// This has a too large std.dev. to be optimal:
