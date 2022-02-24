@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <limits.h>
 #include <stddef.h>
 #include <string.h>
 #include <stdio.h>
@@ -14,6 +15,21 @@
 void randombytes(unsigned char *x, unsigned long long xlen) {
 	for (; xlen -- > 0; ++x)
 		*x = ((unsigned char) rand());
+}
+
+void random_hash(int8_t *h, unsigned logn) {
+	assert(RAND_MAX == INT_MAX); // rand() should generate 31 random bits
+	int x = rand();
+	size_t RAND_BITS = 31, rand_bits = RAND_BITS;
+	for (size_t u = MKN(logn); u -- > 0; ) {
+		if (rand_bits == 0) {
+			x = rand();
+			rand_bits = RAND_BITS;
+		}
+		h[u] = (x & 1);
+		x >>= 1;
+		rand_bits--;
+	}
 }
 
 long long time_diff(const struct timeval *begin, const struct timeval *end) {
@@ -79,7 +95,7 @@ void benchmark(fpr isigma_kg, fpr isigma_sig, uint32_t bound) {
 
 	for (int rep = 0; rep < n_repetitions; rep++) {
 		// make a signature of a random message...
-		randombytes((unsigned char *)h, sizeof h);
+		random_hash(h, logn);
 
 		// Compute the signature.
 		Zf(sign)(&sc, sig, f, g, h, isigma_sig, bound, logn, tmp.b);

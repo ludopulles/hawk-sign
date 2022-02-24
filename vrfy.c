@@ -80,8 +80,12 @@ Zf(complete_verify)(const int8_t *restrict hm,
 	t2 = t1 + n;
 	t3 = t2 + n;
 
+	/**
+	 * Put (e0, e1) = (2 s0 - hm, 2 s1) in FFT representation so we can
+	 * calculate the l2-norm wrt Q.
+	 */
 	for (u = 0; u < n; u ++) {
-		t0[u] = fpr_of(2 * s0[u] + (hm[u] & 1));
+		t0[u] = fpr_of(2 * s0[u] - (hm[u] & 1));
 	}
 	for (u = 0; u < n; u ++) {
 		t1[u] = fpr_of(2 * s1[u]);
@@ -91,22 +95,24 @@ Zf(complete_verify)(const int8_t *restrict hm,
 	Zf(FFT)(t0, logn);
 	Zf(FFT)(t1, logn);
 
-	// Currently in memory: s0, s1, s1, s0 (in FFT representation)
+	// Currently in memory: e0, e1, e1, e0 (in FFT representation)
 	memcpy(t2, t1, n * sizeof *t0);
 	memcpy(t3, t0, n * sizeof *t0);
 
-	// Compute s0 q00 s0* + s0 q01 s1* + s1 q10 s0* + s1 q11 s1*
+	// Compute e0 q00 e0* + e0 q01 e1* + e1 q10 e0* + e1 q11 e1*
 	Zf(poly_mulselfadj_fft)(t2, logn);
 	Zf(poly_mulselfadj_fft)(t3, logn);
-	Zf(poly_mul_autoadj_fft)(t2, q11, logn); // t2 = s1 q11 s1*
-	Zf(poly_mul_autoadj_fft)(t3, q00, logn); // t3 = s0 q00 s0*
-	Zf(poly_muladj_fft)(t1, t0, logn); // t1 = s1 s0*
-	Zf(poly_mul_fft)(t1, q10, logn); // t1 = s1 q10 s0*
+	Zf(poly_mul_autoadj_fft)(t2, q11, logn); // t2 = e1 q11 e1*
+	Zf(poly_mul_autoadj_fft)(t3, q00, logn); // t3 = e0 q00 e0*
+	Zf(poly_muladj_fft)(t1, t0, logn); // t1 = e1 e0*
+	Zf(poly_mul_fft)(t1, q10, logn); // t1 = e1 q10 e0*
 
-	Zf(poly_addselfadj_fft)(t1, logn); // t1 = s1 q10 s0* + s0 q01 s1*
+	Zf(poly_addselfadj_fft)(t1, logn); // t1 = e1 q10 e0* + e0 q01 e1*
 	Zf(poly_add_autoadj_fft)(t1, t2, logn);
 	Zf(poly_add_autoadj_fft)(t1, t3, logn);
 
+	// Calculate the normalized trace of t1 directly by sum t1 under embeddings
+	// divided by n.
 	trace = fpr_zero;
 	for (u = 0; u < n/2; u ++) {
 		trace = fpr_add(trace, t1[u]);
@@ -117,14 +123,14 @@ Zf(complete_verify)(const int8_t *restrict hm,
 	 */
 	trace = fpr_double(trace);
 	/*
-	 * Renormalize, so we get the norm of (s0, s1) w.r.t Q.
+	 * Renormalize, so we get the norm of (e0, e1) w.r.t Q.
 	 */
 	trace = fpr_div(trace, fpr_of(n));
 
 	/*
-	 * Signature is valid if and only if
+	 * First check whether the norm is in range [0, 2^31].
+	 * Signature is valid iff
 	 *     `Tr(s* Q s) / n (=Tr(x^* x)/n = sum_i x_i^2) <= bound`.
-	 * Note: check whether the norm is actually storable in a uint32_t.
 	 */
 	return fpr_lt(fpr_zero, trace) && fpr_lt(trace, fpr_ptwo31m1)
 		&& (uint32_t)fpr_rint(trace) <= bound;
@@ -138,7 +144,7 @@ Zf(verify_simple_rounding)(const int8_t *restrict hm,
 	uint32_t bound, unsigned logn, uint8_t *restrict tmp)
 {
 	size_t u, n;
-	fpr *t0, halfH;
+	fpr *t0;
 
 	n = MKN(logn);
 	t0 = (fpr *)tmp;
@@ -152,10 +158,9 @@ Zf(verify_simple_rounding)(const int8_t *restrict hm,
 	Zf(poly_div_autoadj_fft)(t0, q00, logn); // s1 q10/q00
 	Zf(iFFT)(t0, logn);
 
-	// Recover s0 with s0 = -round(s1 q10 / q00 + (h%2) / 2)
+	// Recover s0 with s0 = round((h%2) / 2 - s1 q10 / q00)
 	for (u = 0; u < n; u ++) {
-		halfH = fpr_half(fpr_of(hm[u] & 1)); // (h%2) / 2
-		s0[u] = -fpr_rint(fpr_add(t0[u], halfH));
+		s0[u] = fpr_rint(fpr_sub(fpr_half(fpr_of(hm[u] & 1)), t0[u]));
 	}
 
 	return Zf(complete_verify)(hm, s0, s1, q00, q10, q11, bound, logn, tmp);
@@ -171,7 +176,7 @@ Zf(verify_nearest_plane)(const int8_t *restrict hm,
 	/*
 	 * This works better than simple rounding.
 	 * Reconstruct s0, by running Babai's NP algorithm with target
-	 *     -( s1 q10 / * q00 + h/2 ).
+	 *     h/2 - s1 * q10 / q00.
 	 */
 
 	size_t n, u;
@@ -181,24 +186,24 @@ Zf(verify_nearest_plane)(const int8_t *restrict hm,
 	t0 = (fpr *)tmp;
 	t1 = t0 + n;
 	for (u = 0; u < n; u ++) {
-		t0[u] = fpr_of(s1[u]);
+		t0[u] = fpr_half(fpr_of(hm[u] & 1));
 	}
 	for (u = 0; u < n; u ++) {
-		t1[u] = fpr_half(fpr_of(hm[u] & 1));
+		t1[u] = fpr_of(s1[u]);
 	}
 
 	Zf(FFT)(t0, logn);
 	Zf(FFT)(t1, logn);
-	Zf(poly_mul_fft)(t0, q10, logn);
-	Zf(poly_div_fft)(t0, q00, logn);
-	Zf(poly_add)(t0, t1, logn); // t0 = s1 q10/q00 + (h%2)/2
+	Zf(poly_mul_fft)(t1, q10, logn);
+	Zf(poly_div_fft)(t1, q00, logn);
+	Zf(poly_sub)(t0, t1, logn); // t0 = (h%2) / 2 - s1 q10/q00
 
 	memcpy(t1, q00, n * sizeof(fpr));
 	// Run Babai with target t0 and Gram-matrix q00.
 	Zf(ffNearestPlane_dyn)(t0, t1, logn, t1 + n);
 	Zf(iFFT)(t0, logn);
 	for (u = 0; u < n; u ++) {
-		s0[u] = -fpr_rint(t0[u]);
+		s0[u] = fpr_rint(t0[u]);
 	}
 
 	/**

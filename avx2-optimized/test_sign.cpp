@@ -53,7 +53,7 @@ Zf(verify_nearest_plane_tree)(const fpr *restrict tree, const int8_t *restrict h
 	/*
 	 * This works better than simple rounding.
 	 * Reconstruct s0, by running Babai's NP algorithm with target
-	 *     -( s1 q10 / * q00 + h/2 ).
+	 *     h/2 - s1 q10 / * q00.
 	 */
 
 	size_t n, u;
@@ -66,31 +66,32 @@ Zf(verify_nearest_plane_tree)(const fpr *restrict tree, const int8_t *restrict h
 	t3 = t2 + n;
 
 	for (u = 0; u < n; u ++) {
-		t1[u] = fpr_of(s1[u]);
+		t0[u] = fpr_half(fpr_of(hm[u] & 1));
 	}
 	for (u = 0; u < n; u ++) {
-		t0[u] = fpr_half(fpr_of(hm[u] & 1));
+		t1[u] = fpr_of(s1[u]);
 	}
 
 	Zf(FFT)(t0, logn);
 	Zf(FFT)(t1, logn);
-	memcpy(t2, t1, n * sizeof *t0);
+	memcpy(t2, t1, n * sizeof *t1);
 	Zf(poly_mul_fft)(t2, q10, logn);
 	Zf(poly_div_fft)(t2, q00, logn);
-	Zf(poly_add)(t2, t0, logn); // t1 = s1 q10/q00 + (h%2)/2
+	Zf(poly_sub)(t2, t0, logn); // t2 = s1 q10/q00 - (h%2)/2
+	Zf(poly_neg)(t2, logn); // t2 = (h%2)/2 - s1 q10/q00
 
-	// Run Babai with target t0 and Gram-matrix q00.
+	// Run Babai with target t2 and Gram-matrix q00.
 	Zf(ffNearestPlane_tree)(t3, tree, t2, logn, t3 + n);
 
-	// t0 = 2 * (t0 - t3) = 2 s0 + (h%2)
-	Zf(poly_sub)(t0, t3, logn);
-	Zf(poly_mulconst)(t0, fpr_two, logn);
-	// t1 = 2 * s1
+	Zf(poly_sub)(t3, t0, logn);
+	Zf(poly_mulconst)(t3, fpr_two, logn);
+	// t0 = 2 * (t3 - t0) = 2 s0 - (h%2)
 	Zf(poly_mulconst)(t1, fpr_two, logn);
+	// t1 = 2 * s1
 
 	// Currently in memory: s0, s1, s1, s0 (in FFT representation)
 	memcpy(t2, t1, n * sizeof *t0);
-	memcpy(t3, t0, n * sizeof *t0);
+	memcpy(t0, t3, n * sizeof *t3);
 
 	// Compute s0 q00 s0* + s0 q01 s1* + s1 q10 s0* + s1 q11 s1*
 	Zf(poly_mulselfadj_fft)(t2, logn);
@@ -151,7 +152,7 @@ void measure_sign_speed(fpr isigma_kg, fpr isigma_sig, uint32_t bound)
 	// uint8_t b[42 << logn];
 	uint8_t b[48 << logn];
 	int8_t f[n], g[n], F[n], G[n], h[n];
-	int16_t s0[n], s1[n];
+	int16_t s1[n];
 	fpr q00[n], q10[n], q11[n];
 	unsigned char seed[48];
 	inner_shake256_context sc;

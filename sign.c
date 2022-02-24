@@ -641,13 +641,16 @@ sample_short(void *samp_ctx, int8_t *restrict x0, int8_t *restrict x1,
 }
 
 /*
- * Compute a signature: the signature contains two vectors, s0 and s1.
- * The s0 vector is not returned.
+ * Compute signature of hm: a vector (s0, s1) that is close to (hm/2, 0) wrt Q.
+ * Here, s0 is not returned.
+ * When 0 is returned, signing failed.
+ * When 1 is returned, there exists some s0 for which (s0, s1) is a signature
+ * but reconstructing s0 might still fail.
  *
- * tmp must have room for at least 28 * 2^logn bytes
+ * tmp must have room for at least 24 * 2^logn bytes
  */
 static int
-Zf(inner_do_sign)(void *samp_ctx, int16_t *restrict s1,
+do_sign(void *samp_ctx, int16_t *restrict s1,
 	const int8_t *restrict f, const int8_t *restrict g,
 	const int8_t *restrict hm, fpr isigma_sig, uint32_t bound,
 	unsigned logn, uint8_t *restrict tmp)
@@ -660,33 +663,35 @@ Zf(inner_do_sign)(void *samp_ctx, int16_t *restrict s1,
 	t0 = (fpr *)tmp;
 	t1 = t0 + n;
 	t2 = t1 + n;
-	x0 = (int8_t *)(t2 + n);
+	x0 = (int8_t *)tmp;
 	x1 = x0 + n;
 
 	if (!sample_short(samp_ctx, x0, x1, f, g, hm, isigma_sig, bound, logn,
-			tmp)) {
+			(uint8_t *)(x1 + n))) {
 		return 0;
 	}
 
 	/*
-	 * Get the signature corresponding to that tiny vector, i.e.
-	 * s = x * B^{-1}. Thus s0 = x0 G - x1 F and s1 = -x0 g + x1 f.
+	 * Note that (x0, x1) == B (h, 0) (mod 2) so we obtain a lattice point
+	 * (s0, s1) that is close to (hm/2, 0) wrt Q by calculating:
+	 *     (s0, s1) = ((h, 0) - B^{-1} (x0, x1)) / 2.
 	 */
-	smallints_to_fpr(t0, f, logn);
 	smallints_to_fpr(t1, x1, logn);
+	smallints_to_fpr(t2, x0, logn);
+	// Now override x0, x1
+	smallints_to_fpr(t0, f, logn);
 	Zf(FFT)(t0, logn);
 	Zf(FFT)(t1, logn);
+	Zf(FFT)(t2, logn);
 	Zf(poly_mul_fft)(t0, t1, logn);
 	smallints_to_fpr(t1, g, logn);
-	smallints_to_fpr(t2, x0, logn);
 	Zf(FFT)(t1, logn);
-	Zf(FFT)(t2, logn);
 	Zf(poly_mul_fft)(t1, t2, logn);
 	Zf(poly_sub)(t0, t1, logn); // s1 = x1 f - x0 g.
 
 	Zf(iFFT)(t0, logn);
 	for (u = 0; u < n; u ++) {
-		s1[u] = (int16_t)fpr_rint(t0[u]);
+		s1[u] = (int16_t) -fpr_rint(t0[u]);
 		// shouldn't happen, except when FFT had rounding issues
 		if (s1[u] & 1) return 0;
 		s1[u] /= 2;
@@ -696,27 +701,29 @@ Zf(inner_do_sign)(void *samp_ctx, int16_t *restrict s1,
 }
 
 /*
- * Compute a signature: the signature contains two vectors, s0 and s1.
- * The s0 vector is not returned.
+ * Compute signature of hm: a vector (s0, s1) that is close to (hm/2, 0) wrt Q.
+ * Here, s0 is not returned.
+ * 1 is returned iff (s0, s1) is a valid signature and s0 can be recovered from
+ * s1 with simple rounding.
  *
  * tmp must have room for at least 40 * 2^logn bytes
  */
 static int
-Zf(inner_do_guaranteed_sign)(void *samp_ctx, int16_t *restrict s1,
+do_guaranteed_sign(void *samp_ctx, int16_t *restrict s1,
 	const int8_t *restrict f, const int8_t *restrict g,
 	const fpr *restrict q00, const int8_t *restrict hm, fpr isigma_sig,
 	uint32_t bound, unsigned logn, uint8_t *restrict tmp)
 {
 	size_t n, u;
 	int8_t *x0, *x1;
-	fpr *tf, *tg, *tx0, *tx1, *terr;
+	fpr *tf, *tg, *tx0, *tx1, *t4;
 
 	n = MKN(logn);
 	tf = (fpr *)tmp;
 	tg = tf + n;
 	tx0 = tg + n;
 	tx1 = tx0 + n;
-	terr = tx1 + n;
+	t4 = tx1 + n;
 
 	x0 = (int8_t *)tmp;
 	x1 = x0 + n;
@@ -727,8 +734,9 @@ Zf(inner_do_guaranteed_sign)(void *samp_ctx, int16_t *restrict s1,
 	}
 
 	/*
-	 * Get the signature corresponding to that tiny vector, i.e.
-	 * s = x * B^{-1}. Thus s0 = x0 G - x1 F and s1 = -x0 g + x1 f.
+	 * Note that (x0, x1) == B (h, 0) (mod 2) so we obtain a lattice point
+	 * (s0, s1) that is close to (hm/2, 0) wrt Q by calculating:
+	 *     (s0, s1) = ((h, 0) - B^{-1} (x0, x1)) / 2.
 	 */
 	smallints_to_fpr(tx0, x0, logn);
 	smallints_to_fpr(tx1, x1, logn);
@@ -741,16 +749,14 @@ Zf(inner_do_guaranteed_sign)(void *samp_ctx, int16_t *restrict s1,
 	Zf(FFT)(tf, logn);
 	Zf(FFT)(tg, logn);
 
-	Zf(poly_add_muladj_fft)(terr, tx0, tx1, tf, tg, logn);
-	Zf(poly_div_autoadj_fft)(terr, q00, logn);
-	// err = (f^* x0 + g^* x1) / q00
-	Zf(iFFT)(terr, logn);
+	Zf(poly_add_muladj_fft)(t4, tx0, tx1, tf, tg, logn);
+	Zf(poly_div_autoadj_fft)(t4, q00, logn);
+	Zf(iFFT)(t4, logn); // err = (f^* x0 + g^* x1) / q00
 
 	// If err is not in (-.5,.5)^n, simple rounding will fail
 	for (u = 0; u < n; u++) {
-		// if (fpr_rint(terr[u])) return 0;
-		if (!(fpr_lt(fpr_neg(fpr_onehalf), terr[u])
-			&& fpr_lt(terr[u], fpr_onehalf))) return 0;
+		if (!fpr_lt(fpr_neg(fpr_onehalf), t4[u])
+			|| !fpr_lt(t4[u], fpr_onehalf)) return 0;
 	}
 
 	Zf(poly_mul_fft)(tf, tx1, logn);
@@ -759,7 +765,7 @@ Zf(inner_do_guaranteed_sign)(void *samp_ctx, int16_t *restrict s1,
 
 	Zf(iFFT)(tf, logn);
 	for (u = 0; u < n; u ++) {
-		s1[u] = (int16_t)fpr_rint(tf[u]);
+		s1[u] = (int16_t) -fpr_rint(tf[u]);
 		// shouldn't happen, except when FFT had rounding issues
 		if (s1[u] & 1) return 0;
 		s1[u] /= 2;
@@ -769,12 +775,13 @@ Zf(inner_do_guaranteed_sign)(void *samp_ctx, int16_t *restrict s1,
 }
 
 /*
- * Compute a signature: the signature contains two vectors, s0 and s1.
+ * Compute signature of hm: a vector (s0, s1) that is close to (hm/2, 0) wrt Q.
+ * If 1 is returned, (s0, s1) is a valid signature.
  *
- * tmp must have room for at least 42 * 2^logn bytes
+ * tmp must have room for at least 40 * 2^logn bytes
  */
 static int
-Zf(inner_do_complete_sign)(void *samp_ctx,
+do_complete_sign(void *samp_ctx,
 	int16_t *restrict s0, int16_t *restrict s1,
 	const int8_t *restrict f, const int8_t *restrict g,
 	const int8_t *restrict F, const int8_t *restrict G,
@@ -791,11 +798,11 @@ Zf(inner_do_complete_sign)(void *samp_ctx,
 	t2 = t1 + n;
 	t3 = t2 + n;
 	t4 = t3 + n;
-	x0 = (int8_t *)(t4 + n);
+	x0 = (int8_t *)tmp;
 	x1 = x0 + n;
 
 	if (!sample_short(samp_ctx, x0, x1, f, g, hm, isigma_sig, bound, logn,
-			tmp)) {
+			(uint8_t *)(x1 + n))) {
 		return 0;
 	}
 
@@ -803,10 +810,11 @@ Zf(inner_do_complete_sign)(void *samp_ctx,
 	 * Get the signature corresponding to that tiny vector, i.e.
 	 * s = x * B^{-1}. Thus s0 = x0 G - x1 F and s1 = -x0 g + x1 f.
 	 */
-	smallints_to_fpr(t0, G, logn);
-	smallints_to_fpr(t1, f, logn);
 	smallints_to_fpr(t2, x0, logn);
 	smallints_to_fpr(t3, x1, logn);
+	// Now override x0, x1
+	smallints_to_fpr(t0, G, logn);
+	smallints_to_fpr(t1, f, logn);
 	Zf(FFT)(t0, logn);
 	Zf(FFT)(t1, logn);
 	Zf(FFT)(t2, logn);
@@ -819,7 +827,6 @@ Zf(inner_do_complete_sign)(void *samp_ctx,
 	Zf(FFT)(t4, logn);
 	Zf(poly_mul_fft)(t3, t4, logn);
 	Zf(poly_sub)(t0, t3, logn); // t0 = x0 G - x1 F
-
 
 	smallints_to_fpr(t4, g, logn);
 	Zf(FFT)(t4, logn);
@@ -835,19 +842,22 @@ Zf(inner_do_complete_sign)(void *samp_ctx,
 		s0[u] = (int16_t)fpr_rint(t0[u]);
 		// shouldn't happen, except when FFT had rounding issues
 		if ((s0[u] ^ hm[u]) & 1) return 0;
-		s0[u] = (s0[u] - (hm[u] & 1)) / 2;
+		s0[u] = ((hm[u] & 1) - s0[u]) / 2;
 	}
 	for (u = 0; u < n; u ++) {
-		s1[u] = (int16_t)fpr_rint(t1[u]);
+		s1[u] = (int16_t) -fpr_rint(t1[u]);
 		// shouldn't happen, except when FFT had rounding issues
 		if (s1[u] & 1) return 0;
 		s1[u] /= 2;
 	}
-
+	// Now (s0, s1) is a lattice that is close to (h/2, 0) wrt Q.
 	return 1;
 }
 
 /* =================================================================== */
+/*
+ * Use a fast PRNG for gaussian sampling during signing.
+ */
 
 /* see inner.h */
 void
@@ -859,11 +869,8 @@ Zf(sign)(inner_shake256_context *rng, int16_t *restrict sig,
 	sampler_context spc;
 	spc.sigma_min = fpr_sigma_min[logn];
 	do {
-		/*
-		 * Use a fast PRNG for gaussian sampling.
-		 */
 		Zf(prng_init)(&spc.p, rng);
-	} while (!Zf(inner_do_sign)(&spc, sig, f, g, hm, isigma_sig,
+	} while (!do_sign(&spc, sig, f, g, hm, isigma_sig,
 			bound, logn, tmp));
 }
 
@@ -877,11 +884,8 @@ Zf(guaranteed_sign)(inner_shake256_context *rng, int16_t *restrict sig,
 	sampler_context spc;
 	spc.sigma_min = fpr_sigma_min[logn];
 	do {
-		/*
-		 * Use a fast PRNG for gaussian sampling.
-		 */
 		Zf(prng_init)(&spc.p, rng);
-	} while (!Zf(inner_do_guaranteed_sign)((void *)&spc, sig, f, g, q00, hm,
+	} while (!do_guaranteed_sign((void *)&spc, sig, f, g, q00, hm,
 			isigma_sig, bound, logn, tmp));
 }
 
@@ -897,10 +901,7 @@ Zf(complete_sign)(inner_shake256_context *rng,
 	sampler_context spc;
 	spc.sigma_min = fpr_sigma_min[logn];
 	do {
-		/*
-		 * Use a fast PRNG for gaussian sampling.
-		 */
 		Zf(prng_init)(&spc.p, rng);
-	} while (!Zf(inner_do_complete_sign)((void *)&spc, s0, s1, f, g, F, G,
+	} while (!do_complete_sign((void *)&spc, s0, s1, f, g, F, G,
 			hm, isigma_sig, bound, logn, tmp));
 }

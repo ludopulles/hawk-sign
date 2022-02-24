@@ -3967,7 +3967,8 @@ Zf(keygen)(inner_shake256_context *rng,
 		Zf(FFT)(q11, logn); // F
 		Zf(FFT)(rt2, logn); // G
 
-		// Optional: do Babai reduction here on (F,G) w.r.t (f,g).
+		// TODO: do Babai reduction here on (F,G) w.r.t (f,g).
+		// In this case, tmp needs to have size for 6 polynomials of size 2^logn.
 		// Zf(ffBabai_reduce)(q00, rt1, q11, rt2, F, G, logn, rt2 + n);
 
 		// q10 = F*adj(f) + G*adj(g)
