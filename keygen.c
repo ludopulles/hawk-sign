@@ -2322,6 +2322,109 @@ poly_small_to_fp(fpr *x, const int8_t *f, unsigned logn)
 }
 
 // =============================================================================
+
+/*
+ * Table below incarnates a discrete Gaussian distribution:
+ *    D(x) = exp(-(x^2)/(2*sigma^2))
+ * where sigma = 1.425.
+ * Element 0 of the table is P(x = 0).
+ * For k > 0, element k is P(x >= k+1 | x > 0).
+ * Probabilities are scaled up by 2^63.
+ */
+static const uint64_t gauss_1425[14] = {
+	2582170577806070936u,
+	3616484622030002669u,
+	 937850763665829726u,
+	 155804309064628172u,
+	  16270507104385775u,
+	   1056136771359479u,
+	     42327595817352u,
+	      1043181220683u,
+	        15771375580u,
+	          146052920u,
+	             827733u,
+	               2869u,
+	                  6u,
+	                  0u
+};
+
+/*
+ * Generate a random value with a Gaussian distribution centered on 0.
+ * The RNG must be ready for extraction (already flipped).
+ *
+ * Distribution has standard deviation 1.425. The code is now only usable for N
+ * = 512 as other values for N would require different values for sigma.
+ */
+static int
+mkgauss(void *samp_ctx, unsigned logn)
+{
+	unsigned u, g;
+	int val;
+
+	sampler_context *sc = (sampler_context *)samp_ctx;
+
+	g = 1U << (9 - logn);
+	val = 0;
+	for (u = 0; u < g; u ++) {
+		/*
+		 * Each iteration generates one value with the
+		 * Gaussian distribution for N = 512.
+		 *
+		 * We use two random 64-bit values. First value
+		 * decides on whether the generated value is 0, and,
+		 * if not, the sign of the value. Second random 64-bit
+		 * word is used to generate the non-zero value.
+		 *
+		 * For constant-time code we have to read the complete
+		 * table. This has negligible cost, compared with the
+		 * remainder of the keygen process (solving the NTRU
+		 * equation).
+		 */
+		uint64_t r;
+		uint32_t f, v, k, neg;
+
+		/*
+		 * First value:
+		 *  - flag 'neg' is randomly selected to be 0 or 1.
+		 *  - flag 'f' is set to 1 if the generated value is zero,
+		 *    or set to 0 otherwise.
+		 */
+		r = prng_get_u64(&sc->p);
+		neg = (uint32_t)(r >> 63);
+		r &= ~((uint64_t)1 << 63);
+		f = (uint32_t)((r - gauss_1425[0]) >> 63);
+
+		/*
+		 * We produce a new random 63-bit integer r, and go over
+		 * the array, starting at index 1. We store in v the
+		 * index of the first array element which is not greater
+		 * than r, unless the flag f was already 1.
+		 */
+		v = 0;
+		r = prng_get_u64(&sc->p);
+		r &= ~((uint64_t)1 << 63);
+		for (k = 1; k < 14; k ++) {
+			uint32_t t;
+			t = (uint32_t)((r - gauss_1425[k]) >> 63) ^ 1;
+			v |= k & -(t & (f ^ 1));
+			f |= t;
+		}
+
+		/*
+		 * We apply the sign ('neg' flag). If the value is zero,
+		 * the sign has no effect.
+		 */
+		v = (v ^ -neg) + neg;
+
+		/*
+		 * Generated value is added to val.
+		 */
+		val += *(int32_t *)&v;
+	}
+	return val;
+}
+
+// TODO: remove unused isigma_kg throughout whole code
 /*
  * Generate a random polynomial with a Gaussian distribution. This function
  * also makes sure that the resultant of the polynomial with phi is odd.
@@ -2338,7 +2441,7 @@ poly_small_mkgauss(void *samp_ctx, int8_t *f, unsigned logn, fpr isigma_kg, int 
 
 	for (u = n; u -- > 1; ) {
 		do {
-			s = Zf(sampler)(samp_ctx, fpr_zero, isigma_kg);
+			s = mkgauss(samp_ctx, logn);
 			/*
 			 * We need the coefficient to fit within -127..+127;
 			 * realistically, this is always the case except for
@@ -2351,7 +2454,7 @@ poly_small_mkgauss(void *samp_ctx, int8_t *f, unsigned logn, fpr isigma_kg, int 
 	}
 
 	do {
-		s = Zf(sampler)(samp_ctx, fpr_zero, isigma_kg);
+		s = mkgauss(samp_ctx, logn);;
 		/*
 		 * We need the sum of all coefficients to be 1; otherwise,
 		 * the resultant of the polynomial with X^N+1 will be even,
