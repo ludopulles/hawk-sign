@@ -113,6 +113,15 @@ size_t Zf(huffman_encode)(void *out, size_t max_out_len, const int16_t *x, unsig
 		int16_t t = x[u];
 		if (t < 0) t = -t, acc |= 1;
 
+		if (++acc_len == 8) {
+			if (buf != NULL) {
+				if (v >= max_out_len) return 0;
+				buf[v] = acc;
+			}
+			acc_len = acc = 0; // reset acc
+			v++;
+		}
+
 		size_t nsteps = 0;
 		for (int16_t idx = MAX_Q10 + t; idx > 1; ) {
 			int16_t next_idx = huffman_tree.p[idx];

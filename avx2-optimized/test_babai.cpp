@@ -582,9 +582,6 @@ int main()
 	PRINTF("# huf (babai) = %.1f±%.1f B\n", final_result.hufB, final_result.sqhufB);
 	PRINTF("# enc q00     = %.1f±%.1f B\n", final_result.enc00, final_result.sqenc00);
 	PRINTF("# huf q00     = %.1f±%.1f B\n", final_result.huf00, final_result.sqhuf00);
-
-	PRINTF("# pubkey      = %.1f±%.1f B\n", final_result.encB + final_result.enc00, final_result.sqencB + final_result.sqenc00);
-	PRINTF("# pubkey (huf)= %.1f±%.1f B\n", final_result.hufB + final_result.huf00, final_result.sqhufB + final_result.sqhuf00);
 	return 0;
 }
 
