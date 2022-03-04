@@ -2351,9 +2351,7 @@ static const uint64_t gauss_1425[14] = {
 /*
  * Generate a random value with a Gaussian distribution centered on 0.
  * The RNG must be ready for extraction (already flipped).
- *
- * Distribution has standard deviation 1.425. The code is now only usable for N
- * = 512 as other values for N would require different values for sigma.
+ * Distribution has standard deviation 1.425 sqrt(512/N).
  */
 static int
 mkgauss(void *samp_ctx, unsigned logn)

@@ -72,7 +72,7 @@ void benchmark(fpr isigma_kg, fpr isigma_sig, uint32_t bound) {
 	inner_shake256_context sc;
 
 	struct timeval t0, t1;
-	const int n_repetitions = 1000;
+	const int n_repetitions = 100;
 
 	// Initialize a RNG.
 	randombytes(seed, sizeof seed);

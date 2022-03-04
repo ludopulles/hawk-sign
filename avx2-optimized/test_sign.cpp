@@ -142,7 +142,7 @@ void output_poly(int16_t *x)
 	printf("\n");
 }
 
-const int num_samples = 10 * 1024;
+const int num_samples = 1024;
 
 int8_t pregen_h[num_samples][n];
 int16_t pregen_s0[num_samples][n], pregen_s1[num_samples][n];
