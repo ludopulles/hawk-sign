@@ -88,6 +88,8 @@ static const uint64_t gauss_1292[26] = {
  * The RNG must be ready for extraction (already flipped).
  *
  * Distribution has standard deviation 1.292 sqrt(512/N).
+ * Note/TODO: Watch out with N != 512, the Renyi-divergence with the perfect
+ * discrete gaussian is unknown.
  */
 static int
 mkgauss(void *samp_ctx, unsigned logn, uint8_t double_mu)
@@ -154,6 +156,14 @@ mkgauss(void *samp_ctx, unsigned logn, uint8_t double_mu)
 		 * Generated value is added to val.
 		 */
 		val += *(int32_t *)&v;
+
+		/*
+		 * In this case that this code is run multiple times, we want to use
+		 * center mu = 0 in the other runs (g > 0), as to not change the center
+		 * and only scale the standard deviation. However, we might be a bit off
+		 * since sum of discrete gaussians might not be a discrete gaussian (it
+		 * is only true in the continuous limit).
+		double_mu = 0;
 	}
 	return val;
 }
