@@ -163,6 +163,7 @@ mkgauss(void *samp_ctx, unsigned logn, uint8_t double_mu)
 		 * and only scale the standard deviation. However, we might be a bit off
 		 * since sum of discrete gaussians might not be a discrete gaussian (it
 		 * is only true in the continuous limit).
+		 */
 		double_mu = 0;
 	}
 	return val;
@@ -237,7 +238,6 @@ sample_short(void *samp_ctx, int8_t *restrict x0, int8_t *restrict x1,
 		z = 2*mkgauss(samp_ctx, logn, z) - z;
 		x0[u] = (int8_t) z;
 		norm += z*z;
-		// printf("%d ", z);
 	}
 	for (u = 0; u < n; u ++) {
 		z = fpr_rint(t1[u]) & 1;
@@ -245,7 +245,6 @@ sample_short(void *samp_ctx, int8_t *restrict x0, int8_t *restrict x1,
 		z = 2*mkgauss(samp_ctx, logn, z) - z;
 		x1[u] = (int8_t) z;
 		norm += z*z;
-		// printf("%d ", z);
 	}
 
 	/*
@@ -286,7 +285,6 @@ do_sign(void *samp_ctx, int16_t *restrict s1,
 
 	if (!sample_short(samp_ctx, x0, x1, f, g, hm, isigma_sig, bound, logn,
 			(uint8_t *)(x1 + n))) {
-		printf("ERR\n");
 		return 0;
 	}
 
