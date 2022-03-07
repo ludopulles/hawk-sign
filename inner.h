@@ -407,26 +407,61 @@ int Zf(gaussian0_sampler)(prng *p);
  * Coding & decoding (compress.c)
  */
 
+/*
+ * Encodes the NTRU-basis which is the private key of the signature scheme,
+ * with an efficient encoding. The smallest private key is obtained by storing
+ * the seed for the key generation, while the largest is storing the basis as
+ * 16bit integers. Here, a middle-way is chosen.
+ */
 size_t
 Zf(encode_seckey)(void *out, size_t max_out_len,
 	const int8_t *f, const int8_t *g, const int8_t *F, const int8_t *G,
 	unsigned logn);
 
+/*
+ * Encode the Gram matrix of the NTRU-basis with determinant 1.
+ */
 size_t
 Zf(encode_pubkey)(void *out, size_t max_out_len,
 	const int16_t *q00, const int16_t *q10, unsigned logn);
 
+/*
+ * Decode the Gram matrix of the NTRU-basis with determinant 1.
+ * The q11 can be recovered by q11 = (1 + q10 q10^*) / q00.
+ */
 size_t
 Zf(decode_pubkey)(int16_t *q00, int16_t *q10,
+	const void *in, size_t max_in_len, unsigned logn);
+
+/*
+ * Encode a signature s1 by output 'lo_bits' bits of the lowest signficant bits
+ * of x[i] and using unary for the other most significant bits.
+ */
+size_t
+Zf(encode_sig)(void *out, size_t max_out_len, const int16_t *x,
+	unsigned logn, size_t lo_bits);
+
+/*
+ * Decode a signature s1.
+ */
+size_t
+Zf(decode_sig)(int16_t *x, const void *in, size_t max_in_len, unsigned logn,
+	size_t lo_bits);
+
+/*
+ * TODO: remove Huffman-table compression
+ */
+size_t
+Zf(encode_pubkey_huffman)(void *out, size_t max_out_len,
+	const int16_t *q00, const int16_t *q10, unsigned logn);
+
+size_t
+Zf(decode_pubkey_huffman)(int16_t *q00, int16_t *q10,
 	const void *in, size_t max_in_len, unsigned logn);
 
 size_t
 Zf(encode_sig_huffman)(void *out, size_t max_out_len, const int16_t *x,
 	unsigned logn);
-
-size_t
-Zf(encode_sig)(void *out, size_t max_out_len, const int16_t *x,
-	unsigned logn, size_t lo_bits);
 
 /* ==================================================================== */
 /*

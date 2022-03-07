@@ -127,7 +127,7 @@ init_huffman_trees() {
 }
 
 size_t
-Zf(encode_pubkey)(void *out, size_t max_out_len,
+Zf(encode_pubkey_huffman)(void *out, size_t max_out_len,
 	const int16_t *q00, const int16_t *q10, unsigned logn)
 {
 	uint8_t *buf;
@@ -238,13 +238,12 @@ Zf(encode_pubkey)(void *out, size_t max_out_len,
 }
 
 size_t
-Zf(decode_pubkey)(int16_t *q00, int16_t *q10,
+Zf(decode_pubkey_huffman)(int16_t *q00, int16_t *q10,
 	const void *in, size_t max_in_len, unsigned logn)
 {
 	const uint8_t *buf;
 	size_t n, u, v;
 	uint8_t acc, acc_len;
-
 
 #define ENSUREBIT()                                                      \
 	if (acc_len == 0) {                                                  \
@@ -344,8 +343,9 @@ Zf(decode_pubkey)(int16_t *q00, int16_t *q10,
 	if ((acc & ((1u << acc_len) - 1u)) != 0) {
 		return 0;
 	}
-
 	return v;
+#undef ENSUREBIT
+#undef GETBIT
 }
 
 /* see inner.h */
@@ -422,11 +422,313 @@ Zf(encode_sig_huffman)(
 }
 
 
+/* =============================================================================
+ * Encoding/decoding that will be used with the signature scheme, as the gain of
+ * a Huffman table is not significant but makes the code more complex.
+ */
+
 /* see inner.h */
 size_t
-Zf(encode_sig)(
-	void *out, size_t max_out_len,
-	const int16_t *x, unsigned logn, size_t lo_bits)
+Zf(encode_pubkey)(void *out, size_t max_out_len,
+	const int16_t *q00, const int16_t *q10, unsigned logn)
+{
+	uint8_t *buf;
+	size_t n, u, v;
+	uint32_t acc;
+	unsigned acc_len;
+
+	n = (size_t)1 << logn;
+	buf = (uint8_t *)out;
+
+	/*
+	 * Make sure coefficient 1 up to n/2 of q00 are within the -512..+511
+	 * range. Moreover, we silently assume q00 is self adjoint.
+	 */
+	for (u = 1; u < n/2; u ++) {
+		if (q00[u] < -512 || q00[u] >= 512) {
+			return 0;
+		}
+	}
+
+	/*
+	 * Make sure all coefficients of q10 are within the -4096..+4095 range.
+	 */
+	for (u = 0; u < n; u ++) {
+		if (q10[u] < -4096 || q10[u] >= 4096) {
+			return 0;
+		}
+	}
+
+	acc = 0;
+	acc_len = 0;
+	v = 0;
+
+
+	/**
+	 * Encode q00.
+	 * The first value of q00 is of the order sigma_kg^2 2n,
+	 * but definitely < 2^16 when sigma_kg = 1.425 and n = 512, by the standard
+	 * Laurent-Massart bound (see https://en.wikipedia.org/wiki/Chi-squared_distribution#Concentration).
+	 */
+	if (buf != NULL) {
+		if (max_out_len < 2) return 0;
+		buf[0] = (uint8_t)q00[0];
+		buf[1] = ((uint16_t)q00[0]) >> 8;
+	}
+	v += 2;
+	for (u = 1; u < n/2; u ++) {
+		uint16_t w;
+
+		/*
+		 * Push the sign bit and store |x| - [x<0] in w.
+		 * Note that x = 1,0,-1,-2,... give value for w of 1,0,0,1,... resp.
+		 */
+		w = (uint16_t) q00[u];
+		acc = (acc << 1) | (w >> 15);
+		w ^= -(w >> 15);
+
+		/*
+		 * Push the low 5 bits of w.
+		 */
+		acc = (acc << 5) | (w & 31);
+		w >>= 5;
+		acc_len += 6;
+
+		/*
+		 * Push as many zeros as necessary, then a one. Since the absolute
+		 * value is at most 511, w can only range up to 15 at this point, thus
+		 * we will add at most 16 bits here. With the 6 bits above and possibly
+		 * up to 7 bits from previous iterations, we may go up to 28 bits,
+		 * which will fit in the accumulator, which is an uint32_t.
+		 */
+		acc <<= (w + 1);
+		acc |= 1;
+		acc_len += w + 1;
+
+		/*
+		 * Produce all full bytes.
+		 */
+		while (acc_len >= 8) {
+			acc_len -= 8;
+			if (buf != NULL) {
+				if (v >= max_out_len) {
+					return 0;
+				}
+				buf[v] = (uint8_t)(acc >> acc_len);
+			}
+			v ++;
+		}
+	}
+
+	/**
+	 * Encode q10.
+	 */
+	for (u = 0; u < n; u ++) {
+		uint16_t w;
+
+		/*
+		 * Push the sign bit and store |x| - [x<0] in w.
+		 * Note that x = 1,0,-1,-2,... give value for w of 1,0,0,1,... resp.
+		 */
+		w = (uint16_t) q10[u];
+		acc = (acc << 1) | (w >> 15);
+		w ^= -(w >> 15);
+
+		/*
+		 * Push the low 8 bits of w.
+		 */
+		acc = (acc << 8) | (w & 255);
+		w >>= 8;
+		acc_len += 9;
+
+		/*
+		 * Push as many zeros as necessary, then a one. Since the initial w is
+		 * at most 4095, w can only range up to 15 at this point, thus we will
+		 * add at most 16 bits here. With the 9 bits above and possibly up to 7
+		 * bits from previous iterations, we may go up to 32 bits, which will
+		 * fit in the accumulator, which is an uint32_t.
+		 */
+		acc <<= (w + 1);
+		acc |= 1;
+		acc_len += w + 1;
+
+		/*
+		 * Produce all full bytes.
+		 */
+		while (acc_len >= 8) {
+			acc_len -= 8;
+			if (buf != NULL) {
+				if (v >= max_out_len) {
+					return 0;
+				}
+				buf[v] = (uint8_t)(acc >> acc_len);
+			}
+			v ++;
+		}
+	}
+
+	/*
+	 * Flush remaining bits (if any).
+	 */
+	if (acc_len > 0) {
+		if (buf != NULL) {
+			if (v >= max_out_len) {
+				return 0;
+			}
+			buf[v] = (uint8_t)(acc << (8 - acc_len));
+		}
+		v ++;
+	}
+
+	return v;
+}
+
+/* see inner.h */
+size_t
+Zf(decode_pubkey)(int16_t *q00, int16_t *q10,
+	const void *in, size_t max_in_len, unsigned logn)
+{
+	const uint8_t *buf;
+	size_t n, u, v;
+	uint16_t acc;
+	unsigned acc_len;
+
+#define ENSUREBIT()                                                      \
+	if (acc_len == 0) {                                                  \
+		if (v >= max_in_len) return 0; /* not enough bits */             \
+		acc = buf[v++];                                                  \
+		acc_len = 8;                                                     \
+	}
+
+#define GETBIT() ((acc >> (--acc_len)) & 1)
+
+	buf = (uint8_t *)in;
+	n = MKN(logn);
+	acc = acc_len = 0;
+
+	/*
+	 * Decode q00.
+	 * First read q00[0].
+	 */
+	if (max_in_len < 2) {
+		return 0;
+	}
+	q00[0] = ((uint16_t)buf[1] << 8) | (uint16_t) buf[0];
+	v = 2;
+
+	/*
+	 * Read q00[1] ... q00[n/2 - 1].
+	 */
+	for (u = 1; u < n/2; u ++) {
+		uint16_t s, w;
+
+		/*
+		 * Get sign of the current coefficient
+		 */
+		ENSUREBIT();
+		s = GETBIT();
+
+		if (acc_len < 5) {
+			if (v >= max_in_len) {
+				return 0;
+			}
+			acc = (acc << 8) | buf[v ++];
+			acc_len += 8;
+		}
+
+		/*
+		 * Get 5 least significant bits of w.
+		 */
+		w = (acc >> (acc_len -= 5)) & 31;
+
+		/*
+		 * Recover the most significant bits of w: count number of consecutive
+		 * zeros up to the first 1 and add 2^5 to w for each one you see.
+		 */
+		for (;;) {
+			ENSUREBIT();
+			if (GETBIT() != 0) {
+				break;
+			}
+			w += 32;
+			if (w >= 512) {
+				return 0;
+			}
+		}
+
+		q00[u] = w ^ -s;
+	}
+
+	/*
+	 * Since q00 is self-adjoint, we can recover q00[n / 2] ... q00[n - 1]
+	 * now.
+	 */
+	q00[n/2] = 0;
+	for (u = n/2 + 1; u < n; u ++) {
+		q00[u] = -q00[n - u];
+	}
+
+	/**
+	 * Decode q10.
+	 */
+	for (u = 0; u < n; u ++) {
+		uint16_t s, w;
+
+		/*
+		 * Get sign of the current coefficient
+		 */
+		ENSUREBIT();
+		s = GETBIT();
+
+		/*
+		 * Get next eight bits that make up the lowest significant bits of w.
+		 */
+		if (acc_len < 8) {
+			// should be true all the time
+			if (v >= max_in_len) return 0;
+			acc = (acc << 8) | buf[v ++];
+			acc_len += 8;
+		}
+
+		/*
+		 * Get 8 least significant bits of w.
+		 */
+		w = (acc >> (acc_len -= 8)) & 255;
+
+		/*
+		 * Recover the most significant bits of w: count number of consecutive
+		 * zeros up to the first 1 and add 2^8 to w for each one you see.
+		 */
+		for (;;) {
+			ENSUREBIT();
+			if (GETBIT() != 0) {
+				break;
+			}
+			w += 256;
+			if (w >= 4096) {
+				return 0;
+			}
+		}
+
+		q10[u] = w ^ -s;
+	}
+
+	/*
+	 * Unused bits in the last byte must be zero.
+	 */
+	if ((acc & ((1u << acc_len) - 1u)) != 0) {
+		return 0;
+	}
+
+	return v;
+#undef ENSUREBIT
+#undef GETBIT
+}
+
+/* see inner.h */
+size_t
+Zf(encode_sig)(void *out, size_t max_out_len, const int16_t *x, unsigned logn,
+	size_t lo_bits)
 {
 	uint8_t *buf;
 	size_t n, u, v;
@@ -437,24 +739,26 @@ Zf(encode_sig)(
 	buf = (uint8_t *)out;
 
 	/*
-	 * Make sure that all values are within the -511..+511 range.
+	 * Make sure that all values are within the -512..+511 range.
 	 */
 	for (u = 0; u < n; u ++)
-		if (x[u] <= -512 || x[u] >= 512) return 0;
+		if (x[u] < -512 || x[u] >= 512) return 0;
 
 	acc = 0;
 	acc_len = 0;
 	v = 0;
 	for (u = 0; u < n; u ++) {
-		unsigned w;
+		uint16_t w;
+
 		/*
 		 * Push sign bit
 		 */
-		acc = (acc << 1) | ((uint16_t)x[u] >> 15);
-		w = (unsigned)(x[u] < 0 ? (-x[u] - 1) : x[u]);
+		w = (uint16_t) x[u];
+		acc = (acc << 1) | (w >> 15);
+		w ^= -(w >> 15);
 
 		/*
-		 * Push the lowest `lo_bits` bits of the absolute value.
+		 * Push the lowest `lo_bits` bits of w which is equal to |x| - [x < 0].
 		 */
 		acc <<= lo_bits;
 		acc |= w & ((1U << lo_bits) - 1);
@@ -463,12 +767,11 @@ Zf(encode_sig)(
 
 		/*
 		 * TODO: assume lo_bits = 5 in the thing below.
-		 * Push as many zeros as necessary, then a one. Since the absolute
-		 * value is at most 511, w can only range up to 15 at this point,
-		 * thus we will add at most 16 bits here. With the 6 bits above
-		 * and possibly up to 7 bits from previous iterations, we may go
-		 * up to 29 bits, which will fit in the accumulator, which is an
-		 * uint32_t.
+		 * Push as many zeros as necessary, then a one. Since the initial w is
+		 * at most 511, w can only range up to 15 at this point, thus we will
+		 * add at most 16 bits here. With the 6 bits above and possibly up to 7
+		 * bits from previous iterations, we may go up to 29 bits, which will
+		 * fit in the accumulator, which is an uint32_t.
 		 */
 		acc <<= (w + 1);
 		acc |= 1;
@@ -508,6 +811,84 @@ Zf(encode_sig)(
 	return v;
 }
 
+size_t
+Zf(decode_sig)(int16_t *x, const void *in, size_t max_in_len, unsigned logn,
+	size_t lo_bits)
+{
+	const uint8_t *buf;
+	size_t n, u, v;
+	uint16_t acc;
+	unsigned acc_len;
+
+#define ENSUREBIT()                                                      \
+	if (acc_len == 0) {                                                  \
+		if (v >= max_in_len) return 0; /* not enough bits */             \
+		acc = buf[v++];                                                  \
+		acc_len = 8;                                                     \
+	}
+
+#define GETBIT() ((acc >> (--acc_len)) & 1)
+
+	buf = (uint8_t *)in;
+	n = MKN(logn);
+	acc = 0;
+	acc_len = 0;
+	v = 0;
+
+	for (u = 0; u < n; u ++) {
+		uint16_t s, w;
+
+		/*
+		 * Get sign of the current coefficient
+		 */
+		ENSUREBIT();
+		s = GETBIT();
+
+		/*
+		 * Get next lo_bits bits that make up the lowest significant bits of w.
+		 */
+		if (acc_len < lo_bits) {
+			// should be true all the time
+			if (v >= max_in_len) return 0;
+			acc = (acc << 8) | buf[v ++];
+			acc_len += 8;
+		}
+
+		/*
+		 * Get lo_bits least significant bits of w.
+		 */
+		w = (acc >> (acc_len -= lo_bits)) & ((1U << lo_bits) - 1);
+
+		/*
+		 * Recover the most significant bits of w: count number of consecutive
+		 * zeros up to the first 1 and add 2^lo_bits to w for each one you see.
+		 */
+		for (;;) {
+			ENSUREBIT();
+			if (GETBIT() != 0) {
+				break;
+			}
+			w += (1U << lo_bits);
+			if (w >= 512) {
+				return 0;
+			}
+		}
+
+		x[u] = w ^ -s;
+	}
+
+	/*
+	 * Unused bits in the last byte must be zero.
+	 */
+	if ((acc & ((1u << acc_len) - 1u)) != 0) {
+		return 0;
+	}
+
+	return v;
+#undef ENSUREBIT
+#undef GETBIT
+}
+
 static size_t
 poly_enc(uint8_t *buf, size_t max_out_len, uint64_t acc,
 	size_t acc_len, size_t v, const int8_t *x, unsigned logn,
@@ -517,12 +898,14 @@ poly_enc(uint8_t *buf, size_t max_out_len, uint64_t acc,
 
 	n = MKN(logn);
 	for (u = 0; u < n; u ++) {
-		unsigned w;
+		uint8_t w;
+
 		/*
 		 * Push sign bit
 		 */
-		acc = (acc << 1) | ((uint8_t)x[u] >> 7);
-		w = (unsigned)(x[u] < 0 ? (-x[u] - 1) : x[u]);
+		w = (uint8_t) x[u];
+		acc = (acc << 1) | (w >> 7);
+		w ^= -(w >> 7);
 
 		/*
 		 * Push the lowest `lo_bits` bits of |x[u]|.
@@ -532,21 +915,20 @@ poly_enc(uint8_t *buf, size_t max_out_len, uint64_t acc,
 		w >>= lo_bits;
 		acc_len += lo_bits + 1;
 
-		if (acc_len + w + 1 > 64) return 0;
-
 		/*
 		 * TODO: fix the numbers in this documentation.
 		 *
-		 * Push as many zeros as necessary, then a one. Since the
-		 * absolute value is at most 2047, w can only range up to
-		 * 15 at this point, thus we will add at most 16 bits
-		 * here. With the 8 bits above and possibly up to 7 bits
-		 * from previous iterations, we may go up to 31 bits, which
-		 * will fit in the accumulator, which is an uint64_t.
+		 * Push as many zeros as necessary, then a one. Since the initial w is
+		 * at most 2047, w can only range up to 15 at this point, thus we will
+		 * add at most 16 bits here. With the 8 bits above and possibly up to 7
+		 * bits from previous iterations, we may go up to 31 bits, which will
+		 * fit in the accumulator, which is an uint64_t.
 		 */
 		acc <<= (w + 1);
 		acc |= 1;
 		acc_len += w + 1;
+
+		if (acc_len > 64) return 0;
 
 		/*
 		 * Produce all full bytes.

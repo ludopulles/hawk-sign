@@ -3,7 +3,7 @@
 
 CC = c99
 #CFLAGS = -W -Wall -Wshadow -O3 -march=native
-CFLAGS = -W -Wall -Wshadow -O2 -mavx2
+CFLAGS = -W -Wall -Wshadow -O2 -mavx2 -fdiagnostics-color=always
 #CFLAGS = -W -Wall -Wshadow -g -fsanitize=address,undefined
 LIBS = -lpthread -lm
 CXX = g++

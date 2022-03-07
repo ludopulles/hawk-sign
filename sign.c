@@ -158,7 +158,7 @@ mkgauss(void *samp_ctx, unsigned logn, uint8_t double_mu)
 		val += *(int32_t *)&v;
 
 		/*
-		 * In this case that this code is run multiple times, we want to use
+		 * In the case that this code is run multiple times, we want to use
 		 * center mu = 0 in the other runs (g > 0), as to not change the center
 		 * and only scale the standard deviation. However, we might be a bit off
 		 * since sum of discrete gaussians might not be a discrete gaussian (it
