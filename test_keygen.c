@@ -423,7 +423,7 @@ keygen_count_fails(inner_shake256_context *rng,
 	int8_t *restrict f, int8_t *restrict g, // secret key
 	int8_t *restrict F, int8_t *restrict G, // secret key
 	fpr *restrict q00, fpr *restrict q10, fpr *restrict q11, // public key
-	fpr isigma_kg, unsigned logn, uint8_t *restrict tmp, int *num_fails)
+	unsigned logn, uint8_t *restrict tmp, int *num_fails)
 {
 	size_t n = MKN(logn);
 	for (;;) {
@@ -433,8 +433,8 @@ keygen_count_fails(inner_shake256_context *rng,
 		spc.sigma_min = fpr_sigma_min[logn];
 		Zf(prng_init)(&spc.p, rng);
 		samp_ctx = &spc;
-		poly_small_mkgauss(samp_ctx, f, logn, isigma_kg, 128);
-		poly_small_mkgauss(samp_ctx, g, logn, isigma_kg, 128);
+		poly_small_mkgauss(samp_ctx, f, logn, 128);
+		poly_small_mkgauss(samp_ctx, g, logn, 128);
 		if (!solve_NTRU(logn, F, G, f, g, 128, (uint32_t *)tmp)) {
 			(*num_fails)++;
 			continue;
@@ -470,7 +470,7 @@ keygen_count_fails(inner_shake256_context *rng,
 // =============================================================================
 const size_t logn = 9, n = MKN(logn);
 
-void measure_keygen(fpr isigma_kg) {
+void measure_keygen() {
 	uint8_t b[48 << logn];
 	int8_t f[n], g[n], F[n], G[n];
 	fpr q00[n], q10[n], q11[n];
@@ -497,7 +497,7 @@ void measure_keygen(fpr isigma_kg) {
 	int fails = 0;
 	for (int i = 0; i < n_repetitions; i++) {
 		// Generate key pair.
-		keygen_count_fails(&sc, f, g, F, G, q00, q10, q11, isigma_kg, logn, b, &fails);
+		keygen_count_fails(&sc, f, g, F, G, q00, q10, q11, logn, b, &fails);
 
 		Zf(iFFT)(q00, logn);
 		Zf(iFFT)(q10, logn);
@@ -550,11 +550,6 @@ void measure_keygen(fpr isigma_kg) {
 	printf("cq10 | %.1f (%.1f)\n", avg, std);
 }
 
-int8_t valid_sigma(fpr sigma_sig) {
-	return !fpr_lt(sigma_sig, fpr_sigma_min[logn])
-		&& fpr_lt(sigma_sig, fpr_div(fpr_of(18205), fpr_of(10000)));
-}
-
 int main() {
 	// set seed
 	struct timeval tv;
@@ -564,10 +559,6 @@ int main() {
 	srand(seed);
 
 	init_huffman_trees();
-
-	const fpr sigma_kg  = fpr_div(fpr_of(1425), fpr_of(1000));
-	assert(valid_sigma(sigma_kg));
-	fpr isigma_kg = fpr_inv(sigma_kg);
-	measure_keygen(isigma_kg);
+	measure_keygen();
 	return 0;
 }

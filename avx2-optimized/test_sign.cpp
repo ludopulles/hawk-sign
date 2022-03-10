@@ -46,14 +46,16 @@ ll time_diff(const struct timeval *begin, const struct timeval *end) {
 /* Should be moved to vrfy.c */
 /* Requires space for 6 polynomials of size 2^logn */
 int
-Zf(verify_nearest_plane_tree)(const fpr *restrict tree, const int8_t *restrict hm,
-	const int16_t *restrict s1, const fpr *restrict q00, const fpr *restrict q10,
-	const fpr *restrict q11, uint32_t bound, unsigned logn, uint8_t *restrict tmp)
+Zf(verify_nearest_plane_tree)(const fpr *restrict tree,
+	const int8_t *restrict h0, const int8_t *restrict h1,
+	const int16_t *restrict s1,
+	const fpr *restrict q00, const fpr *restrict q10, const fpr *restrict q11,
+	uint32_t bound, unsigned logn, uint8_t *restrict tmp)
 {
 	/*
 	 * This works better than simple rounding.
 	 * Reconstruct s0, by running Babai's NP algorithm with target
-	 *     h/2 - s1 q10 / * q00.
+	 *     h0/2 + (h1/2 - s1) q10 / q00.
 	 */
 
 	size_t n, u;
@@ -66,10 +68,10 @@ Zf(verify_nearest_plane_tree)(const fpr *restrict tree, const int8_t *restrict h
 	t3 = t2 + n;
 
 	for (u = 0; u < n; u ++) {
-		t0[u] = fpr_half(fpr_of(hm[u] & 1));
+		t0[u] = fpr_half(fpr_of(h0[u] & 1));
 	}
 	for (u = 0; u < n; u ++) {
-		t1[u] = fpr_of(s1[u]);
+		t1[u] = fpr_half(fpr_of((h1[u] & 1) - 2 * s1[u]));
 	}
 
 	Zf(FFT)(t0, logn);
@@ -77,21 +79,20 @@ Zf(verify_nearest_plane_tree)(const fpr *restrict tree, const int8_t *restrict h
 	memcpy(t2, t1, n * sizeof *t1);
 	Zf(poly_mul_fft)(t2, q10, logn);
 	Zf(poly_div_fft)(t2, q00, logn);
-	Zf(poly_sub)(t2, t0, logn); // t2 = s1 q10/q00 - (h%2)/2
-	Zf(poly_neg)(t2, logn); // t2 = (h%2)/2 - s1 q10/q00
+	Zf(poly_add)(t2, t0, logn); // t2 = h0/2 + (h1/2 - s1) q10/q00
 
 	// Run Babai with target t2 and Gram-matrix q00.
 	Zf(ffNearestPlane_tree)(t3, tree, t2, logn, t3 + n);
 
-	Zf(poly_sub)(t3, t0, logn);
-	Zf(poly_mulconst)(t3, fpr_two, logn);
-	// t0 = 2 * (t3 - t0) = 2 s0 - (h%2)
+	Zf(poly_sub)(t0, t3, logn);
+	Zf(poly_mulconst)(t0, fpr_two, logn);
+	// t0 = 2 * (t0 - t3) = h0 - 2 s0
 	Zf(poly_mulconst)(t1, fpr_two, logn);
-	// t1 = 2 * s1
+	// t1 = h1 - 2 s1
 
 	// Currently in memory: s0, s1, s1, s0 (in FFT representation)
 	memcpy(t2, t1, n * sizeof *t0);
-	memcpy(t0, t3, n * sizeof *t3);
+	memcpy(t3, t0, n * sizeof *t0);
 
 	// Compute s0 q00 s0* + s0 q01 s1* + s1 q10 s0* + s1 q11 s1*
 	Zf(poly_mulselfadj_fft)(t2, logn);
@@ -142,16 +143,16 @@ void output_poly(int16_t *x)
 	printf("\n");
 }
 
-const int num_samples = 1024;
+const int num_samples = 4 * 1024;
 
-int8_t pregen_h[num_samples][n];
+int8_t pregen_h0[num_samples][n], pregen_h1[num_samples][n];
 int16_t pregen_s0[num_samples][n], pregen_s1[num_samples][n];
 
-void measure_sign_speed(fpr isigma_kg, fpr isigma_sig, uint32_t bound)
+void measure_sign_speed(uint32_t bound)
 {
 	// uint8_t b[42 << logn];
-	uint8_t b[48 << logn];
-	int8_t f[n], g[n], F[n], G[n], h[n];
+	uint8_t b[50 << logn];
+	int8_t f[n], g[n], F[n], G[n];
 	int16_t s1[n];
 	fpr q00[n], q10[n], q11[n];
 	unsigned char seed[48];
@@ -165,32 +166,31 @@ void measure_sign_speed(fpr isigma_kg, fpr isigma_sig, uint32_t bound)
 	inner_shake256_flip(&sc);
 
 	// One key generation
-	Zf(keygen)(&sc, f, g, F, G, q00, q10, q11, isigma_kg, logn, b);
+	Zf(keygen)(&sc, f, g, F, G, q00, q10, q11, logn, b);
 
 	for (int rep = 0; rep < num_samples; rep++) {
-		random_hash(pregen_h[rep], logn);
+		random_hash(pregen_h0[rep], logn);
+		random_hash(pregen_h1[rep], logn);
 	}
 
 	// Also pregenerate all signatures
 	gettimeofday(&t0, NULL);
 	for (int rep = 0; rep < num_samples; rep++) {
-		Zf(complete_sign)(&sc, pregen_s0[rep], pregen_s1[rep], f, g, F, G, pregen_h[rep], isigma_sig, bound, logn, b);
+		Zf(complete_sign)(&sc, pregen_s0[rep], pregen_s1[rep], f, g, F, G, pregen_h0[rep], pregen_h1[rep], bound, logn, b);
 	}
 	gettimeofday(&t1, NULL);
 	ll cs_us = time_diff(&t0, &t1);
 
 	gettimeofday(&t0, NULL);
 	for (int rep = 0; rep < num_samples; rep++) {
-		random_hash(h, logn);
-		Zf(sign)(&sc, s1, f, g, pregen_h[rep], isigma_sig, bound, logn, b);
+		Zf(sign)(&sc, s1, f, g, F, G, pregen_h0[rep], pregen_h1[rep], bound, logn, b);
 	}
 	gettimeofday(&t1, NULL);
 	ll  s_us = time_diff(&t0, &t1);
 
 	gettimeofday(&t0, NULL);
 	for (int rep = 0; rep < num_samples; rep++) {
-		random_hash(h, logn);
-		Zf(guaranteed_sign)(&sc, s1, f, g, q00, pregen_h[rep], isigma_sig, bound, logn, b);
+		Zf(guaranteed_sign)(&sc, s1, f, g, F, G, q00, pregen_h0[rep], pregen_h1[rep], bound, logn, b);
 	}
 	gettimeofday(&t1, NULL);
 	ll gs_us = time_diff(&t0, &t1);
@@ -203,7 +203,7 @@ void measure_sign_speed(fpr isigma_kg, fpr isigma_sig, uint32_t bound)
 	int nr_cor = 0;
 	gettimeofday(&t0, NULL);
 	for (int rep = 0; rep < num_samples; rep++)
-		nr_cor += Zf(complete_verify)(pregen_h[rep], pregen_s0[rep], pregen_s1[rep], q00, q10, q11, bound, logn, b);
+		nr_cor += Zf(complete_verify)(pregen_h0[rep], pregen_h1[rep], pregen_s0[rep], pregen_s1[rep], q00, q10, q11, bound, logn, b);
 	gettimeofday(&t1, NULL);
 	ll cv_us = time_diff(&t0, &t1);
 
@@ -211,7 +211,7 @@ void measure_sign_speed(fpr isigma_kg, fpr isigma_sig, uint32_t bound)
 	nr_cor = 0;
 	gettimeofday(&t0, NULL);
 	for (int rep = 0; rep < num_samples; rep++) {
-		nr_cor += Zf(verify_simple_rounding)(pregen_h[rep], pregen_s0[rep], pregen_s1[rep], q00, q10, q11, bound, logn, b);
+		nr_cor += Zf(verify_simple_rounding)(pregen_h0[rep], pregen_h1[rep], pregen_s0[rep], pregen_s1[rep], q00, q10, q11, bound, logn, b);
 	}
 	gettimeofday(&t1, NULL);
 	ll vsr_us = time_diff(&t0, &t1);
@@ -220,7 +220,7 @@ void measure_sign_speed(fpr isigma_kg, fpr isigma_sig, uint32_t bound)
 	nr_cor = 0;
 	gettimeofday(&t0, NULL);
 	for (int rep = 0; rep < num_samples; rep++) {
-		nr_cor += Zf(verify_nearest_plane)(pregen_h[rep], pregen_s0[rep], pregen_s1[rep], q00, q10, q11, bound, logn, b);
+		nr_cor += Zf(verify_nearest_plane)(pregen_h0[rep], pregen_h1[rep], pregen_s0[rep], pregen_s1[rep], q00, q10, q11, bound, logn, b);
 	}
 	gettimeofday(&t1, NULL);
 	ll vnp_us = time_diff(&t0, &t1);
@@ -233,7 +233,7 @@ void measure_sign_speed(fpr isigma_kg, fpr isigma_sig, uint32_t bound)
 	nr_cor = 0;
 	gettimeofday(&t0, NULL);
 	for (int rep = 0; rep < num_samples; rep++) {
-		nr_cor += Zf(verify_nearest_plane_tree)(tree, pregen_h[rep], pregen_s1[rep], q00, q10, q11, bound, logn, b);
+		nr_cor += Zf(verify_nearest_plane_tree)(tree, pregen_h0[rep], pregen_h1[rep], pregen_s1[rep], q00, q10, q11, bound, logn, b);
 	}
 	gettimeofday(&t1, NULL);
 	ll vnpt_us = time_diff(&t0, &t1);
@@ -262,10 +262,10 @@ struct WorkerResult {
 	}
 };
 
-WorkerResult measure_signatures(fpr isigma_kg, fpr isigma_sig, uint32_t bound)
+WorkerResult measure_signatures(uint32_t bound)
 {
 	uint8_t b[42 << logn];
-	int8_t f[n], g[n], F[n], G[n], h[n];
+	int8_t f[n], g[n], F[n], G[n], h0[n], h1[n];
 	int16_t recs0[n], s1[n];
 	fpr q00[n], q10[n], q11[n];
 	unsigned char seed[48];
@@ -284,19 +284,20 @@ WorkerResult measure_signatures(fpr isigma_kg, fpr isigma_sig, uint32_t bound)
 	for (int rep = 0; rep < num_reps; rep++) {
 		// Generate key pair.
 		if ((rep & 1023) == 0)
-			Zf(keygen)(&sc, f, g, F, G, q00, q10, q11, isigma_kg, logn, b);
+			Zf(keygen)(&sc, f, g, F, G, q00, q10, q11, logn, b);
 
 		// make a signature of a random message...
-		random_hash(h, logn);
+		random_hash(h0, logn);
+		random_hash(h1, logn);
 
 		// Compute the signature.
-		// Zf(complete_sign)(&sc, recs0, s1, f, g, F, G, h, isigma_sig, bound, logn, b);
-		// Zf(sign)(&sc, s1, f, g, h, isigma_sig, bound, logn, b);
-		Zf(guaranteed_sign)(&sc, s1, f, g, q00, h, isigma_sig, bound, logn, b);
+		// Zf(complete_sign)(&sc, recs0, s1, f, g, F, G, h0, h1, bound, logn, b);
+		// Zf(sign)(&sc, s1, f, g, h0, h1, bound, logn, b);
+		Zf(guaranteed_sign)(&sc, s1, f, g, F, G, q00, h0, h1, bound, logn, b);
 
-		if (!Zf(verify_nearest_plane)(h, recs0, s1, q00, q10, q11, bound, logn, b))
+		if (!Zf(verify_nearest_plane)(h0, h1, recs0, s1, q00, q10, q11, bound, logn, b))
 			result.babai_fail++;
-		assert(Zf(verify_simple_rounding)(h, recs0, s1, q00, q10, q11, bound, logn, b));
+		assert(Zf(verify_simple_rounding)(h0, h1, recs0, s1, q00, q10, q11, bound, logn, b));
 
 		size_t sig_sz = Zf(encode_sig)(NULL, 0, s1, logn, 5);
 		if (sig_sz == 0) {
@@ -321,7 +322,7 @@ constexpr fpr verif_margin = { v: 1.1 };
 void work()
 {
 	uint32_t bound = fpr_floor(fpr_mul(fpr_sqr(fpr_mul(verif_margin, fpr_double(sigma_sig))), fpr_double(fpr_of(n))));
-	WorkerResult result = measure_signatures(fpr_inv(sigma_kg), fpr_inv(sigma_sig), bound);
+	WorkerResult result = measure_signatures(bound);
 
 	{
 		std::lock_guard<std::mutex> guard(mx);
@@ -338,7 +339,7 @@ int main() {
 	srand(seed);
 
 	uint32_t bound = fpr_floor(fpr_mul(fpr_sqr(fpr_mul(verif_margin, fpr_double(sigma_sig))), fpr_double(fpr_of(n))));
-	measure_sign_speed(fpr_inv(sigma_kg), fpr_inv(sigma_sig), bound);
+	measure_sign_speed(bound);
 	return 0;
 
 	const int nthreads = 4;

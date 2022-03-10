@@ -449,7 +449,7 @@ improveq10:
 	}
 }
 
-WorkerResult measure_keygen(fpr isigma_kg)
+WorkerResult measure_keygen()
 {
 	union { // use union to ensure alignment
 		uint8_t b[28*512]; // 14 kB temporary memory, 17.5 kB total
@@ -478,7 +478,7 @@ WorkerResult measure_keygen(fpr isigma_kg)
 	gettimeofday(&t0, NULL);
 	for (int _ = 0; _ < n_repetitions; _++) {
 		// Generate key pair.
-		Zf(keygen)(&sc, f, g, F, G, q00, q10, q11, isigma_kg, logn, tmp.b);
+		Zf(keygen)(&sc, f, g, F, G, q00, q10, q11, logn, tmp.b);
 
 		result.num_iters++;
 
@@ -528,19 +528,11 @@ WorkerResult measure_keygen(fpr isigma_kg)
 	return result;
 }
 
-int8_t valid_sigma(fpr sigma_sig)
-{
-	return !fpr_lt(sigma_sig, fpr_sigma_min[logn])
-		&& fpr_lt(sigma_sig, fpr_div(fpr_of(18205), fpr_of(10000)));
-}
-
-constexpr fpr sigma_kg  = { v: 1.425 };
-
 WorkerResult final_result;
 std::mutex final_result_mutex;
 
 void work() {
-	WorkerResult result = measure_keygen(fpr_inv(sigma_kg));
+	WorkerResult result = measure_keygen();
 
 	// acquire mutex:
 	{
@@ -558,8 +550,6 @@ int main()
 	unsigned seed = 1000000 * tv.tv_sec + tv.tv_usec;
 	printf("Seed: %u\n", seed);
 	srand(seed);
-
-	assert(valid_sigma(sigma_kg));
 
 	create_huffman_tree();
 

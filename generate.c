@@ -14,11 +14,6 @@ void randombytes(unsigned char *x, unsigned long long xlen) {
 // =============================================================================
 // | TESTING CODE                                                              |
 // =============================================================================
-int valid_sigma(int logn, fpr sigma_sig) {
-	return !fpr_lt(sigma_sig, fpr_sigma_min[logn])
-		&& fpr_lt(sigma_sig, fpr_div(fpr_of(18205), fpr_of(10000)));
-}
-
 void output_poly(int8_t *p, int logn) {
 	for (size_t u = 0; u < MKN(logn); u++) {
 		if (u) printf(" ");
@@ -49,9 +44,6 @@ int main(int argc, char **argv) {
 	gettimeofday(&tv, NULL);
 	srand(1000000 * tv.tv_sec + tv.tv_usec);
 
-	const fpr sigma_kg = fpr_div(fpr_of(1425), fpr_of(1000));
-	assert(valid_sigma(logn, sigma_kg));
-
 	// Initialize a RNG.
 	randombytes(shakeseed, sizeof shakeseed);
 	inner_shake256_init(&sc);
@@ -59,7 +51,7 @@ int main(int argc, char **argv) {
 	inner_shake256_flip(&sc);
 
 	// Generate key pair.
-	Zf(keygen)(&sc, f, g, F, G, q00, q10, q11, fpr_inv(sigma_kg), logn, b);
+	Zf(keygen)(&sc, f, g, F, G, q00, q10, q11, logn, b);
 
 	// Output secret key (f, g, F, G)
 	output_poly(f, logn);

@@ -10,7 +10,7 @@ CXX = g++
 CXXFLAGS = --std=c++11 $(CFLAGS)
 
 OBJ = build/compress.o build/fft.o build/ffo.o build/fpr.o build/keygen.o build/rng.o build/sampler.o build/shake.o build/sign.o build/vrfy.o
-PROGS = bin/main bin/test_keygen bin/test_sign bin/config_fg bin/config_FG bin/test_babai bin/test_enum bin/test_forge bin/test_compress_sig
+PROGS = bin/main bin/test_keygen bin/test_sign bin/config_fg bin/config_FG bin/test_babai bin/test_enum bin/test_compress_sig
 
 HEAD = fpr.h inner.h
 
@@ -43,8 +43,6 @@ bin/test_babai: test_babai.cpp $(OBJ)
 	$(CXX) $(CXXFLAGS) -o bin/test_babai $(OBJ) test_babai.cpp $(LIBS)
 bin/test_enum: test_enum.cpp $(OBJ)
 	$(CXX) $(CXXFLAGS) -o bin/test_enum $(OBJ) test_enum.cpp $(LIBS)
-bin/test_forge: test_forge.cpp $(OBJ)
-	$(CXX) $(CXXFLAGS) -o bin/test_forge $(OBJ) test_forge.cpp $(LIBS)
 bin/test_compress_sig: test_compress_sig.cpp $(OBJ)
 	$(CXX) $(CXXFLAGS) -o bin/test_compress_sig $(OBJ) test_compress_sig.cpp $(LIBS)
 

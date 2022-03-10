@@ -66,56 +66,62 @@ Zf(poly_add_autoadj_fft)(fpr *a, fpr *b, unsigned logn)
 
 /* see inner.h */
 int
-Zf(complete_verify)(const int8_t *restrict hm,
+Zf(complete_verify)(const int8_t *restrict h0, const int8_t *restrict h1,
 	const int16_t *restrict s0, const int16_t *restrict s1,
 	const fpr *restrict q00, const fpr *restrict q10, const fpr *restrict q11,
 	uint32_t bound, unsigned logn, uint8_t *restrict tmp)
 {
-	size_t u, n;
-	fpr *t0, *t1, *t2, *t3, trace;
+	size_t u, hn, n;
+	fpr *t0, *t1, trace;
 
 	n = MKN(logn);
+	hn = n >> 1;
 	t0 = (fpr *)tmp;
 	t1 = t0 + n;
-	t2 = t1 + n;
-	t3 = t2 + n;
 
 	/**
-	 * Put (e0, e1) = (2 s0 - hm, 2 s1) in FFT representation so we can
+	 * Put (t0, t1) = (2 s0 - h0, 2 s1 - h1) in FFT representation so we can
 	 * calculate the l2-norm wrt Q.
 	 */
 	for (u = 0; u < n; u ++) {
-		t0[u] = fpr_of(2 * s0[u] - (hm[u] & 1));
+		t0[u] = fpr_of(2 * s0[u] - (h0[u] & 1));
 	}
 	for (u = 0; u < n; u ++) {
-		t1[u] = fpr_of(2 * s1[u]);
+		t1[u] = fpr_of(2 * s1[u] - (h1[u] & 1));
 	}
 
 	// Takes 50% of time (2us of 4us):
 	Zf(FFT)(t0, logn);
 	Zf(FFT)(t1, logn);
 
-	// Currently in memory: e0, e1, e1, e0 (in FFT representation)
-	memcpy(t2, t1, n * sizeof *t0);
-	memcpy(t3, t0, n * sizeof *t0);
-
-	// Compute e0 q00 e0* + e0 q01 e1* + e1 q10 e0* + e1 q11 e1*
-	Zf(poly_mulselfadj_fft)(t2, logn);
-	Zf(poly_mulselfadj_fft)(t3, logn);
-	Zf(poly_mul_autoadj_fft)(t2, q11, logn); // t2 = e1 q11 e1*
-	Zf(poly_mul_autoadj_fft)(t3, q00, logn); // t3 = e0 q00 e0*
-	Zf(poly_muladj_fft)(t1, t0, logn); // t1 = e1 e0*
-	Zf(poly_mul_fft)(t1, q10, logn); // t1 = e1 q10 e0*
-
-	Zf(poly_addselfadj_fft)(t1, logn); // t1 = e1 q10 e0* + e0 q01 e1*
-	Zf(poly_add_autoadj_fft)(t1, t2, logn);
-	Zf(poly_add_autoadj_fft)(t1, t3, logn);
-
-	// Calculate the normalized trace of t1 directly by sum t1 under embeddings
-	// divided by n.
 	trace = fpr_zero;
-	for (u = 0; u < n/2; u ++) {
-		trace = fpr_add(trace, t1[u]);
+
+	// Calculate normalized trace( (t0, t1)^* Q (t0, t1) )
+	// Note that the trace is by definition the sum under its n embeddings
+	for (u = 0; u < hn; u ++) {
+		fpr a_re, a_im, b_re, b_im, ab_re, ab_im;
+
+		a_re = t0[u];
+		a_im = t0[u + hn];
+		b_re = t1[u];
+		b_im = t1[u + hn];
+
+		fpr norm0 = fpr_add(fpr_sqr(a_re), fpr_sqr(a_im));
+		fpr norm1 = fpr_add(fpr_sqr(b_re), fpr_sqr(b_im));
+
+		// contribution of t0 Q00 t0*
+		trace = fpr_add(trace, fpr_mul(norm0, q00[u]));
+		// contribution of t1 Q11 t1*
+		trace = fpr_add(trace, fpr_mul(norm1, q11[u]));
+
+		// ab = t1 t0*
+		ab_re = fpr_add(fpr_mul(a_re, b_re), fpr_mul(a_im, b_im));
+		ab_im = fpr_sub(fpr_mul(a_re, b_im), fpr_mul(a_im, b_re));
+
+		// contribution of t1 q10 t0* + t0 q01 t1*
+		trace = fpr_add(trace, fpr_double(
+			fpr_sub(fpr_mul(ab_re, q10[u]), fpr_mul(ab_im, q10[u + hn]))
+		));
 	}
 
 	/*
@@ -123,12 +129,12 @@ Zf(complete_verify)(const int8_t *restrict hm,
 	 */
 	trace = fpr_double(trace);
 	/*
-	 * Renormalize, so we get the norm of (e0, e1) w.r.t Q.
+	 * Renormalize, so we get the geometric norm of (t0, t1) w.r.t Q.
 	 */
 	trace = fpr_div(trace, fpr_of(n));
 
 	/*
-	 * First check whether the norm is in range [0, 2^31].
+	 * First check whether the norm is in range [0, 2^31).
 	 * Signature is valid iff
 	 *     `Tr(s* Q s) / n (=Tr(x^* x)/n = sum_i x_i^2) <= bound`.
 	 */
@@ -138,7 +144,7 @@ Zf(complete_verify)(const int8_t *restrict hm,
 
 /* see inner.h */
 int
-Zf(verify_simple_rounding)(const int8_t *restrict hm,
+Zf(verify_simple_rounding)(const int8_t *restrict h0, const int8_t *restrict h1,
 	int16_t *restrict s0, const int16_t *restrict s1,
 	const fpr *restrict q00, const fpr *restrict q10, const fpr *restrict q11,
 	uint32_t bound, unsigned logn, uint8_t *restrict tmp)
@@ -150,25 +156,25 @@ Zf(verify_simple_rounding)(const int8_t *restrict hm,
 	t0 = (fpr *)tmp;
 
 	for (u = 0; u < n; u ++) {
-		t0[u] = fpr_of(s1[u]);
+		t0[u] = fpr_half(fpr_of((h1[u] & 1) - 2 * s1[u]));
 	}
 
 	Zf(FFT)(t0, logn);
-	Zf(poly_mul_fft)(t0, q10, logn); // s1 q10
-	Zf(poly_div_autoadj_fft)(t0, q00, logn); // s1 q10/q00
+	Zf(poly_mul_fft)(t0, q10, logn); // (h1/2 - s1) q10
+	Zf(poly_div_autoadj_fft)(t0, q00, logn); // (h1/2 - s1) q10/q00
 	Zf(iFFT)(t0, logn);
 
-	// Recover s0 with s0 = round((h%2) / 2 - s1 q10 / q00)
+	// Recover s0 with s0 = round(h0/2 + (h1/2 - s1) q10 / q00)
 	for (u = 0; u < n; u ++) {
-		s0[u] = fpr_rint(fpr_sub(fpr_half(fpr_of(hm[u] & 1)), t0[u]));
+		s0[u] = fpr_rint(fpr_add(fpr_half(fpr_of(h0[u] & 1)), t0[u]));
 	}
 
-	return Zf(complete_verify)(hm, s0, s1, q00, q10, q11, bound, logn, tmp);
+	return Zf(complete_verify)(h0, h1, s0, s1, q00, q10, q11, bound, logn, tmp);
 }
 
 /* see inner.h */
 int
-Zf(verify_nearest_plane)(const int8_t *restrict hm,
+Zf(verify_nearest_plane)(const int8_t *restrict h0, const int8_t *restrict h1,
 	int16_t *restrict s0, const int16_t *restrict s1,
 	const fpr *restrict q00, const fpr *restrict q10, const fpr *restrict q11,
 	uint32_t bound, unsigned logn, uint8_t *restrict tmp)
@@ -176,7 +182,7 @@ Zf(verify_nearest_plane)(const int8_t *restrict hm,
 	/*
 	 * This works better than simple rounding.
 	 * Reconstruct s0, by running Babai's NP algorithm with target
-	 *     h/2 - s1 * q10 / q00.
+	 *     h0 / 2 + (h1 / 2 - s1) * q10 / q00.
 	 */
 
 	size_t n, u;
@@ -186,17 +192,17 @@ Zf(verify_nearest_plane)(const int8_t *restrict hm,
 	t0 = (fpr *)tmp;
 	t1 = t0 + n;
 	for (u = 0; u < n; u ++) {
-		t0[u] = fpr_half(fpr_of(hm[u] & 1));
+		t0[u] = fpr_half(fpr_of(h0[u] & 1));
 	}
 	for (u = 0; u < n; u ++) {
-		t1[u] = fpr_of(s1[u]);
+		t1[u] = fpr_half(fpr_of((h1[u] & 1) - 2 * s1[u]));
 	}
 
 	Zf(FFT)(t0, logn);
 	Zf(FFT)(t1, logn);
 	Zf(poly_mul_fft)(t1, q10, logn);
 	Zf(poly_div_fft)(t1, q00, logn);
-	Zf(poly_sub)(t0, t1, logn); // t0 = (h%2) / 2 - s1 q10/q00
+	Zf(poly_add)(t0, t1, logn); // t0 = h0 / 2 + (h1 / 2 - s1) q10/q00
 
 	memcpy(t1, q00, n * sizeof(fpr));
 	// Run Babai with target t0 and Gram-matrix q00.
@@ -209,5 +215,5 @@ Zf(verify_nearest_plane)(const int8_t *restrict hm,
 	/**
 	 * Now run the casual verification.
 	 */
-	return Zf(complete_verify)(hm, s0, s1, q00, q10, q11, bound, logn, tmp);
+	return Zf(complete_verify)(h0, h1, s0, s1, q00, q10, q11, bound, logn, tmp);
 }

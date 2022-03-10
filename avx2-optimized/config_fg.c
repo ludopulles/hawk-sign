@@ -100,8 +100,8 @@ void sample_fg(inner_shake256_context *rng, int8_t *f, int8_t *g, uint8_t *tmp)
 	/*
 	 * In the binary case, coefficients of f and g are generated
 	 * independently of each other, with a discrete Gaussian
-	 * distribution of standard deviation 1/isigma_kg. Then,
-	 * the two vectors have expected norm 2n/isigma_kg.
+	 * distribution of standard deviation 1.425 Then,
+	 * the two vectors have expected norm 2n * 1.425.
 	 *
 	 * We require that Res(f,phi) and Res(g,phi) are both odd (the
 	 * NTRU equation solver requires it).
@@ -114,11 +114,8 @@ void sample_fg(inner_shake256_context *rng, int8_t *f, int8_t *g, uint8_t *tmp)
 		Zf(prng_init)(&spc.p, rng);
 		samp_ctx = &spc;
 
-		fpr sigma_kg = fpr_div(fpr_of(1425), fpr_of(1000));
-		fpr isigma_kg = fpr_inv(sigma_kg);
-
-		poly_small_mkgauss(samp_ctx, f, logn, isigma_kg, lim);
-		poly_small_mkgauss(samp_ctx, g, logn, isigma_kg, lim);
+		poly_small_mkgauss(samp_ctx, f, logn, lim);
+		poly_small_mkgauss(samp_ctx, g, logn, lim);
 	} while (!solve_NTRU_deepest(logn, f, g, (uint32_t *)tmp));
 }
 

@@ -2354,7 +2354,7 @@ static const uint64_t gauss_1425[14] = {
  * Distribution has standard deviation 1.425 sqrt(512/N).
  */
 static int
-mkgauss(void *samp_ctx, unsigned logn)
+mkgauss_1425(void *samp_ctx, unsigned logn)
 {
 	unsigned u, g;
 	int val;
@@ -2422,13 +2422,12 @@ mkgauss(void *samp_ctx, unsigned logn)
 	return val;
 }
 
-// TODO: remove unused isigma_kg throughout whole code
 /*
  * Generate a random polynomial with a Gaussian distribution. This function
  * also makes sure that the resultant of the polynomial with phi is odd.
  */
 static void
-poly_small_mkgauss(void *samp_ctx, int8_t *f, unsigned logn, fpr isigma_kg, int lim)
+poly_small_mkgauss(void *samp_ctx, int8_t *f, unsigned logn, int lim)
 {
 	size_t n, u;
 	int s;
@@ -2439,7 +2438,7 @@ poly_small_mkgauss(void *samp_ctx, int8_t *f, unsigned logn, fpr isigma_kg, int 
 
 	for (u = n; u -- > 1; ) {
 		do {
-			s = mkgauss(samp_ctx, logn);
+			s = mkgauss_1425(samp_ctx, logn);
 			/*
 			 * We need the coefficient to fit within -127..+127;
 			 * realistically, this is always the case except for
@@ -2452,7 +2451,7 @@ poly_small_mkgauss(void *samp_ctx, int8_t *f, unsigned logn, fpr isigma_kg, int 
 	}
 
 	do {
-		s = mkgauss(samp_ctx, logn);;
+		s = mkgauss_1425(samp_ctx, logn);;
 		/*
 		 * We need the sum of all coefficients to be 1; otherwise,
 		 * the resultant of the polynomial with X^N+1 will be even,
@@ -4002,7 +4001,7 @@ Zf(keygen)(inner_shake256_context *rng,
 	int8_t *restrict f, int8_t *restrict g, // secret key
 	int8_t *restrict F, int8_t *restrict G, // secret key
 	fpr *restrict q00, fpr *restrict q10, fpr *restrict q11, // public key
-	fpr isigma_kg, unsigned logn, uint8_t *restrict tmp)
+	unsigned logn, uint8_t *restrict tmp)
 {
 	/*
 	 * Algorithm is the following:
@@ -4022,8 +4021,8 @@ Zf(keygen)(inner_shake256_context *rng,
 	/*
 	 * In the binary case, coefficients of f and g are generated
 	 * independently of each other, with a discrete Gaussian
-	 * distribution of standard deviation 1/isigma_kg. Then,
-	 * the two vectors have expected norm 2n/isigma_kg.
+	 * distribution of standard deviation 1.425. Then,
+	 * the two vectors have expected norm 2n * 1.425.
 	 *
 	 * We require that Res(f,phi) and Res(g,phi) are both odd (the
 	 * NTRU equation solver requires it).
@@ -4046,8 +4045,8 @@ Zf(keygen)(inner_shake256_context *rng,
 		 * key will be encodable with FALCON_COMP_TRIM.
 		 */
 		lim = 128; // 1 << (Zf(max_fg_bits)[logn] - 1);
-		poly_small_mkgauss(samp_ctx, f, logn, isigma_kg, lim);
-		poly_small_mkgauss(samp_ctx, g, logn, isigma_kg, lim);
+		poly_small_mkgauss(samp_ctx, f, logn, lim);
+		poly_small_mkgauss(samp_ctx, g, logn, lim);
 
 		// Solve the NTRU equation to get F and G.
 		lim = 128; // (1 << (Zf(max_FG_bits)[logn] - 1)) - 1;

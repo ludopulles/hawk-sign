@@ -92,12 +92,10 @@ static const uint64_t gauss_1292[26] = {
  * discrete gaussian is unknown.
  */
 static int
-mkgauss(void *samp_ctx, unsigned logn, uint8_t double_mu)
+mkgauss_1292(prng *rng, unsigned logn, uint8_t double_mu)
 {
 	unsigned u, g;
 	int val;
-
-	sampler_context *sc = (sampler_context *)samp_ctx;
 
 	g = 1U << (9 - logn);
 	val = 0;
@@ -106,15 +104,13 @@ mkgauss(void *samp_ctx, unsigned logn, uint8_t double_mu)
 		 * Each iteration generates one value with the
 		 * Gaussian distribution for N = 512.
 		 *
-		 * We use two random 64-bit values. First value
-		 * decides on whether the generated value is 0, and,
-		 * if not, the sign of the value. Second random 64-bit
-		 * word is used to generate the non-zero value.
+		 * We use two random 64-bit values. First value decides on whether the
+		 * generated value is 0, and, if not, the sign of the value. Second
+		 * random 64-bit word is used to generate the non-zero value.
 		 *
-		 * For constant-time code we have to read the complete
-		 * table. This has negligible cost, compared with the
-		 * remainder of the keygen process (solving the NTRU
-		 * equation).
+		 * For constant-time code we have to read the complete table. Currently
+		 * sampling takes up most time of the signing process, so this is
+		 * something that should be optimized.
 		 */
 		uint64_t r;
 		uint32_t f, v, k, neg;
@@ -125,7 +121,7 @@ mkgauss(void *samp_ctx, unsigned logn, uint8_t double_mu)
 		 *  - flag 'f' is set to 1 if the generated value is zero,
 		 *    or set to 0 otherwise.
 		 */
-		r = prng_get_u64(&sc->p);
+		r = prng_get_u64(rng);
 		neg = (uint32_t)(r >> 63);
 		r &= ~((uint64_t)1 << 63);
 		f = (uint32_t)((r - gauss_1292[double_mu]) >> 63);
@@ -137,7 +133,7 @@ mkgauss(void *samp_ctx, unsigned logn, uint8_t double_mu)
 		 * than r, unless the flag f was already 1.
 		 */
 		v = 0;
-		r = prng_get_u64(&sc->p);
+		r = prng_get_u64(rng);
 		r &= ~((uint64_t)1 << 63);
 		for (k = 1; k < 13; k ++) {
 			uint32_t t;
@@ -187,62 +183,73 @@ smallints_to_fpr(fpr *r, const int8_t *t, unsigned logn)
 }
 
 /*
- * Sample a vector (x0, x1) that is congruent to (h*f, h*g) modulo 2 from
- * a Discrete Gaussian with lattice coset 2Z^{2n} + (h*f, h*g) and
- * standard deviation 1/isigma_sig.
+ * Sample a vector (x0, x1) that is congruent to (t0, t1) = B * (h0, h1)^t modulo 2 from
+ * a Discrete Gaussian with lattice coset 2Z^{2n} + (t0, t1) and standard deviation 1.292.
  * Returns whether or not (x0, x1) has a squared l2-norm less than bound.
- * Note: tmp must have a size of at least 4n bytes.
+ * Note: tmp must have a size of at least 6n bytes.
  */
 static int
-sample_short(void *samp_ctx, int8_t *restrict x0, int8_t *restrict x1,
+sample_short(prng *rng, int8_t *restrict x0, int8_t *restrict x1,
 	const int8_t *restrict f, const int8_t *restrict g,
-	const int8_t *restrict hm, fpr isigma_sig, uint32_t bound,
-	unsigned logn, uint8_t *restrict tmp)
+	const int8_t *restrict F, const int8_t *restrict G,
+	const int8_t *restrict h0, const int8_t *restrict h1,
+	uint32_t bound, unsigned logn, uint8_t *restrict tmp)
 {
 	size_t n, u;
 	int32_t norm, z;
-	fpr *t0, *t1, *t2;
+	fpr *t0, *t1, *t2, *t3, *t4, *t5;
 
 	n = MKN(logn);
 	norm = 0;
 	t0 = (fpr *)tmp;
 	t1 = t0 + n;
 	t2 = t1 + n;
+	t3 = t2 + n;
+	t4 = t3 + n;
+	t5 = t4 + n;
 
 	/*
-	 * Set the target vector to [hm, 0] * B (hm is the hashed message).
+	 * Set the target vector to B * (h0, h1)^T.
 	 */
 	for (u = 0; u < n; u++) {
-		t0[u] = fpr_of(f[u] & 1);
-		t1[u] = fpr_of(g[u] & 1);
-		t2[u] = fpr_of(hm[u] & 1);
+		t0[u] = fpr_of(h0[u] & 1);
+		t1[u] = fpr_of(h1[u] & 1);
+		t2[u] = fpr_of(f[u] & 1);
+		t3[u] = fpr_of(g[u] & 1);
+		t4[u] = fpr_of(F[u] & 1);
+		t5[u] = fpr_of(G[u] & 1);
 	}
 
 	Zf(FFT)(t0, logn);
 	Zf(FFT)(t1, logn);
 	Zf(FFT)(t2, logn);
+	Zf(FFT)(t3, logn);
+	Zf(FFT)(t4, logn);
+	Zf(FFT)(t5, logn);
 
-	Zf(poly_mul_fft)(t0, t2, logn);
-	Zf(poly_mul_fft)(t1, t2, logn);
+	Zf(poly_mul_fft)(t2, t0, logn); // f h0
+	Zf(poly_mul_fft)(t3, t0, logn); // g h0
+	Zf(poly_mul_fft)(t4, t1, logn); // F h1
+	Zf(poly_mul_fft)(t5, t1, logn); // G h1
+	Zf(poly_add)(t2, t4, logn); // f h0 + F h1
+	Zf(poly_add)(t3, t5, logn); // g h0 + G h1
 
-	Zf(iFFT)(t0, logn);
-	Zf(iFFT)(t1, logn);
+	Zf(iFFT)(t2, logn);
+	Zf(iFFT)(t3, logn);
 
 	/*
-	 * Sample and write the result in (x0,x1). Gaussian smoothing is used
-	 * to not reveal information on the secret basis.
+	 * Sample and write the result in (x0, x1). Gaussian smoothing is used to
+	 * not reveal information on the secret basis.
 	 */
 	for (u = 0; u < n; u ++) {
-		z = fpr_rint(t0[u]) & 1;
-		// z = 2*Zf(sampler)(samp_ctx, fpr_half(fpr_of(z)), isigma_sig) - z;
-		z = 2*mkgauss(samp_ctx, logn, z) - z;
+		z = fpr_rint(t2[u]) & 1;
+		z = 2*mkgauss_1292(rng, logn, z) - z;
 		x0[u] = (int8_t) z;
 		norm += z*z;
 	}
 	for (u = 0; u < n; u ++) {
-		z = fpr_rint(t1[u]) & 1;
-		// z = 2*Zf(sampler)(samp_ctx, fpr_half(fpr_of(z)), isigma_sig) - z;
-		z = 2*mkgauss(samp_ctx, logn, z) - z;
+		z = fpr_rint(t3[u]) & 1;
+		z = 2*mkgauss_1292(rng, logn, z) - z;
 		x1[u] = (int8_t) z;
 		norm += z*z;
 	}
@@ -258,18 +265,19 @@ sample_short(void *samp_ctx, int8_t *restrict x0, int8_t *restrict x1,
 }
 
 /*
- * Compute signature of hm: a vector (s0, s1) that is close to (hm/2, 0) wrt Q.
+ * Compute signature of (h0, h1): a vector (s0, s1) that is close to (h0, h1)/2 wrt Q.
  * Here, s0 is not returned.
  * When 0 is returned, signing failed.
  * When 1 is returned, there exists some s0 for which (s0, s1) is a signature
  * but reconstructing s0 might still fail.
  *
- * tmp must have room for at least 24 * 2^logn bytes
+ * tmp must have room for at least 50 * 2^logn bytes
  */
 static int
-do_sign(void *samp_ctx, int16_t *restrict s1,
+do_sign(prng *rng, int16_t *restrict s1,
 	const int8_t *restrict f, const int8_t *restrict g,
-	const int8_t *restrict hm, fpr isigma_sig, uint32_t bound,
+	const int8_t *restrict F, const int8_t *restrict G,
+	const int8_t *restrict h0, const int8_t *restrict h1, uint32_t bound,
 	unsigned logn, uint8_t *restrict tmp)
 {
 	size_t n, u;
@@ -283,15 +291,15 @@ do_sign(void *samp_ctx, int16_t *restrict s1,
 	x0 = (int8_t *)tmp;
 	x1 = x0 + n;
 
-	if (!sample_short(samp_ctx, x0, x1, f, g, hm, isigma_sig, bound, logn,
+	if (!sample_short(rng, x0, x1, f, g, F, G, h0, h1, bound, logn,
 			(uint8_t *)(x1 + n))) {
 		return 0;
 	}
 
 	/*
-	 * Note that (x0, x1) == B (h, 0) (mod 2) so we obtain a lattice point
-	 * (s0, s1) that is close to (hm/2, 0) wrt Q by calculating:
-	 *     (s0, s1) = ((h, 0) - B^{-1} (x0, x1)) / 2.
+	 * Note that (x0, x1) == B (h0, h1) (mod 2) so we obtain a lattice point
+	 * (s0, s1) that is close to (h0, h1)/2 wrt Q by calculating:
+	 *     (s0, s1) = ((h0, h1) - B^{-1} (x0, x1)) / 2.
 	 */
 	smallints_to_fpr(t1, x1, logn);
 	smallints_to_fpr(t2, x0, logn);
@@ -308,27 +316,25 @@ do_sign(void *samp_ctx, int16_t *restrict s1,
 
 	Zf(iFFT)(t0, logn);
 	for (u = 0; u < n; u ++) {
-		s1[u] = (int16_t) -fpr_rint(t0[u]);
-		// shouldn't happen, except when FFT had rounding issues
-		if (s1[u] & 1) { exit(1); return 0; }
-		s1[u] /= 2;
+		s1[u] = (int16_t) (h1[u] - fpr_rint(t0[u])) / 2;
 	}
 
 	return 1;
 }
 
 /*
- * Compute signature of hm: a vector (s0, s1) that is close to (hm/2, 0) wrt Q.
+ * Compute signature of (h0, h1): a vector (s0, s1) that is close to (h0, h1)/2 wrt Q.
  * Here, s0 is not returned.
  * 1 is returned iff (s0, s1) is a valid signature and s0 can be recovered from
  * s1 with simple rounding.
  *
- * tmp must have room for at least 40 * 2^logn bytes
+ * tmp must have room for at least 50 * 2^logn bytes
  */
 static int
-do_guaranteed_sign(void *samp_ctx, int16_t *restrict s1,
+do_guaranteed_sign(prng *rng, int16_t *restrict s1,
 	const int8_t *restrict f, const int8_t *restrict g,
-	const fpr *restrict q00, const int8_t *restrict hm, fpr isigma_sig,
+	const int8_t *restrict F, const int8_t *restrict G,
+	const fpr *restrict q00, const int8_t *restrict h0, const int8_t *restrict h1,
 	uint32_t bound, unsigned logn, uint8_t *restrict tmp)
 {
 	size_t n, u;
@@ -345,14 +351,14 @@ do_guaranteed_sign(void *samp_ctx, int16_t *restrict s1,
 	x0 = (int8_t *)tmp;
 	x1 = x0 + n;
 
-	if (!sample_short(samp_ctx, x0, x1, f, g, hm, isigma_sig, bound, logn,
+	if (!sample_short(rng, x0, x1, f, g, F, G, h0, h1, bound, logn,
 			(uint8_t*)(x1 + n))) {
 		return 0;
 	}
 
 	/*
 	 * Note that (x0, x1) == B (h, 0) (mod 2) so we obtain a lattice point
-	 * (s0, s1) that is close to (hm/2, 0) wrt Q by calculating:
+	 * (s0, s1) that is close to (h0, h1)/2 wrt Q by calculating:
 	 *     (s0, s1) = ((h, 0) - B^{-1} (x0, x1)) / 2.
 	 */
 	smallints_to_fpr(tx0, x0, logn);
@@ -382,27 +388,24 @@ do_guaranteed_sign(void *samp_ctx, int16_t *restrict s1,
 
 	Zf(iFFT)(tf, logn);
 	for (u = 0; u < n; u ++) {
-		s1[u] = (int16_t) -fpr_rint(tf[u]);
-		// shouldn't happen, except when FFT had rounding issues
-		if (s1[u] & 1) return 0;
-		s1[u] /= 2;
+		s1[u] = (int16_t) (h1[u] - fpr_rint(tf[u])) / 2;
 	}
 
 	return 1;
 }
 
 /*
- * Compute signature of hm: a vector (s0, s1) that is close to (hm/2, 0) wrt Q.
+ * Compute signature of (h0, h1): a vector (s0, s1) that is close to (h0, h1)/2 wrt Q.
  * If 1 is returned, (s0, s1) is a valid signature.
  *
- * tmp must have room for at least 40 * 2^logn bytes
+ * tmp must have room for at least 50 * 2^logn bytes
  */
 static int
-do_complete_sign(void *samp_ctx,
+do_complete_sign(prng *rng,
 	int16_t *restrict s0, int16_t *restrict s1,
 	const int8_t *restrict f, const int8_t *restrict g,
 	const int8_t *restrict F, const int8_t *restrict G,
-	const int8_t *restrict hm, fpr isigma_sig, uint32_t bound,
+	const int8_t *restrict h0, const int8_t *restrict h1, uint32_t bound,
 	unsigned logn, uint8_t *restrict tmp)
 {
 	size_t n, u;
@@ -418,7 +421,7 @@ do_complete_sign(void *samp_ctx,
 	x0 = (int8_t *)tmp;
 	x1 = x0 + n;
 
-	if (!sample_short(samp_ctx, x0, x1, f, g, hm, isigma_sig, bound, logn,
+	if (!sample_short(rng, x0, x1, f, g, F, G, h0, h1, bound, logn,
 			(uint8_t *)(x1 + n))) {
 		return 0;
 	}
@@ -455,19 +458,12 @@ do_complete_sign(void *samp_ctx,
 	 */
 	Zf(iFFT)(t0, logn);
 	Zf(iFFT)(t1, logn);
+
 	for (u = 0; u < n; u ++) {
-		s0[u] = (int16_t)fpr_rint(t0[u]);
-		// shouldn't happen, except when FFT had rounding issues
-		if ((s0[u] ^ hm[u]) & 1) return 0;
-		s0[u] = ((hm[u] & 1) - s0[u]) / 2;
+		s0[u] = (int16_t) (h0[u] - fpr_rint(t0[u])) / 2;
+		s1[u] = (int16_t) (h1[u] - fpr_rint(t1[u])) / 2;
 	}
-	for (u = 0; u < n; u ++) {
-		s1[u] = (int16_t) -fpr_rint(t1[u]);
-		// shouldn't happen, except when FFT had rounding issues
-		if (s1[u] & 1) return 0;
-		s1[u] /= 2;
-	}
-	// Now (s0, s1) is a lattice that is close to (h/2, 0) wrt Q.
+	// Now (s0, s1) is a lattice that is close to (h0, h1)/2 wrt Q.
 	return 1;
 }
 
@@ -480,30 +476,29 @@ do_complete_sign(void *samp_ctx,
 void
 Zf(sign)(inner_shake256_context *rng, int16_t *restrict sig,
 	const int8_t *restrict f, const int8_t *restrict g,
-	const int8_t *restrict hm, fpr isigma_sig, uint32_t bound,
-	unsigned logn, uint8_t *restrict tmp)
+	const int8_t *restrict F, const int8_t *restrict G,
+	const int8_t *restrict h0, const int8_t *restrict h1,
+	uint32_t bound, unsigned logn, uint8_t *restrict tmp)
 {
-	sampler_context spc;
-	spc.sigma_min = fpr_sigma_min[logn];
+	prng p;
 	do {
-		Zf(prng_init)(&spc.p, rng);
-	} while (!do_sign(&spc, sig, f, g, hm, isigma_sig,
-			bound, logn, tmp));
+		Zf(prng_init)(&p, rng);
+	} while (!do_sign(&p, sig, f, g, F, G, h0, h1, bound, logn, tmp));
 }
 
 /* see inner.h */
 void
 Zf(guaranteed_sign)(inner_shake256_context *rng, int16_t *restrict sig,
 	const int8_t *restrict f, const int8_t *restrict g,
-	const fpr *restrict q00, const int8_t *restrict hm, fpr isigma_sig,
-	uint32_t bound, unsigned logn, uint8_t *restrict tmp)
+	const int8_t *restrict F, const int8_t *restrict G,
+	const fpr *restrict q00, const int8_t *restrict h0,
+	const int8_t *restrict h1, uint32_t bound, unsigned logn,
+	uint8_t *restrict tmp)
 {
-	sampler_context spc;
-	spc.sigma_min = fpr_sigma_min[logn];
+	prng p;
 	do {
-		Zf(prng_init)(&spc.p, rng);
-	} while (!do_guaranteed_sign((void *)&spc, sig, f, g, q00, hm,
-			isigma_sig, bound, logn, tmp));
+		Zf(prng_init)(&p, rng);
+	} while (!do_guaranteed_sign(&p, sig, f, g, F, G, q00, h0, h1, bound, logn, tmp));
 }
 
 /* see inner.h */
@@ -512,13 +507,12 @@ Zf(complete_sign)(inner_shake256_context *rng,
 	int16_t *restrict s0, int16_t *restrict s1,
 	const int8_t *restrict f, const int8_t *restrict g,
 	const int8_t *restrict F, const int8_t *restrict G,
-	const int8_t *restrict hm, fpr isigma_sig, uint32_t bound,
-	unsigned logn, uint8_t *restrict tmp)
+	const int8_t *restrict h0, const int8_t *restrict h1,
+	uint32_t bound, unsigned logn, uint8_t *restrict tmp)
 {
-	sampler_context spc;
-	spc.sigma_min = fpr_sigma_min[logn];
+	prng p;
 	do {
-		Zf(prng_init)(&spc.p, rng);
-	} while (!do_complete_sign((void *)&spc, s0, s1, f, g, F, G,
-			hm, isigma_sig, bound, logn, tmp));
+		Zf(prng_init)(&p, rng);
+	} while (!do_complete_sign(&p, s0, s1, f, g, F, G,
+			h0, h1, bound, logn, tmp));
 }

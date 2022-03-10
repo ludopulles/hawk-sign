@@ -89,11 +89,11 @@ struct WorkerResult {
 	}
 };
 
-const int n_repetitions = 1000;
+const int n_repetitions = 100;
 
-WorkerResult measure_signatures(fpr isigma_kg, fpr isigma_sig, uint32_t bound) {
-	uint8_t b[42 << logn];
-	int8_t f[n], g[n], F[n], G[n], h[n];
+WorkerResult measure_signatures(uint32_t bound) {
+	uint8_t b[50 << logn];
+	int8_t f[n], g[n], F[n], G[n], h0[n], h1[n];
 	int16_t s0[n], s1[n];
 	fpr q00[n], q10[n], q11[n];
 	unsigned char seed[48];
@@ -108,13 +108,14 @@ WorkerResult measure_signatures(fpr isigma_kg, fpr isigma_sig, uint32_t bound) {
 	WorkerResult result;
 	for (int rep = 0; rep < n_repetitions; rep++) {
 		// Generate key pair.
-		Zf(keygen)(&sc, f, g, F, G, q00, q10, q11, isigma_kg, logn, b);
+		Zf(keygen)(&sc, f, g, F, G, q00, q10, q11, logn, b);
 
 		// make a signature of a random message...
-		random_hash(h, logn);
+		random_hash(h0, logn);
+		random_hash(h1, logn);
 
 		// Compute the signature.
-		Zf(complete_sign)(&sc, s0, s1, f, g, F, G, h, isigma_sig, bound, logn, b);
+		Zf(complete_sign)(&sc, s0, s1, f, g, F, G, h0, h1, bound, logn, b);
 
 		for (int lobits = 3; lobits < 10; lobits++) {
 			size_t sz = Zf(encode_sig)(NULL, 0, s1, logn, lobits);
@@ -134,7 +135,6 @@ WorkerResult measure_signatures(fpr isigma_kg, fpr isigma_sig, uint32_t bound) {
 WorkerResult tot;
 mutex mx;
 
-constexpr fpr sigma_kg  = { v: 1.425 };
 constexpr fpr sigma_sig = { v: 1.292 };
 constexpr fpr verif_margin = { v: 1.1 };
 
@@ -143,7 +143,7 @@ uint32_t getbound() {
 }
 
 void work() {
-	WorkerResult result = measure_signatures(fpr_inv(sigma_kg), fpr_inv(sigma_sig), getbound());
+	WorkerResult result = measure_signatures(getbound());
 
 	{
 		lock_guard<mutex> guard(mx);
