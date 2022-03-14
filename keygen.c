@@ -1033,7 +1033,7 @@ modp_iNTT2_ext(uint32_t *a, size_t stride, const uint32_t *igm, unsigned logn,
 				y = *r2;
 				*r1 = modp_add(x, y, p);
 				*r2 = modp_montymul(
-					modp_sub(x, y, p), s, p, p0i);;
+					modp_sub(x, y, p), s, p, p0i);
 			}
 		}
 		t = dt;
@@ -2451,7 +2451,7 @@ poly_small_mkgauss(void *samp_ctx, int8_t *f, unsigned logn, int lim)
 	}
 
 	do {
-		s = mkgauss_1425(samp_ctx, logn);;
+		s = mkgauss_1425(samp_ctx, logn);
 		/*
 		 * We need the sum of all coefficients to be 1; otherwise,
 		 * the resultant of the polynomial with X^N+1 will be even,
