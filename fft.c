@@ -416,6 +416,26 @@ Zf(poly_mul_fft)(
 
 /* see inner.h */
 void
+Zf(poly_prod_fft)(fpr *restrict d,
+	const fpr *restrict a, const fpr *restrict b, unsigned logn)
+{
+	size_t n, hn, u;
+
+	n = (size_t)1 << logn;
+	hn = n >> 1;
+	for (u = 0; u < hn; u ++) {
+		fpr a_re, a_im, b_re, b_im;
+
+		a_re = a[u];
+		a_im = a[u + hn];
+		b_re = b[u];
+		b_im = b[u + hn];
+		FPC_MUL(d[u], d[u + hn], a_re, a_im, b_re, b_im);
+	}
+}
+
+/* see inner.h */
+void
 Zf(poly_muladj_fft)(
 	fpr *restrict a, const fpr *restrict b, unsigned logn)
 {
@@ -537,6 +557,37 @@ Zf(poly_add_muladj_fft)(fpr *restrict d,
 
 		FPC_MUL(a_re, a_im, F_re, F_im, f_re, fpr_neg(f_im));
 		FPC_MUL(b_re, b_im, G_re, G_im, g_re, fpr_neg(g_im));
+		d[u] = fpr_add(a_re, b_re);
+		d[u + hn] = fpr_add(a_im, b_im);
+	}
+}
+
+/* see inner.h */
+void
+Zf(poly_add_mul_fft)(fpr *restrict d,
+	const fpr *restrict F, const fpr *restrict G,
+	const fpr *restrict f, const fpr *restrict g, unsigned logn)
+{
+	size_t n, hn, u;
+
+	n = (size_t)1 << logn;
+	hn = n >> 1;
+	for (u = 0; u < hn; u ++) {
+		fpr F_re, F_im, G_re, G_im;
+		fpr f_re, f_im, g_re, g_im;
+		fpr a_re, a_im, b_re, b_im;
+
+		F_re = F[u];
+		F_im = F[u + hn];
+		G_re = G[u];
+		G_im = G[u + hn];
+		f_re = f[u];
+		f_im = f[u + hn];
+		g_re = g[u];
+		g_im = g[u + hn];
+
+		FPC_MUL(a_re, a_im, F_re, F_im, f_re, f_im);
+		FPC_MUL(b_re, b_im, G_re, G_im, g_re, g_im);
 		d[u] = fpr_add(a_re, b_re);
 		d[u + hn] = fpr_add(a_im, b_im);
 	}

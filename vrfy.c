@@ -217,3 +217,111 @@ Zf(verify_nearest_plane)(const int8_t *restrict h0, const int8_t *restrict h1,
 	 */
 	return Zf(complete_verify)(h0, h1, s0, s1, q00, q10, q11, bound, logn, tmp);
 }
+
+/* see inner.h */
+int
+Zf(verify_simple_rounding_fft)(const uint8_t *restrict h,
+	const int16_t *restrict s1, const fpr *restrict q00,
+	const fpr *restrict q10, const fpr *restrict q11, uint32_t bound,
+	unsigned logn, uint8_t *restrict tmp)
+{
+	size_t u, v, w, hn, n;
+	fpr *t0, *t1, trace;
+
+	n = MKN(logn);
+	hn = n >> 1;
+	t0 = (fpr *)tmp;
+	t1 = t0 + n;
+
+	/**
+	 * t1 = h1 / 2 - s1
+	 */
+	for (u = 0, w = 0; w < n; u ++ ) {
+		uint8_t h1;
+
+		h1 = h[n / 8 + u];
+		for (v = 0; v < 8; v ++, w ++) {
+			t1[w] = fpr_half(fpr_of((h1 & 1) - 2 * s1[w]));
+
+			h1 >>= 1;
+		}
+	}
+
+	Zf(FFT)(t1, logn);
+	Zf(poly_prod_fft)(t0, t1, q10, logn); // t0 = (h1/2 - s1) q10
+	Zf(poly_div_autoadj_fft)(t0, q00, logn); // t0 = (h1/2 - s1) q10/q00
+	Zf(iFFT)(t0, logn);
+
+	/**
+	 * Recover s0 with s0 = round(h0/2 + (h1/2 - s1) q10 / q00).
+	 * Put (t0, t1) = (h0 / 2 - s0, h1 / 2 - s1) in FFT representation so we can
+	 * calculate the l2-norm wrt Q.
+	 */
+	for (u = 0, w = 0; w < n; u ++ ) {
+		int s0w;
+		uint8_t h0;
+
+		h0 = h[u];
+		for (v = 0; v < 8; v ++, w ++) {
+			s0w = fpr_rint(fpr_add(fpr_half(fpr_of(h0 & 1)), t0[w]));
+			t0[w] = fpr_half(fpr_of((h0 & 1) - 2 * s0w));
+
+			h0 >>= 1;
+		}
+	}
+
+	// TODO: adjust bound calculation
+	bound /= 4;
+
+	Zf(FFT)(t0, logn);
+
+	trace = fpr_zero;
+	/**
+	 * Calculate normalized trace( (t0, t1)^* Q (t0, t1) )
+	 * Note that the trace is by definition the sum under its n embeddings, and
+	 * the complex embeddings are exactly what the FFT give us.
+	 */
+	for (u = 0; u < hn; u ++) {
+		fpr a_re, a_im, b_re, b_im, ab_re, ab_im;
+
+		a_re = t0[u];
+		a_im = t0[u + hn];
+		b_re = t1[u];
+		b_im = t1[u + hn];
+
+		fpr norm0 = fpr_add(fpr_sqr(a_re), fpr_sqr(a_im));
+		fpr norm1 = fpr_add(fpr_sqr(b_re), fpr_sqr(b_im));
+
+		// contribution of t0 Q00 t0*
+		trace = fpr_add(trace, fpr_mul(norm0, q00[u]));
+		// contribution of t1 Q11 t1*
+		trace = fpr_add(trace, fpr_mul(norm1, q11[u]));
+
+		// ab = t1 t0*
+		ab_re = fpr_add(fpr_mul(a_re, b_re), fpr_mul(a_im, b_im));
+		ab_im = fpr_sub(fpr_mul(a_re, b_im), fpr_mul(a_im, b_re));
+
+		// contribution of t1 q10 t0* + t0 q01 t1*
+		trace = fpr_add(trace, fpr_double(
+			fpr_sub(fpr_mul(ab_re, q10[u]), fpr_mul(ab_im, q10[u + hn]))
+		));
+	}
+
+	/*
+	 * Note: only n/2 embeddings are stored, because they come in pairs.
+	 */
+	trace = fpr_double(trace);
+	/*
+	 * Renormalize, so we get the geometric norm of (t0, t1) w.r.t Q.
+	 */
+	trace = fpr_div(trace, fpr_of(n));
+
+	/*
+	 * First check whether the norm is in range [0, 2^31).
+	 * Signature is valid iff
+	 *     `Tr(s* Q s) / n (=Tr(x^* x)/n = sum_i x_i^2) <= bound`.
+	 */
+	return fpr_lt(fpr_zero, trace) && fpr_lt(trace, fpr_ptwo31m1)
+		&& (uint32_t)fpr_rint(trace) <= bound;
+}
+

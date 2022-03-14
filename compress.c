@@ -350,8 +350,7 @@ Zf(decode_pubkey_huffman)(int16_t *q00, int16_t *q10,
 
 /* see inner.h */
 size_t
-Zf(encode_sig_huffman)(
-	void *out, size_t max_out_len,
+Zf(encode_sig_huffman)(void *out, size_t max_out_len,
 	const int16_t *x, unsigned logn)
 {
 	uint8_t *buf;
@@ -950,13 +949,11 @@ poly_enc(uint8_t *buf, size_t max_out_len, uint64_t acc,
 /*
  * Optimal choice for sigma_pk = 1.425 is lo_bits_fg = 0, lo_bits_FG = 2
  * Results in |sk| = 1037.2 ± 10.7 bytes, for n=512.
+ * Note: G can be recalculated from fG - gF = 1 so do not encode it.
  */
 size_t
-Zf(encode_seckey)(
-	void *out, size_t max_out_len,
-	const int8_t *f, const int8_t *g,
-	const int8_t *F, const int8_t *G,
-	unsigned logn)
+Zf(encode_seckey)(void *out, size_t max_out_len,
+	const int8_t *f, const int8_t *g, const int8_t *F, unsigned logn)
 {
 	uint8_t *buf;
 	size_t v, acc_len;
@@ -972,8 +969,6 @@ Zf(encode_seckey)(
 	if (v == 0) return 0;
 	v = poly_enc(buf, max_out_len, acc, acc_len, v, F, logn, 2);
 	if (v == 0) return 0;
-	v = poly_enc(buf, max_out_len, acc, acc_len, v, G, logn, 2);
-	if (v == 0) return 0;
 
 	/*
 	 * Flush remaining bits (if any).
@@ -986,6 +981,106 @@ Zf(encode_seckey)(
 			buf[v] = (uint8_t)(acc << (8 - acc_len));
 		}
 		v ++;
+	}
+
+	return v;
+}
+
+static size_t
+poly_dec(const uint8_t *buf, size_t max_in_len, uint16_t acc,
+	size_t acc_len, size_t v, int8_t *x, unsigned logn,
+	size_t lo_bits)
+{
+	size_t n, u;
+
+#define ENSUREBIT()                                                      \
+	if (acc_len == 0) {                                                  \
+		if (v >= max_in_len) return 0; /* not enough bits */             \
+		acc = buf[v++];                                                  \
+		acc_len = 8;                                                     \
+	}
+
+#define GETBIT() ((acc >> (--acc_len)) & 1)
+
+	n = MKN(logn);
+
+	for (u = 0; u < n; u ++) {
+		uint16_t s, w;
+
+		/*
+		 * Get sign of the current coefficient
+		 */
+		ENSUREBIT();
+		s = GETBIT();
+
+		/*
+		 * Get next lo_bits bits that make up the lowest significant bits of w.
+		 */
+		if (acc_len < lo_bits) {
+			// should be true all the time
+			if (v >= max_in_len) return 0;
+			acc = (acc << 8) | buf[v ++];
+			acc_len += 8;
+		}
+
+		/*
+		 * Get lo_bits least significant bits of w.
+		 */
+		w = (acc >> (acc_len -= lo_bits)) & ((1U << lo_bits) - 1);
+
+		/*
+		 * Recover the most significant bits of w: count number of consecutive
+		 * zeros up to the first 1 and add 2^lo_bits to w for each one you see.
+		 */
+		for (;;) {
+			ENSUREBIT();
+			if (GETBIT() != 0) {
+				break;
+			}
+			w += (1U << lo_bits);
+			if (w >= 128) {
+				// Value does not fit into a int8_t (signed single byte).
+				return 0;
+			}
+		}
+
+		x[u] = w ^ -s;
+	}
+
+	return v;
+#undef ENSUREBIT
+#undef GETBIT
+}
+
+/*
+ * Decodes the f, g, and F from the encoded secret key basis [[f,g], [F,G]].
+ * Moreover, G can be efficiently constructed from fG - gF = 1 (mod phi) using
+ * FFT.
+ */
+size_t
+Zf(decode_seckey)(int8_t *f, int8_t *g, int8_t *F,
+	const void *in, size_t max_in_len,  unsigned logn)
+{
+	const uint8_t *buf;
+	size_t v, acc_len;
+	uint16_t acc;
+
+	buf = (const uint8_t *)in;
+	acc = 0;
+	acc_len = 0;
+
+	v = poly_dec(buf, max_in_len, acc, acc_len, 0, f, logn, 0);
+	if (v == 0) return 0;
+	v = poly_dec(buf, max_in_len, acc, acc_len, v, g, logn, 0);
+	if (v == 0) return 0;
+	v = poly_dec(buf, max_in_len, acc, acc_len, v, F, logn, 2);
+	if (v == 0) return 0;
+
+	/*
+	 * Unused bits in the last byte must be zero.
+	 */
+	if ((acc & ((1u << acc_len) - 1u)) != 0) {
+		return 0;
 	}
 
 	return v;

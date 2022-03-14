@@ -415,8 +415,14 @@ int Zf(gaussian0_sampler)(prng *p);
  */
 size_t
 Zf(encode_seckey)(void *out, size_t max_out_len,
-	const int8_t *f, const int8_t *g, const int8_t *F, const int8_t *G,
-	unsigned logn);
+	const int8_t *f, const int8_t *g, const int8_t *F, unsigned logn);
+
+/**
+ * Inverse of Zf(encode_seckey). To calculate G, use Zf(expand_seckey).
+ */
+size_t
+Zf(decode_seckey)(int8_t *f, int8_t *g, int8_t *F,
+	const void *in, size_t max_in_len,  unsigned logn);
 
 /*
  * Encode the Gram matrix of the NTRU-basis with determinant 1.
@@ -434,12 +440,12 @@ Zf(decode_pubkey)(int16_t *q00, int16_t *q10,
 	const void *in, size_t max_in_len, unsigned logn);
 
 /*
- * Encode a signature s1 by output 'lo_bits' bits of the lowest signficant bits
- * of x[i] and using unary for the other most significant bits.
+ * Encode a signature s1 by outputting 'lo_bits' bits of the lowest signficant
+ * bits of x[i] and using unary for the other most significant bits.
  */
 size_t
-Zf(encode_sig)(void *out, size_t max_out_len, const int16_t *x,
-	unsigned logn, size_t lo_bits);
+Zf(encode_sig)(void *out, size_t max_out_len, const int16_t *x, unsigned logn,
+	size_t lo_bits);
 
 /*
  * Decode a signature s1.
@@ -523,6 +529,13 @@ void Zf(poly_adj_fft)(fpr *a, unsigned logn);
 void Zf(poly_mul_fft)(fpr *restrict a, const fpr *restrict b, unsigned logn);
 
 /*
+ * Multiply polynomial a with polynomial b and store result in d. d, a and b
+ * MUST NOT overlap. This function works only in FFT representation.
+ */
+void Zf(poly_prod_fft)(fpr *restrict d, const fpr *restrict a,
+	const fpr *restrict b, unsigned logn);
+
+/*
  * Multiply polynomial a with the adjoint of polynomial b. a and b MUST NOT
  * overlap. This function works only in FFT representation.
  */
@@ -563,6 +576,15 @@ void Zf(poly_invnorm2_fft)(fpr *restrict d,
  * any of the source arrays.
  */
 void Zf(poly_add_muladj_fft)(fpr *restrict d,
+	const fpr *restrict F, const fpr *restrict G,
+	const fpr *restrict f, const fpr *restrict g, unsigned logn);
+
+/*
+ * Given F, G, f and g (in FFT representation), compute F*f+G*g
+ * (also in FFT representation). Destination d MUST NOT overlap with
+ * any of the source arrays.
+ */
+void Zf(poly_add_mul_fft)(fpr *restrict d,
 	const fpr *restrict F, const fpr *restrict G,
 	const fpr *restrict f, const fpr *restrict g, unsigned logn);
 
@@ -772,6 +794,37 @@ Zf(guaranteed_sign)(inner_shake256_context *rng, int16_t *restrict sig,
 	const int8_t *restrict h1, uint32_t bound, unsigned logn,
 	uint8_t *restrict tmp);
 
+/**
+ * Required space in terms of number of fpr values for an expanded secret key,
+ * which can be used in Zf(fft_sign).
+ */
+#define EXPANDED_SECKEY_SIZE(logn) (9 << ((logn) - 1))
+
+/**
+ * Expands a secret key given by the key generation, to produce the secret key
+ * basis [[f,g], [F,G]] in FFT-representation, as well as 1/(f^* f + g^* g).
+ *
+ * Note: expanded_seckey[] must have space for at least 4.5 2^logn fprs, since
+ * there are 4 polynomials in the basis and 1/(f* f + g* g) is self-adjoint.
+ */
+void
+Zf(expand_seckey)(fpr *restrict expanded_seckey,
+	const int8_t *f, const int8_t *g, const int8_t *F, unsigned logn);
+
+/**
+ * Generates a signature of a message with hash h, that is guaranteed to be a
+ * valid signature.
+ *
+ * Here, h is assumed to have 2^logn bits, so contains 2^logn / 8 bytes!
+ *
+ * Note: tmp[] must have space for at least ??? * 2^logn bytes.
+ * TODO: fix value
+ */
+void
+Zf(fft_sign)(inner_shake256_context *rng, int16_t *restrict sig,
+	const fpr *restrict expanded_seckey, const uint8_t *restrict h,
+	uint32_t bound, unsigned logn, uint8_t *restrict tmp);
+
 /* ==================================================================== */
 /*
  * Signature verification functions (vrfy.c).
@@ -813,5 +866,19 @@ Zf(verify_nearest_plane)(const int8_t *restrict h0, const int8_t *restrict h1,
 	int16_t *restrict s0, const int16_t *restrict s1,
 	const fpr *restrict q00, const fpr *restrict q10, const fpr *restrict q11,
 	uint32_t bound, unsigned logn, uint8_t *restrict tmp);
+
+/**
+ * Verify if a signature (s0, s1) is valid for a hashed message h of length n/4
+ * bytes, where s0 is reconstructed with simple rounding.
+ * The signature is accepted iff the squared l2-norm of (h0 - 2s0, h1 - 2s1) is
+ * at most bound wrt quadratic form Q.
+ *
+ * Note: tmp[] must have space for at least 16 * 2^logn bytes.
+ */
+int
+Zf(verify_simple_rounding_fft)(const uint8_t *restrict h,
+	const int16_t *restrict s1, const fpr *restrict q00,
+	const fpr *restrict q10, const fpr *restrict q11, uint32_t bound,
+	unsigned logn, uint8_t *restrict tmp);
 
 #endif

@@ -67,7 +67,7 @@ int main() {
  * mu = 1/2 is in the odd indices.
  * Probabilities are scaled up by 2^63.
  */
-static const uint64_t gauss_1292[26] = {
+static const uint64_t gauss_1292[24] = {
 	2847982254933138603u, 5285010687306232178u,
 	3115855658194614154u, 2424313226695581870u,
 	 629245045388085487u,  372648834165936922u,
@@ -80,7 +80,7 @@ static const uint64_t gauss_1292[26] = {
 	             809457u,               60785u,
 	               1500u,                  83u,
 	                  2u,                   0u,
-	                  0u,                   0u,
+//	                  0u,                   0u,
 };
 
 /*
@@ -122,6 +122,7 @@ mkgauss_1292(prng *rng, unsigned logn, uint8_t double_mu)
 		 *    or set to 0 otherwise.
 		 */
 		r = prng_get_u64(rng);
+
 		neg = (uint32_t)(r >> 63);
 		r &= ~((uint64_t)1 << 63);
 		f = (uint32_t)((r - gauss_1292[double_mu]) >> 63);
@@ -133,9 +134,11 @@ mkgauss_1292(prng *rng, unsigned logn, uint8_t double_mu)
 		 * than r, unless the flag f was already 1.
 		 */
 		v = 0;
+
 		r = prng_get_u64(rng);
+
 		r &= ~((uint64_t)1 << 63);
-		for (k = 1; k < 13; k ++) {
+		for (k = 1; k < 12; k ++) {
 			uint32_t t;
 			t = (uint32_t)((r - gauss_1292[2 * k + double_mu]) >> 63) ^ 1;
 			v |= k & -(t & (f ^ 1));
@@ -170,14 +173,12 @@ mkgauss_1292(prng *rng, unsigned logn, uint8_t double_mu)
 /*
  * Convert an integer polynomial (with small values) into the
  * representation with complex numbers.
+ * Also works when r and t overlap, since the loop goes in decreasing order.
  */
 static void
 smallints_to_fpr(fpr *r, const int8_t *t, unsigned logn)
 {
-	size_t n, u;
-
-	n = MKN(logn);
-	for (u = 0; u < n; u ++) {
+	for (size_t u = MKN(logn); u --> 0; ) {
 		r[u] = fpr_of(t[u]);
 	}
 }
@@ -395,6 +396,139 @@ do_guaranteed_sign(prng *rng, int16_t *restrict s1,
 }
 
 /*
+ * Compute signature of h: a vector (s0, s1) that is close to (h0, h1)/2 wrt Q.
+ * Here, s0 is not returned.
+ * 1 is returned iff (s0, s1) is a valid signature and s0 can be recovered from
+ * s1 with simple rounding.
+ *
+ * tmp must have room for at least 24 * 2^logn bytes
+ */
+static int
+do_fft_sign(prng *rng, int16_t *restrict s1,
+	const fpr *restrict expanded_seckey, const uint8_t *restrict h,
+	uint32_t bound, unsigned logn, uint8_t *restrict tmp)
+{
+	size_t n, u, v, w;
+	int8_t *x0, *x1;
+	const fpr *tf, *tg, *tF, *tG, *tiq00;
+	fpr *tx0, *tx1, *tres;
+	int32_t norm, z;
+
+	n = MKN(logn);
+
+	tf = expanded_seckey;
+	tg = tf + n;
+	tF = tg + n;
+	tG = tF + n;
+	tiq00 = tG + n;
+
+	tx0 = (fpr *)tmp;
+	tx1 = tx0 + n;
+	tres = tx1 + n;
+
+	x0 = (int8_t *)(tres + n);
+	x1 = x0 + n;
+	norm = 0;
+
+	/*
+	 * Set the target vector to B * (h0, h1)^T.
+	 */
+	for (u = 0; u < n / 8; u ++ ) {
+		uint8_t h0, h1;
+
+		h0 = h[u];
+		h1 = h[n / 8 + u];
+		for (v = 0; v < 8; v ++) {
+			tx0[8 * u + v] = fpr_of(h0 & 1);
+			tx1[8 * u + v] = fpr_of(h1 & 1);
+			h0 >>= 1;
+			h1 >>= 1;
+		}
+	}
+
+	Zf(FFT)(tx0, logn);
+	Zf(FFT)(tx1, logn);
+
+	Zf(poly_add_mul_fft)(tres, tx0, tx1, tf, tF, logn);
+	Zf(iFFT)(tres, logn);
+
+	/*
+	 * Sample and write the result in (x0, x1). Gaussian smoothing is used to
+	 * not reveal information on the secret basis.
+	 */
+	for (u = 0; u < n; u ++) {
+		z = fpr_rint(tres[u]) & 1;
+		z = 2*mkgauss_1292(rng, logn, z) - z;
+		x0[u] = (int8_t) z;
+		norm += z*z;
+	}
+
+	Zf(poly_add_mul_fft)(tres, tx0, tx1, tg, tG, logn);
+	Zf(iFFT)(tres, logn);
+
+	for (u = 0; u < n; u ++) {
+		z = fpr_rint(tres[u]) & 1;
+		z = 2*mkgauss_1292(rng, logn, z) - z;
+		x1[u] = (int8_t) z;
+		norm += z*z;
+	}
+
+	/*
+	 * Test whether the l2-norm of (x0, x1) is below the given bound. The
+	 * code below uses only 32-bit operations to compute the squared norm,
+	 * since the max. value is 2n * 128^2 <= 2^24 (when logn <= 9).
+	 * For a large enough verification margin, it is unlikely that the
+	 * norm of the gaussian (x0, x1) is too large.
+	 */
+	if ((uint32_t)norm > bound) {
+		// Norm is too large, so signature would not be valid.
+		return 0;
+	}
+
+	/*
+	 * Note that (x0, x1) == B (h, 0) (mod 2) so we obtain a lattice point
+	 * (s0, s1) that is close to (h0, h1)/2 wrt Q by calculating:
+	 *     (s0, s1) = ((h, 0) - B^{-1} (x0, x1)) / 2.
+	 */
+	smallints_to_fpr(tx0, x0, logn);
+	smallints_to_fpr(tx1, x1, logn);
+
+	Zf(FFT)(tx0, logn);
+	Zf(FFT)(tx1, logn);
+
+	Zf(poly_add_muladj_fft)(tres, tx0, tx1, tf, tg, logn);
+	Zf(poly_mul_autoadj_fft)(tres, tiq00, logn);
+	Zf(iFFT)(tres, logn); // err = (f^* x0 + g^* x1) / q00
+
+	// If err is not in (-.5,.5)^n, simple rounding will fail
+	for (u = 0; u < n; u++) {
+		if (!fpr_lt(fpr_neg(fpr_onehalf), tres[u])
+				|| !fpr_lt(tres[u], fpr_onehalf)) {
+			return 0;
+		}
+	}
+
+	for (u = 0; u < n; u++)
+		tx1[u] = fpr_neg(tx1[u]);
+
+	Zf(poly_add_mul_fft)(tres, tx0, tx1, tg, tf, logn);
+	Zf(iFFT)(tres, logn);
+
+	for (u = 0, w = 0; w < n; u ++ ) {
+		uint8_t h1;
+
+		h1 = h[n / 8 + u];
+		for (v = 0; v < 8; v ++, w ++) {
+			s1[w] = (int16_t)((h1 & 1) - fpr_rint(tres[w])) / 2;
+			h1 >>= 1;
+		}
+	}
+
+
+	return 1;
+}
+
+/*
  * Compute signature of (h0, h1): a vector (s0, s1) that is close to (h0, h1)/2 wrt Q.
  * If 1 is returned, (s0, s1) is a valid signature.
  *
@@ -516,3 +650,59 @@ Zf(complete_sign)(inner_shake256_context *rng,
 	} while (!do_complete_sign(&p, s0, s1, f, g, F, G,
 			h0, h1, bound, logn, tmp));
 }
+
+
+/* see inner.h */
+void
+Zf(expand_seckey)(fpr *restrict expanded_seckey,
+	const int8_t *f, const int8_t *g, const int8_t *F, unsigned logn)
+{
+	size_t n, hn, u;
+	fpr *bf, *bg, *bF, *bG, *biq00;
+
+	n = MKN(logn);
+	hn = n >> 1;
+
+	bf = expanded_seckey;
+	bg = bf + n;
+	bF = bg + n;
+	bG = bF + n;
+	biq00 = bG + n;
+
+	/*
+	 * We load the private key elements directly into the 2x2 matrix B.
+	 */
+	smallints_to_fpr(bf, f, logn);
+	smallints_to_fpr(bg, g, logn);
+	smallints_to_fpr(bF, F, logn);
+
+	/*
+	 * Compute the FFT for the key elements
+	 */
+	Zf(FFT)(bf, logn);
+	Zf(FFT)(bg, logn);
+	Zf(FFT)(bF, logn);
+
+	/**
+	 * Compute G = (1 + gF) / f
+	 */
+	Zf(poly_prod_fft)(bG, bg, bF, logn);
+	for (u = 0; u < hn; u++)
+		bG[u] = fpr_add(bG[u], fpr_one);
+	Zf(poly_div_fft)(bG, bf, logn);
+
+	Zf(poly_invnorm2_fft)(biq00, bf, bg, logn);
+}
+
+/* see inner.h */
+void
+Zf(fft_sign)(inner_shake256_context *rng, int16_t *restrict sig,
+	const fpr *restrict expanded_seckey, const uint8_t *restrict h,
+	uint32_t bound, unsigned logn, uint8_t *restrict tmp)
+{
+	prng p;
+	do {
+		Zf(prng_init)(&p, rng);
+	} while (!do_fft_sign(&p, sig, expanded_seckey, h, bound, logn, tmp));
+}
+

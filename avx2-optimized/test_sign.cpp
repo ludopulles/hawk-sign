@@ -145,15 +145,17 @@ void output_poly(int16_t *x)
 
 const int num_samples = 4 * 1024;
 
+uint8_t pregen_h[num_samples][n/4] = {};
 int8_t pregen_h0[num_samples][n], pregen_h1[num_samples][n];
-int16_t pregen_s0[num_samples][n], pregen_s1[num_samples][n];
+int16_t pregen_s0[num_samples][n], pregen_s1[num_samples][n], pregen_s[num_samples][n];
 
 void measure_sign_speed(uint32_t bound)
 {
 	// uint8_t b[42 << logn];
 	uint8_t b[50 << logn];
 	int8_t f[n], g[n], F[n], G[n];
-	int16_t s1[n];
+	fpr exp_sk[EXPANDED_SECKEY_SIZE(logn)]; // if logn is not known at compile-time, take fixed value
+	int16_t s0[n], s1[n];
 	fpr q00[n], q10[n], q11[n];
 	unsigned char seed[48];
 	inner_shake256_context sc;
@@ -167,10 +169,16 @@ void measure_sign_speed(uint32_t bound)
 
 	// One key generation
 	Zf(keygen)(&sc, f, g, F, G, q00, q10, q11, logn, b);
+	Zf(expand_seckey)(exp_sk, f, g, F, logn);
 
+	// memset(pregen_h, 0, num_samples * n / 4);
 	for (int rep = 0; rep < num_samples; rep++) {
 		random_hash(pregen_h0[rep], logn);
 		random_hash(pregen_h1[rep], logn);
+		for (unsigned i = 0; i < n; i++) {
+			pregen_h[rep][i/8] |= pregen_h0[rep][i] << (i % 8);
+			pregen_h[rep][(n + i) / 8] |= pregen_h1[rep][i] << (i % 8);
+		}
 	}
 
 	// Also pregenerate all signatures
@@ -190,14 +198,24 @@ void measure_sign_speed(uint32_t bound)
 
 	gettimeofday(&t0, NULL);
 	for (int rep = 0; rep < num_samples; rep++) {
-		Zf(guaranteed_sign)(&sc, s1, f, g, F, G, q00, pregen_h0[rep], pregen_h1[rep], bound, logn, b);
+		// Zf(guaranteed_sign)(&sc, s1, f, g, F, G, q00, pregen_h0[rep], pregen_h1[rep], bound, logn, b);
+		Zf(expand_seckey)(exp_sk, f, g, F, logn);
+		Zf(fft_sign)(&sc, pregen_s[rep], exp_sk, pregen_h[rep], bound, logn, b);
 	}
 	gettimeofday(&t1, NULL);
 	ll gs_us = time_diff(&t0, &t1);
 
+	gettimeofday(&t0, NULL);
+	for (int rep = 0; rep < num_samples; rep++) {
+		Zf(fft_sign)(&sc, pregen_s[rep], exp_sk, pregen_h[rep], bound, logn, b);
+	}
+	gettimeofday(&t1, NULL);
+	ll fs_us = time_diff(&t0, &t1);
+
 	printf("  complete_sign: %.1f us/sign\n", (double)cs_us / num_samples);
 	printf("           sign: %.1f us/sign\n", (double) s_us / num_samples);
 	printf("guaranteed_sign: %.1f us/sign\n", (double)gs_us / num_samples);
+	printf("       fft_sign: %.1f us/sign\n", (double)fs_us / num_samples);
 
 	// Run tests:
 	int nr_cor = 0;
@@ -205,18 +223,27 @@ void measure_sign_speed(uint32_t bound)
 	for (int rep = 0; rep < num_samples; rep++)
 		nr_cor += Zf(complete_verify)(pregen_h0[rep], pregen_h1[rep], pregen_s0[rep], pregen_s1[rep], q00, q10, q11, bound, logn, b);
 	gettimeofday(&t1, NULL);
+	printf("# correct = %d\n", nr_cor);
 	ll cv_us = time_diff(&t0, &t1);
 
-	printf("# correct = %d\n", nr_cor);
 	nr_cor = 0;
 	gettimeofday(&t0, NULL);
 	for (int rep = 0; rep < num_samples; rep++) {
-		nr_cor += Zf(verify_simple_rounding)(pregen_h0[rep], pregen_h1[rep], pregen_s0[rep], pregen_s1[rep], q00, q10, q11, bound, logn, b);
+		nr_cor += Zf(verify_simple_rounding)(pregen_h0[rep], pregen_h1[rep], s0, pregen_s1[rep], q00, q10, q11, bound, logn, b);
 	}
 	gettimeofday(&t1, NULL);
+	printf("# correct = %d\n", nr_cor);
 	ll vsr_us = time_diff(&t0, &t1);
 
+	nr_cor = 0;
+	gettimeofday(&t0, NULL);
+	for (int rep = 0; rep < num_samples; rep++) {
+		nr_cor += Zf(verify_simple_rounding_fft)(pregen_h[rep], pregen_s1[rep], q00, q10, q11, bound, logn, b);
+	}
+	gettimeofday(&t1, NULL);
 	printf("# correct = %d\n", nr_cor);
+	ll vfsr_us = time_diff(&t0, &t1);
+
 	nr_cor = 0;
 	gettimeofday(&t0, NULL);
 	for (int rep = 0; rep < num_samples; rep++) {
@@ -241,6 +268,7 @@ void measure_sign_speed(uint32_t bound)
 
 	printf("       complete_verify: %.1f us/vrfy\n", (double) cv_us / num_samples);
 	printf("verify_simple_rounding: %.1f us/vrfy\n", (double) vsr_us / num_samples);
+	printf("verify_simple_roundfft: %.1f us/vrfy\n", (double)vfsr_us / num_samples);
 	printf("  verify_nearest_plane: %.1f us/vrfy\n", (double) vnp_us / num_samples);
 	printf("verify_nearest_plane_t: %.1f us/vrfy\n", (double) vnpt_us / num_samples);
 }
@@ -270,6 +298,8 @@ WorkerResult measure_signatures(uint32_t bound)
 	fpr q00[n], q10[n], q11[n];
 	unsigned char seed[48];
 	inner_shake256_context sc;
+	fpr exp_sk[EXPANDED_SECKEY_SIZE(logn)];
+
 	const int num_reps = 1024 * 20;
 
 	// Initialize a RNG.
@@ -283,8 +313,10 @@ WorkerResult measure_signatures(uint32_t bound)
 
 	for (int rep = 0; rep < num_reps; rep++) {
 		// Generate key pair.
-		if ((rep & 1023) == 0)
+		if ((rep & 1023) == 0) {
 			Zf(keygen)(&sc, f, g, F, G, q00, q10, q11, logn, b);
+			Zf(expand_seckey)(exp_sk, f, g, F, logn);
+		}
 
 		// make a signature of a random message...
 		random_hash(h0, logn);
