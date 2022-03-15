@@ -65,8 +65,10 @@ void benchmark(uint32_t bound) {
 		uint64_t dummy_u64;
 		fpr dummy_fpr;
 	} tmp;
-	int8_t f[512], g[512], F[512], G[512], h0[512], h1[512];
+	int8_t f[512], g[512], F[512], G[512];
+	uint8_t h[512 / 4];
 	fpr q00[512], q10[512], q11[512];
+	fpr exp_sk[EXPANDED_SECKEY_SIZE(logn)]; // if logn is not known at compile-time, take fixed value
 	int16_t sig[512];
 	unsigned char seed[48];
 	inner_shake256_context sc;
@@ -84,6 +86,7 @@ void benchmark(uint32_t bound) {
 
 	// Generate key pair.
 	Zf(keygen)(&sc, f, g, F, G, q00, q10, q11, logn, tmp.b);
+	Zf(expand_seckey)(exp_sk, f, g, F, logn);
 
 	gettimeofday(&t1, NULL);
 	printf("Key generation took %lld microseconds\n", time_diff(&t0, &t1));
@@ -95,11 +98,11 @@ void benchmark(uint32_t bound) {
 
 	for (int rep = 0; rep < n_repetitions; rep++) {
 		// make a signature of a random message...
-		random_hash(h0, logn);
-		random_hash(h1, logn);
+		randombytes(h, n / 4);
 
 		// Compute the signature.
-		Zf(sign)(&sc, sig, f, g, F, G, h0, h1, bound, logn, tmp.b);
+		// Zf(sign)(&sc, sig, f, g, F, G, h0, h1, bound, logn, tmp.b);
+		Zf(fft_sign)(&sc, sig, exp_sk, h, bound, logn, tmp.b);
 	}
 
 	gettimeofday(&t1, NULL);
