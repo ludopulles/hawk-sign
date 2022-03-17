@@ -67,7 +67,7 @@ int main() {
  * mu = 1/2 is in the odd indices.
  * Probabilities are scaled up by 2^63.
  */
-static const uint64_t gauss_1292[24] = {
+static const uint64_t gauss_1292[26] = {
 	2847982254933138603u, 5285010687306232178u,
 	3115855658194614154u, 2424313226695581870u,
 	 629245045388085487u,  372648834165936922u,
@@ -80,7 +80,7 @@ static const uint64_t gauss_1292[24] = {
 	             809457u,               60785u,
 	               1500u,                  83u,
 	                  2u,                   0u,
-//	                  0u,                   0u,
+	                  0u,                   0u,
 };
 
 /*
@@ -138,7 +138,7 @@ mkgauss_1292(prng *rng, unsigned logn, uint8_t double_mu)
 		r = prng_get_u64(rng);
 
 		r &= ~((uint64_t)1 << 63);
-		for (k = 1; k < 12; k ++) {
+		for (k = 1; k < 13; k ++) {
 			uint32_t t;
 			t = (uint32_t)((r - gauss_1292[2 * k + double_mu]) >> 63) ^ 1;
 			v |= k & -(t & (f ^ 1));
