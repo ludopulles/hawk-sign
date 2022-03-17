@@ -428,14 +428,11 @@ keygen_count_fails(inner_shake256_context *rng,
 	size_t n = MKN(logn);
 	for (;;) {
 		fpr *rt1, *rt2;
-		sampler_context spc;
-		void *samp_ctx;
-		spc.sigma_min = fpr_sigma_min[logn];
-		Zf(prng_init)(&spc.p, rng);
-		samp_ctx = &spc;
-		poly_small_mkgauss(samp_ctx, f, logn, 128);
-		poly_small_mkgauss(samp_ctx, g, logn, 128);
-		if (!solve_NTRU(logn, F, G, f, g, 128, (uint32_t *)tmp)) {
+		prng p;
+		Zf(prng_init)(&p, rng);
+		poly_small_mkgauss(&p, f, logn);
+		poly_small_mkgauss(&p, g, logn);
+		if (!solve_NTRU(logn, F, G, f, g, 127, (uint32_t *)tmp)) {
 			(*num_fails)++;
 			continue;
 		}

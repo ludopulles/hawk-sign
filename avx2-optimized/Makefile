@@ -7,7 +7,7 @@ CFLAGS = -W -Wall -Wshadow -O2 -mavx2 -fdiagnostics-color=always
 #CFLAGS = -W -Wall -Wshadow -g -fsanitize=address,undefined
 LIBS = -lpthread -lm
 CXX = g++
-CXXFLAGS = --std=c++11 $(CFLAGS)
+CXXFLAGS = --std=c++17 $(CFLAGS)
 
 OBJ = build/compress.o build/fft.o build/ffo.o build/fpr.o build/keygen.o build/rng.o build/sampler.o build/shake.o build/sign.o build/vrfy.o
 PROGS = bin/main bin/test_keygen bin/test_sign bin/config_fg bin/config_FG bin/test_babai bin/test_enum bin/test_compress_sig

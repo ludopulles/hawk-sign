@@ -84,88 +84,67 @@ static const uint64_t gauss_1292[26] = {
 };
 
 /*
- * Generate a random value with a Gaussian distribution centered on double_mu/2.
- * The RNG must be ready for extraction (already flipped).
+ * Sample a integer with parity equal to double_mu from a Gaussian distribution
+ * with standard deviation 2 * 1.292, i.e. a value x == parity (mod 2) is
+ * chosen with probability proportional to
  *
- * Distribution has standard deviation 1.292 sqrt(512/N).
- * Note/TODO: Watch out with N != 512, the Renyi-divergence with the perfect
- * discrete gaussian is unknown.
+ *     exp(- x^2 / (8 1.292^2)).
+ *
+ * Note: The RNG must be ready for extraction (already flipped).
  */
-static int
-mkgauss_1292(prng *rng, unsigned logn, uint8_t double_mu)
+static inline int
+mkgauss_1292(prng *rng, uint8_t double_mu)
 {
-	unsigned u, g;
-	int val;
+	/* We use two random 64-bit values. First value decides on whether the
+	 * generated value is 0, and, if not, the sign of the value. Second
+	 * random 64-bit word is used to generate the non-zero value.
+	 *
+	 * For constant-time code we have to read the complete table. Currently
+	 * sampling takes up most time of the signing process, so this is
+	 * something that should be optimized.
+	 */
+	uint64_t r;
+	uint32_t f, v, k, neg;
 
-	g = 1U << (9 - logn);
-	val = 0;
-	for (u = 0; u < g; u ++) {
-		/*
-		 * Each iteration generates one value with the
-		 * Gaussian distribution for N = 512.
-		 *
-		 * We use two random 64-bit values. First value decides on whether the
-		 * generated value is 0, and, if not, the sign of the value. Second
-		 * random 64-bit word is used to generate the non-zero value.
-		 *
-		 * For constant-time code we have to read the complete table. Currently
-		 * sampling takes up most time of the signing process, so this is
-		 * something that should be optimized.
-		 */
-		uint64_t r;
-		uint32_t f, v, k, neg;
+	/*
+	 * First value:
+	 *  - flag 'neg' is randomly selected to be 0 or 1.
+	 *  - flag 'f' is set to 1 if the generated value is zero,
+	 *    or set to 0 otherwise.
+	 */
+	r = prng_get_u64(rng);
 
-		/*
-		 * First value:
-		 *  - flag 'neg' is randomly selected to be 0 or 1.
-		 *  - flag 'f' is set to 1 if the generated value is zero,
-		 *    or set to 0 otherwise.
-		 */
-		r = prng_get_u64(rng);
+	neg = (uint32_t)(r >> 63);
+	r &= ~((uint64_t)1 << 63);
+	f = (uint32_t)((r - gauss_1292[double_mu]) >> 63);
 
-		neg = (uint32_t)(r >> 63);
-		r &= ~((uint64_t)1 << 63);
-		f = (uint32_t)((r - gauss_1292[double_mu]) >> 63);
+	/*
+	 * We produce a new random 63-bit integer r, and go over
+	 * the array, starting at index 1. The first time an array element with
+	 * value less than or equal to r, v is set to the 'right' value, and f
+	 * is set to 1 so v only gets a value once.
+	 */
+	v = double_mu;
 
-		/*
-		 * We produce a new random 63-bit integer r, and go over
-		 * the array, starting at index 1. We store in v the
-		 * index of the first array element which is not greater
-		 * than r, unless the flag f was already 1.
-		 */
-		v = 0;
+	r = prng_get_u64(rng);
 
-		r = prng_get_u64(rng);
-
-		r &= ~((uint64_t)1 << 63);
-		for (k = 1; k < 13; k ++) {
-			uint32_t t;
-			t = (uint32_t)((r - gauss_1292[2 * k + double_mu]) >> 63) ^ 1;
-			v |= k & -(t & (f ^ 1));
-			f |= t;
-		}
-
-		/*
-		 * We apply the sign ('neg' flag). If the value is zero and mu = 0,
-		 * the sign has no effect. Moreover, if mu = 1/2 and neg=0, add one.
-		 */
-		v = (v ^ -neg) + neg + (~neg & double_mu);
-
-		/*
-		 * Generated value is added to val.
-		 */
-		val += *(int32_t *)&v;
-
-		/*
-		 * In the case that this code is run multiple times, we want to use
-		 * center mu = 0 in the other runs (g > 0), as to not change the center
-		 * and only scale the standard deviation. However, we might be a bit off
-		 * since sum of discrete gaussians might not be a discrete gaussian (it
-		 * is only true in the continuous limit).
-		 */
-		double_mu = 0;
+	r &= ~((uint64_t)1 << 63);
+	for (k = 1; k < 13; k ++) {
+		uint32_t t;
+		t = (uint32_t)((r - gauss_1292[2 * k + double_mu]) >> 63) ^ 1;
+		v |= (k << 1) & -(t & (f ^ 1));
+		f |= t;
 	}
-	return val;
+
+	/*
+	 * We apply the sign ('neg' flag).
+	 */
+	v = (v ^ -neg) + neg;
+
+	/*
+	 * Return v interpreted as a signed integer
+	 */
+	return *(int32_t *)&v;
 }
 
 // =============================================================================
@@ -187,7 +166,8 @@ smallints_to_fpr(fpr *r, const int8_t *t, unsigned logn)
  * Sample a vector (x0, x1) that is congruent to (t0, t1) = B * (h0, h1)^t modulo 2 from
  * a Discrete Gaussian with lattice coset 2Z^{2n} + (t0, t1) and standard deviation 1.292.
  * Returns whether or not (x0, x1) has a squared l2-norm less than bound.
- * Note: tmp must have a size of at least 6n bytes.
+ *
+ * Note: tmp[] must have space for at least 48 * 2^logn bytes.
  */
 static int
 sample_short(prng *rng, int8_t *restrict x0, int8_t *restrict x1,
@@ -244,13 +224,13 @@ sample_short(prng *rng, int8_t *restrict x0, int8_t *restrict x1,
 	 */
 	for (u = 0; u < n; u ++) {
 		z = fpr_rint(t2[u]) & 1;
-		z = 2*mkgauss_1292(rng, logn, z) - z;
+		z = mkgauss_1292(rng, z);
 		x0[u] = (int8_t) z;
 		norm += z*z;
 	}
 	for (u = 0; u < n; u ++) {
 		z = fpr_rint(t3[u]) & 1;
-		z = 2*mkgauss_1292(rng, logn, z) - z;
+		z = mkgauss_1292(rng, z);
 		x1[u] = (int8_t) z;
 		norm += z*z;
 	}
@@ -272,7 +252,7 @@ sample_short(prng *rng, int8_t *restrict x0, int8_t *restrict x1,
  * When 1 is returned, there exists some s0 for which (s0, s1) is a signature
  * but reconstructing s0 might still fail.
  *
- * tmp must have room for at least 50 * 2^logn bytes
+ * Note: tmp[] must have space for at least 50 * 2^logn bytes.
  */
 static int
 do_sign(prng *rng, int16_t *restrict s1,
@@ -329,7 +309,7 @@ do_sign(prng *rng, int16_t *restrict s1,
  * 1 is returned iff (s0, s1) is a valid signature and s0 can be recovered from
  * s1 with simple rounding.
  *
- * tmp must have room for at least 50 * 2^logn bytes
+ * Note: tmp[] must have space for at least 50 * 2^logn bytes.
  */
 static int
 do_guaranteed_sign(prng *rng, int16_t *restrict s1,
@@ -375,12 +355,13 @@ do_guaranteed_sign(prng *rng, int16_t *restrict s1,
 
 	Zf(poly_add_muladj_fft)(t4, tx0, tx1, tf, tg, logn);
 	Zf(poly_div_autoadj_fft)(t4, q00, logn);
-	Zf(iFFT)(t4, logn); // err = (f^* x0 + g^* x1) / q00
+	Zf(iFFT)(t4, logn); // err / 2 = (f^* x0 + g^* x1) / q00
 
-	// If err is not in (-.5,.5)^n, simple rounding will fail
+	// If err / 2 is not in (-.5,.5)^n, simple rounding will fail
 	for (u = 0; u < n; u++) {
-		if (!fpr_lt(fpr_neg(fpr_onehalf), t4[u])
-			|| !fpr_lt(t4[u], fpr_onehalf)) return 0;
+		if (!fpr_lt(fpr_neg(fpr_one), t4[u]) || !fpr_lt(t4[u], fpr_one)) {
+			return 0;
+		}
 	}
 
 	Zf(poly_mul_fft)(tf, tx1, logn);
@@ -401,7 +382,7 @@ do_guaranteed_sign(prng *rng, int16_t *restrict s1,
  * 1 is returned iff (s0, s1) is a valid signature and s0 can be recovered from
  * s1 with simple rounding.
  *
- * tmp must have room for at least 24 * 2^logn bytes
+ * Note: tmp[] must have space for at least 26 * 2^logn bytes.
  */
 static int
 do_fft_sign(prng *rng, int16_t *restrict s1,
@@ -414,7 +395,9 @@ do_fft_sign(prng *rng, int16_t *restrict s1,
 	fpr *tx0, *tx1, *tres;
 	int32_t norm, z;
 
+
 	n = MKN(logn);
+	norm = 0;
 
 	tf = expanded_seckey;
 	tg = tf + n;
@@ -425,50 +408,55 @@ do_fft_sign(prng *rng, int16_t *restrict s1,
 	tx0 = (fpr *)tmp;
 	tx1 = tx0 + n;
 	tres = tx1 + n;
-
 	x0 = (int8_t *)(tres + n);
 	x1 = x0 + n;
-	norm = 0;
 
 	/*
-	 * Set the target vector to B * (h0, h1)^T.
+	 * Set the target vector to (h0, h1) B (row-notation).
 	 */
-	for (u = 0; u < n / 8; u ++ ) {
+	for (u = 0, w = 0; w < n; u ++ ) {
 		uint8_t h0, h1;
 
 		h0 = h[u];
 		h1 = h[n / 8 + u];
-		for (v = 0; v < 8; v ++) {
-			tx0[8 * u + v] = fpr_of(h0 & 1);
-			tx1[8 * u + v] = fpr_of(h1 & 1);
+		for (v = 0; v < 8; v ++, w ++) {
+			tx0[w] = fpr_of(h0 & 1);
+			tx1[w] = fpr_of(h1 & 1);
 			h0 >>= 1;
 			h1 >>= 1;
 		}
 	}
 
+	/*
+	 * Sample (x0, x1) according to a discrete gaussian distribution on 2
+	 * Z^{2n} + (h0, h1) B with standard deviation 2 sigma_{sig}. Gaussian
+	 * smoothing is used to not reveal information on the secret basis.
+	 */
 	Zf(FFT)(tx0, logn);
 	Zf(FFT)(tx1, logn);
 
+	/**
+	 * First, calculate the 0th component of (h0, h1) B, and sample x0.
+	 */
 	Zf(poly_add_mul_fft)(tres, tx0, tx1, tf, tF, logn);
 	Zf(iFFT)(tres, logn);
 
-	/*
-	 * Sample and write the result in (x0, x1). Gaussian smoothing is used to
-	 * not reveal information on the secret basis.
-	 */
 	for (u = 0; u < n; u ++) {
 		z = fpr_rint(tres[u]) & 1;
-		z = 2*mkgauss_1292(rng, logn, z) - z;
+		z = mkgauss_1292(rng, z);
 		x0[u] = (int8_t) z;
 		norm += z*z;
 	}
 
+	/**
+	 * Second, calculate the 1th component of (h0, h1) B, and sample x1.
+	 */
 	Zf(poly_add_mul_fft)(tres, tx0, tx1, tg, tG, logn);
 	Zf(iFFT)(tres, logn);
 
 	for (u = 0; u < n; u ++) {
 		z = fpr_rint(tres[u]) & 1;
-		z = 2*mkgauss_1292(rng, logn, z) - z;
+		z = mkgauss_1292(rng, z);
 		x1[u] = (int8_t) z;
 		norm += z*z;
 	}
@@ -480,41 +468,52 @@ do_fft_sign(prng *rng, int16_t *restrict s1,
 	 * For a large enough verification margin, it is unlikely that the
 	 * norm of the gaussian (x0, x1) is too large.
 	 */
-	if ((uint32_t)norm > bound) {
+	if ((uint32_t)norm >= bound) {
 		// Norm is too large, so signature would not be valid.
 		return 0;
 	}
 
-	/*
-	 * Note that (x0, x1) == B (h, 0) (mod 2) so we obtain a lattice point
-	 * (s0, s1) that is close to (h0, h1)/2 wrt Q by calculating:
-	 *     (s0, s1) = ((h, 0) - B^{-1} (x0, x1)) / 2.
-	 */
 	smallints_to_fpr(tx0, x0, logn);
 	smallints_to_fpr(tx1, x1, logn);
-
 	Zf(FFT)(tx0, logn);
 	Zf(FFT)(tx1, logn);
 
+	/**
+	 * Calculate the rounding errors that occur when we want to recover s0 from
+	 * s1 during verification of this signature. These errors should be of
+	 * absolute value at most 1/2.
+	 * The errors are calculated by:
+	 *
+	 *     (f^* x0 + g^* x1) / (f^* f + g^* g).
+	 *
+	 * If err / 2 is not in (-.5,.5)^n, verification will reconstruct a
+	 * different s0 so the signature may not be valid anymore.
+	 */
 	Zf(poly_add_muladj_fft)(tres, tx0, tx1, tf, tg, logn);
 	Zf(poly_mul_autoadj_fft)(tres, tiq00, logn);
-	Zf(iFFT)(tres, logn); // err = (f^* x0 + g^* x1) / q00
+	Zf(iFFT)(tres, logn);
 
-	// If err is not in (-.5,.5)^n, simple rounding will fail
 	for (u = 0; u < n; u++) {
-		if (!fpr_lt(fpr_neg(fpr_onehalf), tres[u])
-				|| !fpr_lt(tres[u], fpr_onehalf)) {
+		if (!fpr_lt(fpr_neg(fpr_one), tres[u]) || !fpr_lt(tres[u], fpr_one)) {
 			return 0;
 		}
 	}
 
-	for (u = 0; u < n; u++)
-		tx1[u] = fpr_neg(tx1[u]);
-
+	/*
+	 * In row-notation, (x0, x1) == (h0, h1) B (mod 2) holds while it also
+	 * close to (h, 0) B since the discrete gaussian distribution has small
+	 * standard deviation. Thus, (s0, s1) := ((h0, h1) - (x0, x1) B^{-1}) / 2
+	 * is a lattice point that is close to (h0, h1)/2 with respect to the
+	 * quadratic form Q.
+	 *
+	 * Note: B = [[f, g], [F, G]] with det. 1 so B^{-1} = [[G, -g], [-F, f]]
+	 * yielding s1 = (h1 - (-x0 g + x1 f)) / 2.
+	 */
+	Zf(poly_neg)(tx0, logn);
 	Zf(poly_add_mul_fft)(tres, tx0, tx1, tg, tf, logn);
 	Zf(iFFT)(tres, logn);
 
-	for (u = 0, w = 0; w < n; u ++ ) {
+	for (u = 0, w = 0; w < n; u ++) {
 		uint8_t h1;
 
 		h1 = h[n / 8 + u];
@@ -524,7 +523,6 @@ do_fft_sign(prng *rng, int16_t *restrict s1,
 		}
 	}
 
-
 	return 1;
 }
 
@@ -532,7 +530,7 @@ do_fft_sign(prng *rng, int16_t *restrict s1,
  * Compute signature of (h0, h1): a vector (s0, s1) that is close to (h0, h1)/2 wrt Q.
  * If 1 is returned, (s0, s1) is a valid signature.
  *
- * tmp must have room for at least 50 * 2^logn bytes
+ * Note: tmp[] must have space for at least 50 * 2^logn bytes
  */
 static int
 do_complete_sign(prng *rng,

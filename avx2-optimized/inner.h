@@ -804,7 +804,8 @@ Zf(ffBabai_reduce)(const fpr *restrict f, const fpr *restrict g,
  * the basis vectors (f, g) and (F, G). A discrete gaussian with sigma = 1.425
  * is used to generate coefficients of f and g.
  *
- * tmp: buffer for intermediate values, of size >= 28*512 = 14336 bytes.
+ * Note: tmp[] must have space for at least 48 * 2^logn bytes.
+ * If Babai reduction is not done, at least 28 2^logn bytes are needed.
  */
 void
 Zf(keygen)(inner_shake256_context *rng,
@@ -883,13 +884,10 @@ Zf(expand_seckey)(fpr *restrict expanded_seckey,
 	const int8_t *f, const int8_t *g, const int8_t *F, unsigned logn);
 
 /**
- * Generates a signature of a message with hash h, that is guaranteed to be a
- * valid signature.
+ * Generates a signature of a message with hash h[] (of n/8 bytes long), which
+ * is guaranteed to be a valid signature.
  *
- * Here, h is assumed to have 2^logn bits, so contains 2^logn / 8 bytes!
- *
- * Note: tmp[] must have space for at least ??? * 2^logn bytes.
- * TODO: fix value
+ * Note: tmp[] must have space for at least 26 * 2^logn bytes.
  */
 void
 Zf(fft_sign)(inner_shake256_context *rng, int16_t *restrict sig,

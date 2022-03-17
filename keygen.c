@@ -2230,13 +2230,13 @@ static const size_t MAX_BL_SMALL[10] = { 1, 1, 2, 4, 4, 8, 16, 32, 64, 128 };
 #else
 static const size_t MAX_BL_SMALL[10] = {
 //  1, 1, 2, 2, 4, 7, 14, 27, 53, 106, 209 // (FALCON)
-	1, 1, 2, 2, 4, 6, 11, 21, 41,  82 //, ??
+	1, 1, 2, 2, 4, 6, 11, 21, 41,  82
 };
 #endif // __CONFIG_fg
 
 static const size_t MAX_BL_LARGE[9] = {
 //	2, 2, 5, 7, 12, 21, 40, 78, 157, 308 // (FALCON)
-	2, 2, 3, 5, 8, 16, 31, 61, 121 //, ??
+	2, 2, 3, 5, 8, 16, 31, 61, 121
 };
 
 /*
@@ -2258,7 +2258,6 @@ static const struct {
 	{ 599, 7 },
 	{ 1185, 12 },
 	{ 2370, 24 }
-	// , { ???, ??? }
 };
 
 /*
@@ -2354,72 +2353,55 @@ static const uint64_t gauss_1425[14] = {
  * Distribution has standard deviation 1.425 sqrt(512/N).
  */
 static int
-mkgauss_1425(void *samp_ctx, unsigned logn)
+mkgauss_1425(prng *rng)
 {
-	unsigned u, g;
-	int val;
+	/*
+	 * We use two random 64-bit values. First value
+	 * decides on whether the generated value is 0, and,
+	 * if not, the sign of the value. Second random 64-bit
+	 * word is used to generate the non-zero value.
+	 *
+	 * For constant-time code we have to read the complete
+	 * table. This has negligible cost, compared with the
+	 * remainder of the keygen process (solving the NTRU
+	 * equation).
+	 */
+	uint64_t r;
+	uint32_t f, v, k, neg;
 
-	sampler_context *sc = (sampler_context *)samp_ctx;
+	/*
+	 * First value:
+	 *  - flag 'neg' is randomly selected to be 0 or 1.
+	 *  - flag 'f' is set to 1 if the generated value is zero,
+	 *    or set to 0 otherwise.
+	 */
+	r = prng_get_u64(rng);
+	neg = (uint32_t)(r >> 63);
+	r &= ~((uint64_t)1 << 63);
+	f = (uint32_t)((r - gauss_1425[0]) >> 63);
 
-	g = 1U << (9 - logn);
-	val = 0;
-	for (u = 0; u < g; u ++) {
-		/*
-		 * Each iteration generates one value with the
-		 * Gaussian distribution for N = 512.
-		 *
-		 * We use two random 64-bit values. First value
-		 * decides on whether the generated value is 0, and,
-		 * if not, the sign of the value. Second random 64-bit
-		 * word is used to generate the non-zero value.
-		 *
-		 * For constant-time code we have to read the complete
-		 * table. This has negligible cost, compared with the
-		 * remainder of the keygen process (solving the NTRU
-		 * equation).
-		 */
-		uint64_t r;
-		uint32_t f, v, k, neg;
-
-		/*
-		 * First value:
-		 *  - flag 'neg' is randomly selected to be 0 or 1.
-		 *  - flag 'f' is set to 1 if the generated value is zero,
-		 *    or set to 0 otherwise.
-		 */
-		r = prng_get_u64(&sc->p);
-		neg = (uint32_t)(r >> 63);
-		r &= ~((uint64_t)1 << 63);
-		f = (uint32_t)((r - gauss_1425[0]) >> 63);
-
-		/*
-		 * We produce a new random 63-bit integer r, and go over
-		 * the array, starting at index 1. We store in v the
-		 * index of the first array element which is not greater
-		 * than r, unless the flag f was already 1.
-		 */
-		v = 0;
-		r = prng_get_u64(&sc->p);
-		r &= ~((uint64_t)1 << 63);
-		for (k = 1; k < 14; k ++) {
-			uint32_t t;
-			t = (uint32_t)((r - gauss_1425[k]) >> 63) ^ 1;
-			v |= k & -(t & (f ^ 1));
-			f |= t;
-		}
-
-		/*
-		 * We apply the sign ('neg' flag). If the value is zero,
-		 * the sign has no effect.
-		 */
-		v = (v ^ -neg) + neg;
-
-		/*
-		 * Generated value is added to val.
-		 */
-		val += *(int32_t *)&v;
+	/*
+	 * We produce a new random 63-bit integer r, and go over
+	 * the array, starting at index 1. We store in v the
+	 * index of the first array element which is not greater
+	 * than r, unless the flag f was already 1.
+	 */
+	v = 0;
+	r = prng_get_u64(rng);
+	r &= ~((uint64_t)1 << 63);
+	for (k = 1; k < 14; k ++) {
+		uint32_t t;
+		t = (uint32_t)((r - gauss_1425[k]) >> 63) ^ 1;
+		v |= k & -(t & (f ^ 1));
+		f |= t;
 	}
-	return val;
+
+	/*
+	 * We apply the sign ('neg' flag). If the value is zero,
+	 * the sign has no effect.
+	 */
+	v = (v ^ -neg) + neg;
+	return *(int32_t *)&v;
 }
 
 /*
@@ -2427,7 +2409,7 @@ mkgauss_1425(void *samp_ctx, unsigned logn)
  * also makes sure that the resultant of the polynomial with phi is odd.
  */
 static void
-poly_small_mkgauss(void *samp_ctx, int8_t *f, unsigned logn, int lim)
+poly_small_mkgauss(prng *rng, int8_t *f, unsigned logn)
 {
 	size_t n, u;
 	int s;
@@ -2438,26 +2420,26 @@ poly_small_mkgauss(void *samp_ctx, int8_t *f, unsigned logn, int lim)
 
 	for (u = n; u -- > 1; ) {
 		do {
-			s = mkgauss_1425(samp_ctx, logn);
+			s = mkgauss_1425(rng);
 			/*
 			 * We need the coefficient to fit within -127..+127;
 			 * realistically, this is always the case except for
 			 * the very low degrees (N = 2 or 4), for which there
 			 * is no real security anyway.
 			 */
-		} while (s <= -lim || s >= lim);
+		} while (s < -127 || s > 127);
 		mod2 ^= (unsigned)(s & 1);
 		f[u] = (int8_t)s;
 	}
 
 	do {
-		s = mkgauss_1425(samp_ctx, logn);
+		s = mkgauss_1425(rng);
 		/*
 		 * We need the sum of all coefficients to be 1; otherwise,
 		 * the resultant of the polynomial with X^N+1 will be even,
 		 * and the binary GCD will fail.
 		 */
-	} while (s <= -lim || s >= lim || mod2 == (unsigned)(s & 1));
+	} while (s < -127 || s > 127 || mod2 == (unsigned)(s & 1));
 	f[0] = (int8_t)s;
 }
 
@@ -4008,85 +3990,85 @@ Zf(keygen)(inner_shake256_context *rng,
 	 *
 	 *  - Generate f and g with the Gaussian distribution.
 	 *
-	 *  - If either Res(f,phi) or Res(g,phi) is even, try again.
+	 *  - If either N(f) or N(g) is even, try again.
 	 *
-	 *  - Solve the NTRU equation fG - gF = 1; if the solving fails,
-	 *    try again. Usual failure condition is when Res(f,phi)
-	 *    and Res(g,phi) are not prime to each other.
+	 *  - Solve the NTRU equation fG - gF = 1; if the solving fails, try again.
+	 *    Usual failure condition is when N(f) and N(g) are not coprime.
+	 *
+	 *  - Use Babai Reduction on F, G.
+	 *
+	 *  - Calculate the Gram matrix of the basis [[f, g], [F, G]].
 	 */
 	size_t n;
+	prng p;
+	fpr *rt1, *rt2;
 
 	n = MKN(logn);
+	rt1 = (fpr *)tmp;
+	rt2 = rt1 + n;
+
+	do {
+		/*
+		 * The coefficients of polynomials f and g will be generated from a
+		 * discrete gaussian that draws random numbers from a fast PRNG that is
+		 * seeded from a SHAKE context ('rng').
+		 */
+		Zf(prng_init)(&p, rng);
+
+		/*
+		 * The coefficients of f and g are generated independently of each other,
+		 * with a discrete Gaussian distribution of standard deviation 1.425. The
+		 * expected l2-norm of (f, g) is 2n 1.425^2.
+		 *
+		 * We require that N(f) and N(g) are both odd (the NTRU equation solver
+		 * requires it).
+		 */
+		poly_small_mkgauss(&p, f, logn);
+		poly_small_mkgauss(&p, g, logn);
+
+		/*
+		 * Try to solve the NTRU equation for polynomials f and g, i.e. find
+		 * polynomials F, G that satisfy
+		 *
+		 *     f * G - g * F = 1 (mod X^n + 1).
+		 */
+	} while (!solve_NTRU(logn, F, G, f, g, 127, (uint32_t *)tmp));
 
 	/*
-	 * In the binary case, coefficients of f and g are generated
-	 * independently of each other, with a discrete Gaussian
-	 * distribution of standard deviation 1.425. Then,
-	 * the two vectors have expected norm 2n * 1.425.
-	 *
-	 * We require that Res(f,phi) and Res(g,phi) are both odd (the
-	 * NTRU equation solver requires it).
+	 * Calculate q00, q10, q11 (in FFT representation) using
+	 * Q = B * adj(B^{T}).
 	 */
-	for (;;) {
-		fpr *rt1, *rt2;
-		int lim;
+	poly_small_to_fp(q00, f, logn);
+	poly_small_to_fp(rt1, g, logn);
+	poly_small_to_fp(q11, F, logn);
+	poly_small_to_fp(rt2, G, logn);
 
-		// Normal sampling. We use a fast PRNG seeded from our SHAKE context ('rng').
-		sampler_context spc;
-		void *samp_ctx;
-		spc.sigma_min = fpr_sigma_min[logn];
-		Zf(prng_init)(&spc.p, rng);
-		samp_ctx = &spc;
+	Zf(FFT)(q00, logn); // f
+	Zf(FFT)(rt1, logn); // g
+	Zf(FFT)(q11, logn); // F
+	Zf(FFT)(rt2, logn); // G
 
-		/*
-		 * Verify that all coefficients are within the bounds
-		 * defined in max_fg_bits. This is the case with
-		 * overwhelming probability; this guarantees that the
-		 * key will be encodable with FALCON_COMP_TRIM.
-		 */
-		lim = 128; // 1 << (Zf(max_fg_bits)[logn] - 1);
-		poly_small_mkgauss(samp_ctx, f, logn, lim);
-		poly_small_mkgauss(samp_ctx, g, logn, lim);
+	/*
+	 * Perform Babai's Nearest Plane Algorithm to reduce (F, G) with
+	 * respect to (f, g).
+	 * In this case, tmp needs to have size for 6 polynomials of size 2^logn.
+	 */
+	Zf(ffBabai_reduce)(q00, rt1, q11, rt2, F, G, logn, rt2 + n);
 
-		// Solve the NTRU equation to get F and G.
-		lim = 128; // (1 << (Zf(max_FG_bits)[logn] - 1)) - 1;
-		if (!solve_NTRU(logn, F, G, f, g, lim, (uint32_t *)tmp)) {
-			continue;
-		}
+	// q10 = F*adj(f) + G*adj(g)
+	Zf(poly_add_muladj_fft)(q10, q11, rt2, q00, rt1, logn);
 
-		// Calculate q00, q10, q11 (in FFT representation) using
-		// Q = B * adj(B^{T})
-		rt1 = (fpr *)tmp;
-		rt2 = rt1 + n;
-		poly_small_to_fp(q00, f, logn);
-		poly_small_to_fp(rt1, g, logn);
-		poly_small_to_fp(q11, F, logn);
-		poly_small_to_fp(rt2, G, logn);
-		Zf(FFT)(q00, logn); // f
-		Zf(FFT)(rt1, logn); // g
-		Zf(FFT)(q11, logn); // F
-		Zf(FFT)(rt2, logn); // G
+	// q00 = f*adj(f) + g*adj(g)
+	Zf(poly_mulselfadj_fft)(q00, logn); // f*adj(f)
+	Zf(poly_mulselfadj_fft)(rt1, logn); // g*adj(g)
+	Zf(poly_add)(q00, rt1, logn);
 
-		// TODO: do Babai reduction here on (F,G) w.r.t (f,g).
-		// In this case, tmp needs to have size for 6 polynomials of size 2^logn.
-		// Zf(ffBabai_reduce)(q00, rt1, q11, rt2, F, G, logn, rt2 + n);
+	// q11 = F*bar(F) + G*bar(G)
+	Zf(poly_mulselfadj_fft)(q11, logn); // F*adj(F)
+	Zf(poly_mulselfadj_fft)(rt2, logn); // G*adj(G)
+	Zf(poly_add)(q11, rt2, logn);
 
-		// q10 = F*adj(f) + G*adj(g)
-		Zf(poly_add_muladj_fft)(q10, q11, rt2, q00, rt1, logn);
-
-		// q00 = f*adj(f) + g*adj(g)
-		Zf(poly_mulselfadj_fft)(q00, logn); // f*adj(f)
-		Zf(poly_mulselfadj_fft)(rt1, logn); // g*adj(g)
-		Zf(poly_add)(q00, rt1, logn);
-
-		// q11 = F*bar(F) + G*bar(G)
-		Zf(poly_mulselfadj_fft)(q11, logn); // F*adj(F)
-		Zf(poly_mulselfadj_fft)(rt2, logn); // G*adj(G)
-		Zf(poly_add)(q11, rt2, logn);
-
-		/*
-		 * Key pair is generated.
-		 */
-		break;
-	}
+	/*
+	 * Key pair is generated.
+	 */
 }

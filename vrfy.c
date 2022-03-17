@@ -270,9 +270,6 @@ Zf(verify_simple_rounding_fft)(const uint8_t *restrict h,
 		}
 	}
 
-	// TODO: adjust bound calculation
-	bound /= 4;
-
 	Zf(FFT)(t0, logn);
 
 	trace = fpr_zero;
@@ -315,6 +312,11 @@ Zf(verify_simple_rounding_fft)(const uint8_t *restrict h,
 	 * Renormalize, so we get the geometric norm of (t0, t1) w.r.t Q.
 	 */
 	trace = fpr_div(trace, fpr_of(n));
+
+	// We need to divide the bound by 2^2 since the 'lattice-errors' above are
+	// halved.
+	// TODO: adjust bound calculation to floor( (verif_margin sigma_sig)^2 * 2n).
+	bound /= 4;
 
 	/*
 	 * First check whether the norm is in range [0, 2^31).

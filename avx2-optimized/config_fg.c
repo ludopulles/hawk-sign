@@ -95,9 +95,7 @@ void sample_fg(inner_shake256_context *rng, int8_t *f, int8_t *g, uint8_t *tmp)
 	 *  - Solve the NTRU equation fG - gF = 1; if the solving fails,
 	 *    try again. Usual failure condition is when Res(f,phi)
 	 *    and Res(g,phi) are not prime to each other.
-	 */
-	int lim = 128;
-	/*
+	 *
 	 * In the binary case, coefficients of f and g are generated
 	 * independently of each other, with a discrete Gaussian
 	 * distribution of standard deviation 1.425 Then,
@@ -108,14 +106,11 @@ void sample_fg(inner_shake256_context *rng, int8_t *f, int8_t *g, uint8_t *tmp)
 	 */
 	do {
 		// Normal sampling. We use a fast PRNG seeded from our SHAKE context ('rng').
-		sampler_context spc;
-		void *samp_ctx;
-		spc.sigma_min = fpr_sigma_min[logn];
-		Zf(prng_init)(&spc.p, rng);
-		samp_ctx = &spc;
+		prng p;
+		Zf(prng_init)(&p, rng);
 
-		poly_small_mkgauss(samp_ctx, f, logn, lim);
-		poly_small_mkgauss(samp_ctx, g, logn, lim);
+		poly_small_mkgauss(&p, f, logn);
+		poly_small_mkgauss(&p, g, logn);
 	} while (!solve_NTRU_deepest(logn, f, g, (uint32_t *)tmp));
 }
 
