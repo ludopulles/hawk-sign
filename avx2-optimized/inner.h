@@ -884,8 +884,8 @@ Zf(expand_seckey)(fpr *restrict expanded_seckey,
 	const int8_t *f, const int8_t *g, const int8_t *F, unsigned logn);
 
 /**
- * Generates a signature of a message with hash h[] (of n/8 bytes long), which
- * is guaranteed to be a valid signature.
+ * Generates a signature of a message with hash h[] (of n / 8 bytes long),
+ * which is guaranteed to be a valid signature.
  *
  * Note: tmp[] must have space for at least 26 * 2^logn bytes.
  */
@@ -937,8 +937,8 @@ Zf(verify_nearest_plane)(const int8_t *restrict h0, const int8_t *restrict h1,
 	uint32_t bound, unsigned logn, uint8_t *restrict tmp);
 
 /**
- * Verify if a signature (s0, s1) is valid for a hashed message h of length n/4
- * bytes, where s0 is reconstructed with simple rounding.
+ * Verify if a signature (s0, s1) is valid for a hashed message h of length
+ * n / 4 bytes, where s0 is reconstructed with simple rounding.
  * The signature is accepted iff the squared l2-norm of (h0 - 2s0, h1 - 2s1) is
  * at most bound wrt quadratic form Q.
  *

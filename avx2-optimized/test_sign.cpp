@@ -145,7 +145,7 @@ void output_poly(int16_t *x)
 
 const int num_samples = 200'000;
 
-uint8_t pregen_h[num_samples][n/4] = {};
+uint8_t pregen_h[num_samples][n / 4] = {};
 int8_t pregen_h0[num_samples][n] = {}, pregen_h1[num_samples][n] = {};
 int16_t pregen_s0[num_samples][n], pregen_s1[num_samples][n], pregen_s[num_samples][n];
 

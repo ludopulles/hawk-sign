@@ -300,7 +300,7 @@ int simple_rounding_test(unsigned char *seed) {
 		Zf(prng_get_bytes)(&rng, (void *)h, sizeof h);
 
 		poly_sign_mkgauss(&rng, x0, h);
-		poly_sign_mkgauss(&rng, x1, h + n/8);
+		poly_sign_mkgauss(&rng, x1, h + n / 8);
 
 		smallints_to_fpr(x0p, x0);
 		smallints_to_fpr(x1p, x1);
