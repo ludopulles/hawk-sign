@@ -3978,61 +3978,25 @@ solve_NTRU(unsigned logn, int8_t *F, int8_t *G,
 /* =================================================================== */
 
 /* see inner.h */
-void
-Zf(keygen)(inner_shake256_context *rng,
-	int8_t *restrict f, int8_t *restrict g, // secret key
-	int8_t *restrict F, int8_t *restrict G, // secret key
+int
+Zf(complete_private)(const int8_t *restrict f, const int8_t *restrict g,
+	int8_t *restrict F, int8_t *restrict G,
 	fpr *restrict q00, fpr *restrict q10, fpr *restrict q11, // public key
 	unsigned logn, uint8_t *restrict tmp)
 {
-	/*
-	 * Algorithm is the following:
-	 *
-	 *  - Generate f and g with the Gaussian distribution.
-	 *
-	 *  - If either N(f) or N(g) is even, try again.
-	 *
-	 *  - Solve the NTRU equation fG - gF = 1; if the solving fails, try again.
-	 *    Usual failure condition is when N(f) and N(g) are not coprime.
-	 *
-	 *  - Use Babai Reduction on F, G.
-	 *
-	 *  - Calculate the Gram matrix of the basis [[f, g], [F, G]].
-	 */
 	size_t n;
-	prng p;
 	fpr *rt1, *rt2;
 
 	n = MKN(logn);
 	rt1 = (fpr *)tmp;
 	rt2 = rt1 + n;
 
-	do {
-		/*
-		 * The coefficients of polynomials f and g will be generated from a
-		 * discrete gaussian that draws random numbers from a fast PRNG that is
-		 * seeded from a SHAKE context ('rng').
-		 */
-		Zf(prng_init)(&p, rng);
-
-		/*
-		 * The coefficients of f and g are generated independently of each other,
-		 * with a discrete Gaussian distribution of standard deviation 1.425. The
-		 * expected l2-norm of (f, g) is 2n 1.425^2.
-		 *
-		 * We require that N(f) and N(g) are both odd (the NTRU equation solver
-		 * requires it).
-		 */
-		poly_small_mkgauss(&p, f, logn);
-		poly_small_mkgauss(&p, g, logn);
-
-		/*
-		 * Try to solve the NTRU equation for polynomials f and g, i.e. find
-		 * polynomials F, G that satisfy
-		 *
-		 *     f * G - g * F = 1 (mod X^n + 1).
-		 */
-	} while (!solve_NTRU(logn, F, G, f, g, 127, (uint32_t *)tmp));
+	/*
+	 * Try to complete the basis.
+	 */
+	if (!solve_NTRU(logn, F, G, f, g, 127, (uint32_t *)tmp)) {
+		return 0;
+	}
 
 	/*
 	 * Calculate q00, q10, q11 (in FFT representation) using
@@ -4068,7 +4032,63 @@ Zf(keygen)(inner_shake256_context *rng,
 	Zf(poly_mulselfadj_fft)(rt2, logn); // G*adj(G)
 	Zf(poly_add)(q11, rt2, logn);
 
+	return 1;
+}
+
+/* see inner.h */
+void
+Zf(keygen)(inner_shake256_context *rng,
+	int8_t *restrict f, int8_t *restrict g, // secret key
+	int8_t *restrict F, int8_t *restrict G, // secret key
+	fpr *restrict q00, fpr *restrict q10, fpr *restrict q11, // public key
+	unsigned logn, uint8_t *restrict tmp)
+{
 	/*
-	 * Key pair is generated.
+	 * Algorithm is the following:
+	 *
+	 *  - Generate f and g with the Gaussian distribution.
+	 *
+	 *  - If either N(f) or N(g) is even, try again.
+	 *
+	 *  - Solve the NTRU equation fG - gF = 1; if the solving fails, try again.
+	 *    Usual failure condition is when N(f) and N(g) are not coprime.
+	 *
+	 *  - Use Babai Reduction on F, G.
+	 *
+	 *  - Calculate the Gram matrix of the basis [[f, g], [F, G]].
 	 */
+	prng p;
+
+	for (;;) {
+		/*
+		 * The coefficients of polynomials f and g will be generated from a
+		 * discrete gaussian that draws random numbers from a fast PRNG that is
+		 * seeded from a SHAKE context ('rng').
+		 */
+		Zf(prng_init)(&p, rng);
+
+		/*
+		 * The coefficients of f and g are generated independently of each other,
+		 * with a discrete Gaussian distribution of standard deviation 1.425. The
+		 * expected l2-norm of (f, g) is 2n 1.425^2.
+		 *
+		 * We require that N(f) and N(g) are both odd (the NTRU equation solver
+		 * requires it).
+		 */
+		poly_small_mkgauss(&p, f, logn);
+		poly_small_mkgauss(&p, g, logn);
+
+		/*
+		 * Try to solve the NTRU equation for polynomials f and g, i.e. find
+		 * polynomials F, G that satisfy
+		 *
+		 *     f * G - g * F = 1 (mod X^n + 1).
+		 */
+		if (Zf(complete_private)(f, g, F, G, q00, q10, q11, logn, tmp)) {
+			/*
+			 * A valid key pair is generated.
+			 */
+			return;
+		}
+	}
 }

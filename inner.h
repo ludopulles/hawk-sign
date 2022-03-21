@@ -153,117 +153,12 @@ typedef struct {
 #define inner_shake256_flip      Zf(i_shake256_flip)
 #define inner_shake256_extract   Zf(i_shake256_extract)
 
-void Zf(i_shake256_init)(
-	inner_shake256_context *sc);
-void Zf(i_shake256_inject)(
-	inner_shake256_context *sc, const uint8_t *in, size_t len);
-void Zf(i_shake256_flip)(
-	inner_shake256_context *sc);
-void Zf(i_shake256_extract)(
-	inner_shake256_context *sc, uint8_t *out, size_t len);
-
-/* ==================================================================== */
-/*
- * Implementation of floating-point real numbers (fpr.h, fpr.c).
- */
-
-/*
- * Real numbers are implemented by an extra header file, included below.
- * This is meant to support pluggable implementations. The default
- * implementation relies on the C type 'double'.
- *
- * The included file must define the following types, functions and
- * constants:
- *
- *   fpr
- *         type for a real number
- *
- *   fpr fpr_of(int64_t i)
- *         cast an integer into a real number; source must be in the
- *         -(2^63-1)..+(2^63-1) range
- *
- *   fpr fpr_scaled(int64_t i, int sc)
- *         compute i*2^sc as a real number; source 'i' must be in the
- *         -(2^63-1)..+(2^63-1) range
- *
- *   fpr fpr_ldexp(fpr x, int e)
- *         compute x*2^e
- *
- *   int64_t fpr_rint(fpr x)
- *         round x to the nearest integer; x must be in the -(2^63-1)
- *         to +(2^63-1) range
- *
- *   int64_t fpr_trunc(fpr x)
- *         round to an integer; this rounds towards zero; value must
- *         be in the -(2^63-1) to +(2^63-1) range
- *
- *   fpr fpr_add(fpr x, fpr y)
- *         compute x + y
- *
- *   fpr fpr_sub(fpr x, fpr y)
- *         compute x - y
- *
- *   fpr fpr_neg(fpr x)
- *         compute -x
- *
- *   fpr fpr_half(fpr x)
- *         compute x/2
- *
- *   fpr fpr_double(fpr x)
- *         compute x*2
- *
- *   fpr fpr_mul(fpr x, fpr y)
- *         compute x * y
- *
- *   fpr fpr_sqr(fpr x)
- *         compute x * x
- *
- *   fpr fpr_inv(fpr x)
- *         compute 1/x
- *
- *   fpr fpr_div(fpr x, fpr y)
- *         compute x/y
- *
- *   fpr fpr_sqrt(fpr x)
- *         compute the square root of x
- *
- *   int fpr_lt(fpr x, fpr y)
- *         return 1 if x < y, 0 otherwise
- *
- *   uint64_t fpr_expm_p63(fpr x)
- *         return exp(x), assuming that 0 <= x < log(2). Returned value
- *         is scaled to 63 bits (i.e. it really returns 2^63*exp(-x),
- *         rounded to the nearest integer). Computation should have a
- *         precision of at least 45 bits.
- *
- *   const fpr fpr_gm_tab[]
- *         array of constants for FFT / iFFT
- *
- *   const fpr fpr_p2_tab[]
- *         precomputed powers of 2 (by index, 0 to 10)
- *
- * Constants of type 'fpr':
- *
- *   fpr fpr_q                 12289
- *   fpr fpr_inverse_of_q      1/12289
- *   fpr fpr_inv_2sqrsigma0    1/(2*(1.8205^2))
- *   fpr fpr_inv_sigma[]       1/sigma (indexed by logn, 1 to 10)
- *   fpr fpr_sigma_min[]       1/sigma_min (indexed by logn, 1 to 10)
- *   fpr fpr_log2              log(2)
- *   fpr fpr_inv_log2          1/log(2)
- *   fpr fpr_bnorm_max         16822.4121
- *   fpr fpr_zero              0
- *   fpr fpr_one               1
- *   fpr fpr_two               2
- *   fpr fpr_onehalf           0.5
- *   fpr fpr_ptwo31            2^31
- *   fpr fpr_ptwo31m1          2^31-1
- *   fpr fpr_mtwo31m1          -(2^31-1)
- *   fpr fpr_ptwo63m1          2^63-1
- *   fpr fpr_mtwo63m1          -(2^63-1)
- *   fpr fpr_ptwo63            2^63
- */
-#include "fpr.h"
+void Zf(i_shake256_init)(inner_shake256_context *sc);
+void Zf(i_shake256_inject)(inner_shake256_context *sc,
+	const uint8_t *in, size_t len);
+void Zf(i_shake256_flip)(inner_shake256_context *sc);
+void Zf(i_shake256_extract)(inner_shake256_context *sc,
+	uint8_t *out, size_t len);
 
 /* ==================================================================== */
 /*
@@ -371,6 +266,109 @@ prng_get_u8(prng *p)
 
 /* ==================================================================== */
 /*
+ * Implementation of floating-point real numbers (fpr.h, fpr.c).
+ */
+
+/*
+ * Real numbers are implemented by an extra header file, included below.
+ * This is meant to support pluggable implementations. The default
+ * implementation relies on the C type 'double'.
+ *
+ * The included file must define the following types, functions and
+ * constants:
+ *
+ *   fpr
+ *         type for a real number
+ *
+ *   fpr fpr_of(int64_t i)
+ *         cast an integer into a real number; source must be in the
+ *         -(2^63-1)..+(2^63-1) range
+ *
+ *   fpr fpr_scaled(int64_t i, int sc)
+ *         compute i*2^sc as a real number; source 'i' must be in the
+ *         -(2^63-1)..+(2^63-1) range
+ *
+ *   fpr fpr_ldexp(fpr x, int e)
+ *         compute x*2^e
+ *
+ *   int64_t fpr_rint(fpr x)
+ *         round x to the nearest integer; x must be in the -(2^63-1)
+ *         to +(2^63-1) range
+ *
+ *   int64_t fpr_trunc(fpr x)
+ *         round to an integer; this rounds towards zero; value must
+ *         be in the -(2^63-1) to +(2^63-1) range
+ *
+ *   fpr fpr_add(fpr x, fpr y)
+ *         compute x + y
+ *
+ *   fpr fpr_sub(fpr x, fpr y)
+ *         compute x - y
+ *
+ *   fpr fpr_neg(fpr x)
+ *         compute -x
+ *
+ *   fpr fpr_half(fpr x)
+ *         compute x/2
+ *
+ *   fpr fpr_double(fpr x)
+ *         compute x*2
+ *
+ *   fpr fpr_mul(fpr x, fpr y)
+ *         compute x * y
+ *
+ *   fpr fpr_sqr(fpr x)
+ *         compute x * x
+ *
+ *   fpr fpr_inv(fpr x)
+ *         compute 1/x
+ *
+ *   fpr fpr_div(fpr x, fpr y)
+ *         compute x/y
+ *
+ *   fpr fpr_sqrt(fpr x)
+ *         compute the square root of x
+ *
+ *   int fpr_lt(fpr x, fpr y)
+ *         return 1 if x < y, 0 otherwise
+ *
+ *   uint64_t fpr_expm_p63(fpr x)
+ *         return exp(x), assuming that 0 <= x < log(2). Returned value
+ *         is scaled to 63 bits (i.e. it really returns 2^63*exp(-x),
+ *         rounded to the nearest integer). Computation should have a
+ *         precision of at least 45 bits.
+ *
+ *   const fpr fpr_gm_tab[]
+ *         array of constants for FFT / iFFT
+ *
+ *   const fpr fpr_p2_tab[]
+ *         precomputed powers of 2 (by index, 0 to 10)
+ *
+ * Constants of type 'fpr':
+ *
+ *   fpr fpr_q                 12289
+ *   fpr fpr_inverse_of_q      1/12289
+ *   fpr fpr_inv_2sqrsigma0    1/(2*(1.8205^2))
+ *   fpr fpr_inv_sigma[]       1/sigma (indexed by logn, 1 to 10)
+ *   fpr fpr_sigma_min[]       1/sigma_min (indexed by logn, 1 to 10)
+ *   fpr fpr_log2              log(2)
+ *   fpr fpr_inv_log2          1/log(2)
+ *   fpr fpr_bnorm_max         16822.4121
+ *   fpr fpr_zero              0
+ *   fpr fpr_one               1
+ *   fpr fpr_two               2
+ *   fpr fpr_onehalf           0.5
+ *   fpr fpr_ptwo31            2^31
+ *   fpr fpr_ptwo31m1          2^31-1
+ *   fpr fpr_mtwo31m1          -(2^31-1)
+ *   fpr fpr_ptwo63m1          2^63-1
+ *   fpr fpr_mtwo63m1          -(2^63-1)
+ *   fpr fpr_ptwo63            2^63
+ */
+#include "fpr.h"
+
+/* ==================================================================== */
+/*
  * Discrete gaussian sampling (sampler.c).
  */
 
@@ -417,7 +415,7 @@ size_t
 Zf(encode_seckey)(void *out, size_t max_out_len,
 	const int8_t *f, const int8_t *g, const int8_t *F, unsigned logn);
 
-/**
+/*
  * Inverse of Zf(encode_seckey). To calculate G, use Zf(expand_seckey).
  */
 size_t
@@ -529,8 +527,8 @@ void Zf(poly_adj_fft)(fpr *a, unsigned logn);
 void Zf(poly_mul_fft)(fpr *restrict a, const fpr *restrict b, unsigned logn);
 
 /*
- * Multiply polynomial a with polynomial b and store result in d. d, a and b
- * MUST NOT overlap. This function works only in FFT representation.
+ * Store product of polynomial a and polynomial b in d. d, a and b MUST NOT
+ * overlap. This function works only in FFT representation.
  */
 void Zf(poly_prod_fft)(fpr *restrict d, const fpr *restrict a,
 	const fpr *restrict b, unsigned logn);
@@ -696,7 +694,7 @@ void
 Zf(ffNearestPlane_tree)(fpr *restrict z, const fpr *restrict tree,
 	const fpr *restrict t, unsigned logn, fpr *restrict tmp);
 
-/**
+/*
  * Dynamic version of Zf(ffNearestPlane_tree). The tree of Gram matrix g
  * is calculated on the fly, and the return value is stored in t. Note: t
  * and g get modified in this function. tmp[] must have space for at least
@@ -721,7 +719,26 @@ Zf(ffBabai_reduce)(const fpr *restrict f, const fpr *restrict g,
  * Key pair generation.
  */
 
-/**
+/*
+ * Completes the NTRU basis, by finding (F, G) in Babai's fundamental domain
+ * generated by (rotations of) (f, g) such that f * G - g * F = 1. Moreover, it
+ * computes the public key which is the Gram matrix of the basis
+ *
+ *     [ (f, g), (F, G) ].
+ *
+ * This function returns 1 on success and 0 on failure which may happen during
+ * NTRU solving.
+ *
+ * Note: tmp[] must have space for at least 48 * 2^logn bytes.
+ * If Babai reduction is not done, at least 28 2^logn bytes are needed.
+ */
+int
+Zf(complete_private)(const int8_t *restrict f, const int8_t *restrict g,
+	int8_t *restrict F, int8_t *restrict G,
+	fpr *restrict q00, fpr *restrict q10, fpr *restrict q11,
+	unsigned logn, uint8_t *restrict tmp);
+
+/*
  * Compute a secret key and a public key belonging to the signature
  * scheme. The secret key is a tuple (f, g, F, G) where each belongs to
  * the ring Z[X] / (X^n + 1) with small coefficients (abs. value << 127),
@@ -768,7 +785,7 @@ Zf(complete_sign)(inner_shake256_context *rng,
 	const int8_t *restrict h0, const int8_t *restrict h1, uint32_t bound,
 	unsigned logn, uint8_t *restrict tmp);
 
-/**
+/*
  * Similar to Zf(complete_sign), except that s0 is not returned.
  * If Zf(sign) returns 1, a signature is only valid with high probability.
  *
@@ -781,7 +798,7 @@ Zf(sign)(inner_shake256_context *rng, int16_t *restrict sig,
 	const int8_t *restrict h0, const int8_t *restrict h1, uint32_t bound,
 	unsigned logn, uint8_t *restrict tmp);
 
-/**
+/*
  * Similar to Zf(sign), except that the signature is always valid when 1 is
  * returned.
  *
@@ -795,13 +812,13 @@ Zf(guaranteed_sign)(inner_shake256_context *rng, int16_t *restrict sig,
 	const int8_t *restrict h1, uint32_t bound, unsigned logn,
 	uint8_t *restrict tmp);
 
-/**
+/*
  * Required space in terms of number of fpr values for an expanded secret key,
  * which can be used in Zf(fft_sign).
  */
 #define EXPANDED_SECKEY_SIZE(logn) (9 << ((logn) - 1))
 
-/**
+/*
  * Expands a secret key given by the key generation, to produce the secret key
  * basis [[f,g], [F,G]] in FFT-representation, as well as 1/(f^* f + g^* g).
  *
@@ -812,9 +829,9 @@ void
 Zf(expand_seckey)(fpr *restrict expanded_seckey,
 	const int8_t *f, const int8_t *g, const int8_t *F, unsigned logn);
 
-/**
- * Generates a signature of a message with hash h[] (of n/8 bytes long), which
- * is guaranteed to be a valid signature.
+/*
+ * Generates a signature of a message with hash h[] (of n / 8 bytes long),
+ * which is guaranteed to be a valid signature.
  *
  * Note: tmp[] must have space for at least 26 * 2^logn bytes.
  */
@@ -828,7 +845,7 @@ Zf(fft_sign)(inner_shake256_context *rng, int16_t *restrict sig,
  * Signature verification functions (vrfy.c).
  */
 
-/**
+/*
  * Verify if a signature (s0, s1) is valid for a message hm.
  * The signature is accepted iff the squared l2-norm of (2s0 - hm, 2s1) is at
  * most bound.
@@ -841,7 +858,7 @@ Zf(complete_verify)(const int8_t *restrict h0, const int8_t *restrict h1,
 	const fpr *restrict q00, const fpr *restrict q10, const fpr *restrict q11,
 	uint32_t bound, unsigned logn, uint8_t *restrict tmp);
 
-/**
+/*
  * Similar to Zf(complete_verify), except that it takes s1 as signature,
  * and reconstructs s0 with simple rounding:
  *     s0 = round((hm%2) / 2 - s1 q10 / q00).
@@ -852,7 +869,7 @@ Zf(verify_simple_rounding)(const int8_t *restrict h0, const int8_t *restrict h1,
 	const fpr *restrict q00, const fpr *restrict q10, const fpr *restrict q11,
 	uint32_t bound, unsigned logn, uint8_t *restrict tmp);
 
-/**
+/*
  * Similar to Zf(complete_verify), except that it takes s1 as signature,
  * and reconstructs s0 with Babai's Nearest Plane Algorithm:
  *     s0 ~ (hm%2) / 2 - s1 q10 / q00,
@@ -865,9 +882,9 @@ Zf(verify_nearest_plane)(const int8_t *restrict h0, const int8_t *restrict h1,
 	const fpr *restrict q00, const fpr *restrict q10, const fpr *restrict q11,
 	uint32_t bound, unsigned logn, uint8_t *restrict tmp);
 
-/**
- * Verify if a signature (s0, s1) is valid for a hashed message h of length n/4
- * bytes, where s0 is reconstructed with simple rounding.
+/*
+ * Verify if a signature (s0, s1) is valid for a hashed message h of length
+ * n / 4 bytes, where s0 is reconstructed with simple rounding.
  * The signature is accepted iff the squared l2-norm of (h0 - 2s0, h1 - 2s1) is
  * at most bound wrt quadratic form Q.
  *

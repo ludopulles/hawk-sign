@@ -231,14 +231,115 @@ typedef struct {
 #define inner_shake256_flip      Zf(i_shake256_flip)
 #define inner_shake256_extract   Zf(i_shake256_extract)
 
-void Zf(i_shake256_init)(
-	inner_shake256_context *sc);
-void Zf(i_shake256_inject)(
-	inner_shake256_context *sc, const uint8_t *in, size_t len);
-void Zf(i_shake256_flip)(
-	inner_shake256_context *sc);
-void Zf(i_shake256_extract)(
-	inner_shake256_context *sc, uint8_t *out, size_t len);
+void Zf(i_shake256_init)(inner_shake256_context *sc);
+void Zf(i_shake256_inject)(inner_shake256_context *sc,
+	const uint8_t *in, size_t len);
+void Zf(i_shake256_flip)(inner_shake256_context *sc);
+void Zf(i_shake256_extract)(inner_shake256_context *sc,
+	uint8_t *out, size_t len);
+
+/* ==================================================================== */
+/*
+ * RNG (rng.c).
+ *
+ * A PRNG based on ChaCha20 is implemented; it is seeded from a SHAKE256
+ * context (flipped) and is used for bulk pseudorandom generation.
+ * A system-dependent seed generator is also provided.
+ */
+
+/*
+ * Obtain a random seed from the system RNG.
+ *
+ * Returned value is 1 on success, 0 on error.
+ */
+int Zf(get_seed)(void *seed, size_t seed_len);
+
+/*
+ * Structure for a PRNG. This includes a large buffer so that values
+ * get generated in advance. The 'state' is used to keep the current
+ * PRNG algorithm state (contents depend on the selected algorithm).
+ *
+ * The unions with 'dummy_u64' are there to ensure proper alignment for
+ * 64-bit direct access.
+ */
+typedef struct {
+	union {
+		uint8_t d[512]; /* MUST be 512, exactly */
+		uint64_t dummy_u64;
+	} buf;
+	size_t ptr;
+	union {
+		uint8_t d[256];
+		uint64_t dummy_u64;
+	} state;
+	int type;
+} prng;
+
+/*
+ * Instantiate a PRNG. That PRNG will feed over the provided SHAKE256
+ * context (in "flipped" state) to obtain its initial state.
+ */
+void Zf(prng_init)(prng *p, inner_shake256_context *src);
+
+/*
+ * Refill the PRNG buffer. This is normally invoked automatically, and
+ * is declared here only so that prng_get_u64() may be inlined.
+ */
+void Zf(prng_refill)(prng *p);
+
+/*
+ * Get some bytes from a PRNG.
+ */
+void Zf(prng_get_bytes)(prng *p, void *dst, size_t len);
+
+/*
+ * Get a 64-bit random value from a PRNG.
+ */
+static inline uint64_t
+prng_get_u64(prng *p)
+{
+	size_t u;
+
+	/*
+	 * If there are less than 9 bytes in the buffer, we refill it.
+	 * This means that we may drop the last few bytes, but this allows
+	 * for faster extraction code. Also, it means that we never leave
+	 * an empty buffer.
+	 */
+	u = p->ptr;
+	if (u >= (sizeof p->buf.d) - 9) {
+		Zf(prng_refill)(p);
+		u = 0;
+	}
+	p->ptr = u + 8;
+
+	/*
+	 * On systems that use little-endian encoding and allow
+	 * unaligned accesses, we can simply read the data where it is.
+	 */
+	return *(uint64_t *)(p->buf.d + u);
+}
+
+/*
+ * Get an 8-bit random value from a PRNG.
+ */
+static inline unsigned
+prng_get_u8(prng *p)
+{
+	unsigned v;
+
+	v = p->buf.d[p->ptr ++];
+	if (p->ptr == sizeof p->buf.d) {
+		Zf(prng_refill)(p);
+	}
+	return v;
+}
+
+/* ==================================================================== */
+/*
+ * After this point, this inner.h is identical to the 'normal' inner.h that
+ * does not use AVX2.
+ */
 
 /* ==================================================================== */
 /*
@@ -345,103 +446,6 @@ void Zf(i_shake256_extract)(
 
 /* ==================================================================== */
 /*
- * RNG (rng.c).
- *
- * A PRNG based on ChaCha20 is implemented; it is seeded from a SHAKE256
- * context (flipped) and is used for bulk pseudorandom generation.
- * A system-dependent seed generator is also provided.
- */
-
-/*
- * Obtain a random seed from the system RNG.
- *
- * Returned value is 1 on success, 0 on error.
- */
-int Zf(get_seed)(void *seed, size_t seed_len);
-
-/*
- * Structure for a PRNG. This includes a large buffer so that values
- * get generated in advance. The 'state' is used to keep the current
- * PRNG algorithm state (contents depend on the selected algorithm).
- *
- * The unions with 'dummy_u64' are there to ensure proper alignment for
- * 64-bit direct access.
- */
-typedef struct {
-	union {
-		uint8_t d[512]; /* MUST be 512, exactly */
-		uint64_t dummy_u64;
-	} buf;
-	size_t ptr;
-	union {
-		uint8_t d[256];
-		uint64_t dummy_u64;
-	} state;
-	int type;
-} prng;
-
-/*
- * Instantiate a PRNG. That PRNG will feed over the provided SHAKE256
- * context (in "flipped" state) to obtain its initial state.
- */
-void Zf(prng_init)(prng *p, inner_shake256_context *src);
-
-/*
- * Refill the PRNG buffer. This is normally invoked automatically, and
- * is declared here only so that prng_get_u64() may be inlined.
- */
-void Zf(prng_refill)(prng *p);
-
-/*
- * Get some bytes from a PRNG.
- */
-void Zf(prng_get_bytes)(prng *p, void *dst, size_t len);
-
-/*
- * Get a 64-bit random value from a PRNG.
- */
-static inline uint64_t
-prng_get_u64(prng *p)
-{
-	size_t u;
-
-	/*
-	 * If there are less than 9 bytes in the buffer, we refill it.
-	 * This means that we may drop the last few bytes, but this allows
-	 * for faster extraction code. Also, it means that we never leave
-	 * an empty buffer.
-	 */
-	u = p->ptr;
-	if (u >= (sizeof p->buf.d) - 9) {
-		Zf(prng_refill)(p);
-		u = 0;
-	}
-	p->ptr = u + 8;
-
-	/*
-	 * On systems that use little-endian encoding and allow
-	 * unaligned accesses, we can simply read the data where it is.
-	 */
-	return *(uint64_t *)(p->buf.d + u);
-}
-
-/*
- * Get an 8-bit random value from a PRNG.
- */
-static inline unsigned
-prng_get_u8(prng *p)
-{
-	unsigned v;
-
-	v = p->buf.d[p->ptr ++];
-	if (p->ptr == sizeof p->buf.d) {
-		Zf(prng_refill)(p);
-	}
-	return v;
-}
-
-/* ==================================================================== */
-/*
  * Discrete gaussian sampling (sampler.c).
  */
 
@@ -488,7 +492,7 @@ size_t
 Zf(encode_seckey)(void *out, size_t max_out_len,
 	const int8_t *f, const int8_t *g, const int8_t *F, unsigned logn);
 
-/**
+/*
  * Inverse of Zf(encode_seckey). To calculate G, use Zf(expand_seckey).
  */
 size_t
@@ -767,7 +771,7 @@ void
 Zf(ffNearestPlane_tree)(fpr *restrict z, const fpr *restrict tree,
 	const fpr *restrict t, unsigned logn, fpr *restrict tmp);
 
-/**
+/*
  * Dynamic version of Zf(ffNearestPlane_tree). The tree of Gram matrix g
  * is calculated on the fly, and the return value is stored in t. Note: t
  * and g get modified in this function. tmp[] must have space for at least
@@ -792,7 +796,26 @@ Zf(ffBabai_reduce)(const fpr *restrict f, const fpr *restrict g,
  * Key pair generation.
  */
 
-/**
+/*
+ * Completes the NTRU basis, by finding (F, G) in Babai's fundamental domain
+ * generated by (rotations of) (f, g) such that f * G - g * F = 1. Moreover, it
+ * computes the public key which is the Gram matrix of the basis
+ *
+ *     [ (f, g), (F, G) ].
+ *
+ * This function returns 1 on success and 0 on failure which may happen during
+ * NTRU solving.
+ *
+ * Note: tmp[] must have space for at least 48 * 2^logn bytes.
+ * If Babai reduction is not done, at least 28 2^logn bytes are needed.
+ */
+int
+Zf(complete_private)(const int8_t *restrict f, const int8_t *restrict g,
+	int8_t *restrict F, int8_t *restrict G,
+	fpr *restrict q00, fpr *restrict q10, fpr *restrict q11,
+	unsigned logn, uint8_t *restrict tmp);
+
+/*
  * Compute a secret key and a public key belonging to the signature
  * scheme. The secret key is a tuple (f, g, F, G) where each belongs to
  * the ring Z[X] / (X^n + 1) with small coefficients (abs. value << 127),
@@ -839,7 +862,7 @@ Zf(complete_sign)(inner_shake256_context *rng,
 	const int8_t *restrict h0, const int8_t *restrict h1, uint32_t bound,
 	unsigned logn, uint8_t *restrict tmp);
 
-/**
+/*
  * Similar to Zf(complete_sign), except that s0 is not returned.
  * If Zf(sign) returns 1, a signature is only valid with high probability.
  *
@@ -852,7 +875,7 @@ Zf(sign)(inner_shake256_context *rng, int16_t *restrict sig,
 	const int8_t *restrict h0, const int8_t *restrict h1, uint32_t bound,
 	unsigned logn, uint8_t *restrict tmp);
 
-/**
+/*
  * Similar to Zf(sign), except that the signature is always valid when 1 is
  * returned.
  *
@@ -866,13 +889,13 @@ Zf(guaranteed_sign)(inner_shake256_context *rng, int16_t *restrict sig,
 	const int8_t *restrict h1, uint32_t bound, unsigned logn,
 	uint8_t *restrict tmp);
 
-/**
+/*
  * Required space in terms of number of fpr values for an expanded secret key,
  * which can be used in Zf(fft_sign).
  */
 #define EXPANDED_SECKEY_SIZE(logn) (9 << ((logn) - 1))
 
-/**
+/*
  * Expands a secret key given by the key generation, to produce the secret key
  * basis [[f,g], [F,G]] in FFT-representation, as well as 1/(f^* f + g^* g).
  *
@@ -883,7 +906,7 @@ void
 Zf(expand_seckey)(fpr *restrict expanded_seckey,
 	const int8_t *f, const int8_t *g, const int8_t *F, unsigned logn);
 
-/**
+/*
  * Generates a signature of a message with hash h[] (of n / 8 bytes long),
  * which is guaranteed to be a valid signature.
  *
@@ -899,7 +922,7 @@ Zf(fft_sign)(inner_shake256_context *rng, int16_t *restrict sig,
  * Signature verification functions (vrfy.c).
  */
 
-/**
+/*
  * Verify if a signature (s0, s1) is valid for a message hm.
  * The signature is accepted iff the squared l2-norm of (2s0 - hm, 2s1) is at
  * most bound.
@@ -912,7 +935,7 @@ Zf(complete_verify)(const int8_t *restrict h0, const int8_t *restrict h1,
 	const fpr *restrict q00, const fpr *restrict q10, const fpr *restrict q11,
 	uint32_t bound, unsigned logn, uint8_t *restrict tmp);
 
-/**
+/*
  * Similar to Zf(complete_verify), except that it takes s1 as signature,
  * and reconstructs s0 with simple rounding:
  *     s0 = round((hm%2) / 2 - s1 q10 / q00).
@@ -923,7 +946,7 @@ Zf(verify_simple_rounding)(const int8_t *restrict h0, const int8_t *restrict h1,
 	const fpr *restrict q00, const fpr *restrict q10, const fpr *restrict q11,
 	uint32_t bound, unsigned logn, uint8_t *restrict tmp);
 
-/**
+/*
  * Similar to Zf(complete_verify), except that it takes s1 as signature,
  * and reconstructs s0 with Babai's Nearest Plane Algorithm:
  *     s0 ~ (hm%2) / 2 - s1 q10 / q00,
@@ -936,7 +959,7 @@ Zf(verify_nearest_plane)(const int8_t *restrict h0, const int8_t *restrict h1,
 	const fpr *restrict q00, const fpr *restrict q10, const fpr *restrict q11,
 	uint32_t bound, unsigned logn, uint8_t *restrict tmp);
 
-/**
+/*
  * Verify if a signature (s0, s1) is valid for a hashed message h of length
  * n / 4 bytes, where s0 is reconstructed with simple rounding.
  * The signature is accepted iff the squared l2-norm of (h0 - 2s0, h1 - 2s1) is
