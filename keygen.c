@@ -2353,55 +2353,70 @@ static const uint64_t gauss_1425[14] = {
  * Distribution has standard deviation 1.425 sqrt(512/N).
  */
 static int
-mkgauss_1425(prng *rng)
+mkgauss_1425(prng *rng, unsigned logn)
 {
-	/*
-	 * We use two random 64-bit values. First value
-	 * decides on whether the generated value is 0, and,
-	 * if not, the sign of the value. Second random 64-bit
-	 * word is used to generate the non-zero value.
-	 *
-	 * For constant-time code we have to read the complete
-	 * table. This has negligible cost, compared with the
-	 * remainder of the keygen process (solving the NTRU
-	 * equation).
-	 */
-	uint64_t r;
-	uint32_t f, v, k, neg;
+	unsigned u, g;
+	int val;
 
-	/*
-	 * First value:
-	 *  - flag 'neg' is randomly selected to be 0 or 1.
-	 *  - flag 'f' is set to 1 if the generated value is zero,
-	 *    or set to 0 otherwise.
-	 */
-	r = prng_get_u64(rng);
-	neg = (uint32_t)(r >> 63);
-	r &= ~((uint64_t)1 << 63);
-	f = (uint32_t)((r - gauss_1425[0]) >> 63);
+	g = 1U << (9 - logn);
+	val = 0;
+	for (u = 0; u < g; u ++) {
+		/*
+		 * Each iteration generates one value with the
+		 * Gaussian distribution for N = 512.
+		 *
+		 * We use two random 64-bit values. First value
+		 * decides on whether the generated value is 0, and,
+		 * if not, the sign of the value. Second random 64-bit
+		 * word is used to generate the non-zero value.
+		 *
+		 * For constant-time code we have to read the complete
+		 * table. This has negligible cost, compared with the
+		 * remainder of the keygen process (solving the NTRU
+		 * equation).
+		 */
+		uint64_t r;
+		uint32_t f, v, k, neg;
 
-	/*
-	 * We produce a new random 63-bit integer r, and go over
-	 * the array, starting at index 1. We store in v the
-	 * index of the first array element which is not greater
-	 * than r, unless the flag f was already 1.
-	 */
-	v = 0;
-	r = prng_get_u64(rng);
-	r &= ~((uint64_t)1 << 63);
-	for (k = 1; k < 14; k ++) {
-		uint32_t t;
-		t = (uint32_t)((r - gauss_1425[k]) >> 63) ^ 1;
-		v |= k & -(t & (f ^ 1));
-		f |= t;
+		/*
+		 * First value:
+		 *  - flag 'neg' is randomly selected to be 0 or 1.
+		 *  - flag 'f' is set to 1 if the generated value is zero,
+		 *    or set to 0 otherwise.
+		 */
+		r = prng_get_u64(rng);
+		neg = (uint32_t)(r >> 63);
+		r &= ~((uint64_t)1 << 63);
+		f = (uint32_t)((r - gauss_1425[0]) >> 63);
+
+		/*
+		 * We produce a new random 63-bit integer r, and go over
+		 * the array, starting at index 1. We store in v the
+		 * index of the first array element which is not greater
+		 * than r, unless the flag f was already 1.
+		 */
+		v = 0;
+		r = prng_get_u64(rng);
+		r &= ~((uint64_t)1 << 63);
+		for (k = 1; k < 14; k ++) {
+			uint32_t t;
+			t = (uint32_t)((r - gauss_1425[k]) >> 63) ^ 1;
+			v |= k & -(t & (f ^ 1));
+			f |= t;
+		}
+
+		/*
+		 * We apply the sign ('neg' flag). If the value is zero,
+		 * the sign has no effect.
+		 */
+		v = (v ^ -neg) + neg;
+
+		/*
+		 * Generated value is added to val.
+		 */
+		val += *(int32_t *)&v;
 	}
-
-	/*
-	 * We apply the sign ('neg' flag). If the value is zero,
-	 * the sign has no effect.
-	 */
-	v = (v ^ -neg) + neg;
-	return *(int32_t *)&v;
+	return val;
 }
 
 /*
@@ -2420,7 +2435,7 @@ poly_small_mkgauss(prng *rng, int8_t *f, unsigned logn)
 
 	for (u = n; u -- > 1; ) {
 		do {
-			s = mkgauss_1425(rng);
+			s = mkgauss_1425(rng, logn);
 			/*
 			 * We need the coefficient to fit within -127..+127;
 			 * realistically, this is always the case except for
@@ -2433,7 +2448,7 @@ poly_small_mkgauss(prng *rng, int8_t *f, unsigned logn)
 	}
 
 	do {
-		s = mkgauss_1425(rng);
+		s = mkgauss_1425(rng, logn);
 		/*
 		 * We need the sum of all coefficients to be 1; otherwise,
 		 * the resultant of the polynomial with X^N+1 will be even,
