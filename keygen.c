@@ -4094,6 +4094,33 @@ Zf(keygen)(inner_shake256_context *rng,
 		poly_small_mkgauss(&p, g, logn);
 
 		/*
+		 * Determine cst(1 / (ff* + gg*)) = || (f*, g*) / (ff* + gg*) ||^2. If
+		 * this quantity is much larger than the average value, which
+		 * experimentally has a value of
+		 *     0.00097 +/- 0.00016,
+		 * and theoretically has a value of
+		 *     (e/2)^2 / (2n sigma_pk^2) ~ 0.00088,
+		 * reject the key pair as decompressing a signature might fail with
+		 * non-neglegible probability.
+		 *
+		 * In the actual implementation, do this check AFTER complete_private,
+		 * as the check is easier to do when Q_00 is given in FFT format.
+		 * Moreover, in most cases, this check will succeed,
+		 */
+		poly_small_to_fp(q10, f, logn);
+		poly_small_to_fp(q11, g, logn);
+		Zf(FFT)(q10, logn); // f
+		Zf(FFT)(q11, logn); // g
+		Zf(poly_invnorm2_fft)(q00, q10, q11, logn);
+		Zf(iFFT)(q00, logn); // 1 / Q_00
+
+		// TODO: derive a good bound here, depending on logn and sigma_pk.
+		/* if (fpr_lt(q11[0], fpr_inv(fpr_of(200))) || fpr_lt(fpr_inv(fpr_of(100)), q11[0])) {
+			// Reject keypair as decompression may fail often.
+			continue;
+		} */
+
+		/*
 		 * Try to solve the NTRU equation for polynomials f and g, i.e. find
 		 * polynomials F, G that satisfy
 		 *

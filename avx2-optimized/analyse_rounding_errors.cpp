@@ -122,7 +122,44 @@ void output_poly(int8_t *f, size_t logn) {
 	printf("\n");
 }
 
+#define SQR(x) ((x) * (x))
+
+int approximate_fail_prob(inner_shake256_context *rng,
+	int8_t *f, int8_t *g, int8_t *F, int8_t *G,
+	fpr *q00, fpr *q10, fpr *q11,
+	unsigned logn, uint8_t *tmp)
+{
+	int16_t sig[512];
+	uint8_t h[512/4];
+
+	size_t n, u;
+	n = MKN(logn);
+	uint32_t bound = (uint32_t)(SQR(1.1 * 2 * 1.292) * (2*n));
+
+	fpr expkey[EXPANDED_SECKEY_SIZE(9)];
+	Zf(expand_seckey)(expkey, f, g, F, logn);
+
+	int fails = 0;
+	for (u = 0; u < 1024; u++) {
+		inner_shake256_extract(rng, h, n / 4);
+		// Make sure that sign.c may fail on generating a signature that does not decompress correctly.
+		Zf(fft_sign)(rng, sig, expkey, h, bound, logn, tmp);
+		if (!Zf(verify_simple_rounding_fft)(h, sig, q00, q10, q11, bound, logn, tmp))
+			fails++;
+	}
+	return fails;
+}
+
+
 int main(int argc, char **argv) {
+	// Initialize a RNG.
+	inner_shake256_context sc;
+	inner_shake256_init(&sc);
+	struct timeval tv;
+	gettimeofday(&tv, NULL);
+	inner_shake256_inject(&sc, (unsigned char *)&tv, sizeof tv);
+	inner_shake256_flip(&sc);
+
 	if (argc <= 1) {
 		printf("Usage: ./a.out file\n");
 		return 1;
@@ -176,8 +213,7 @@ int main(int argc, char **argv) {
 
 	fpr *inv_q00 = (fpr *)&tmp[0];
 
-	printf("The following are all bad bases:\n");
-
+	// printf("The following are all bad bases:\n");
 	for (HawkKeyPair &key : bases) {
 		for (size_t u = 0; u < n/2; u++) {
 			inv_q00[u] = fpr_inv(key.q00[u]);
@@ -192,23 +228,13 @@ int main(int argc, char **argv) {
 			norm2 += fpr_sqr(inv_q00[u]).v;
 		norm2 = sqrt(norm2);
 		printf("(f*,g*)/(ff*+gg*) coeff^2: %.8f vs || 1/(ff* + gg*) ||: %.8f\n", cst_term, norm2);
-		// printf("%.8f %d\n", norm2, key.num_occuring);
+		// printf("%.8f %d\n", cst_term, key.num_occuring);
 	}
 	// exit(0);
 
 	// Now compare this to the average private key
 	int8_t f[512], g[512], F[512], G[512];
 	fpr q00[512], q10[512], q11[512];
-	inner_shake256_context sc;
-
-	// Initialize a RNG.
-	inner_shake256_init(&sc);
-	unsigned char seed[49] = "seedseedseedseedseedseedseedseedseedseedseedseed";
-
-	srand(time(NULL));
-	seed[0] = rand();
-	inner_shake256_inject(&sc, seed, 48);
-	inner_shake256_flip(&sc);
 
 	// printf("On average: ");
 	const int n_repetitions = 1000;
@@ -225,14 +251,18 @@ int main(int argc, char **argv) {
 		}
 		Zf(iFFT)(q00, logn);
 
-		// printf("%.8f ", q00[0].v);
+		fpr cstQ00 = q00[0];
+
+		// Zf(FFT)(q00, logn); // restore value.
+		// for (size_t u = 0; u < n/2; u++) q00[u] = fpr_inv(q00[u]);
+		// printf("%.8f %d\n", cstQ00.v, approximate_fail_prob(&sc, f, g, F, G, q00, q10, q11, logn, &tmp[0]));
 
 		double norm2 = 0.0;
 		for (size_t u = 0; u < n; u++) norm2 += fpr_sqr(q00[u]).v;
 		norm2 = sqrt(norm2);
 
-		avg = fpr_add(avg, q00[0]);
-		var = fpr_add(var, fpr_sqr(q00[0]));
+		avg = fpr_add(avg, cstQ00);
+		var = fpr_add(var, fpr_sqr(cstQ00));
 		avgN += norm2;
 		varN += norm2 * norm2;
 	}
