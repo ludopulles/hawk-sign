@@ -846,6 +846,15 @@ Zf(fft_sign)(inner_shake256_context *rng, int16_t *restrict sig,
  */
 
 /*
+ * Given q00_num, q10_num in integer representation, compute the full public
+ * key, which is q00, q10 and q11 in FFT representation.
+ * Note here that q11 is reconstructed using the rule q00 q11 - q10 q01 = 1.
+ */
+void
+Zf(complete_pubkey)(const int16_t *q00_num, const int16_t *q10_num,
+	fpr *q00, fpr *q10, fpr *q11, unsigned logn);
+
+/*
  * Verify if a signature (s0, s1) is valid for a message hm.
  * The signature is accepted iff the squared l2-norm of (2s0 - hm, 2s1) is at
  * most bound.

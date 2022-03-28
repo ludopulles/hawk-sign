@@ -63,6 +63,35 @@ Zf(poly_add_autoadj_fft)(fpr *a, fpr *b, unsigned logn)
 }
 
 /* =================================================================== */
+void
+Zf(complete_pubkey)(const int16_t *q00_num, const int16_t *q10_num,
+	fpr *q00, fpr *q10, fpr *q11, unsigned logn)
+{
+	size_t u, n, hn;
+
+	n = MKN(logn);
+	hn = n >> 1;
+
+	// doing this in reverse, allows q00_num, q10_num to overlap with the begin
+	// of q00.
+	for (u = n; u -- > 0; ) {
+		q10[u] = fpr_of(q10_num[u]);
+	}
+	for (u = n; u -- > 0; ) {
+		q00[u] = fpr_of(q00_num[u]);
+	}
+
+	Zf(FFT)(q00, logn);
+	Zf(FFT)(q10, logn);
+
+	// TODO: write a fft function that computes q11 := q10 * q10^* (selfadj).
+	memcpy(q11, q10, n * sizeof *q11);
+	Zf(poly_mulselfadj_fft)(q11, logn);
+	for (u = 0; u < hn; u ++) {
+		q11[u] = fpr_add(q11[u], fpr_one);
+	}
+	Zf(poly_div_autoadj_fft)(q11, q00, logn);
+}
 
 /* see inner.h */
 int

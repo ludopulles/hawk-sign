@@ -1059,7 +1059,7 @@ poly_dec(const uint8_t *buf, size_t max_in_len, uint16_t acc,
  */
 size_t
 Zf(decode_seckey)(int8_t *f, int8_t *g, int8_t *F,
-	const void *in, size_t max_in_len,  unsigned logn)
+	const void *in, size_t max_in_len, unsigned logn)
 {
 	const uint8_t *buf;
 	size_t v, acc_len;
