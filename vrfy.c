@@ -84,13 +84,12 @@ Zf(complete_pubkey)(const int16_t *q00_num, const int16_t *q10_num,
 	Zf(FFT)(q00, logn);
 	Zf(FFT)(q10, logn);
 
-	// TODO: write a fft function that computes q11 := q10 * q10^* (selfadj).
-	memcpy(q11, q10, n * sizeof *q11);
-	Zf(poly_mulselfadj_fft)(q11, logn);
+	Zf(poly_prod_selfadj_fft)(q11, q10, logn);
 	for (u = 0; u < hn; u ++) {
 		q11[u] = fpr_add(q11[u], fpr_one);
 	}
 	Zf(poly_div_autoadj_fft)(q11, q00, logn);
+	// q11 = (1 + q10 q01) / q00, where q01 = adj(q10).
 }
 
 /* see inner.h */

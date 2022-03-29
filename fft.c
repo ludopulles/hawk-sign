@@ -478,6 +478,29 @@ Zf(poly_mulselfadj_fft)(fpr *a, unsigned logn)
 
 /* see inner.h */
 void
+Zf(poly_prod_selfadj_fft)(fpr *restrict d, const fpr *restrict a,
+	unsigned logn)
+{
+	/*
+	 * Since each coefficient is multiplied with its own conjugate,
+	 * the result contains only real values.
+	 */
+	size_t n, hn, u;
+
+	n = (size_t)1 << logn;
+	hn = n >> 1;
+	for (u = 0; u < hn; u ++) {
+		fpr a_re, a_im;
+
+		a_re = a[u];
+		a_im = a[u + hn];
+		d[u] = fpr_add(fpr_sqr(a_re), fpr_sqr(a_im));
+		d[u + hn] = fpr_zero;
+	}
+}
+
+/* see inner.h */
+void
 Zf(poly_mulconst)(fpr *a, fpr x, unsigned logn)
 {
 	size_t n, u;

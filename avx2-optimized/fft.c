@@ -654,6 +654,46 @@ Zf(poly_mulselfadj_fft)(fpr *a, unsigned logn)
 /* see inner.h */
 TARGET_AVX2
 void
+Zf(poly_prod_selfadj_fft)(fpr *restrict d, const fpr *restrict a,
+	unsigned logn)
+{
+	/*
+	 * Since each coefficient is multiplied with its own conjugate,
+	 * the result contains only real values.
+	 */
+	size_t n, hn, u;
+
+	n = (size_t)1 << logn;
+	hn = n >> 1;
+	if (n >= 8) {
+		__m256d zero;
+
+		zero = _mm256_setzero_pd();
+		for (u = 0; u < hn; u += 4) {
+			__m256d a_re, a_im;
+
+			a_re = _mm256_loadu_pd(&a[u].v);
+			a_im = _mm256_loadu_pd(&a[u + hn].v);
+			_mm256_storeu_pd(&d[u].v,
+				FMADD(a_re, a_re,
+					_mm256_mul_pd(a_im, a_im)));
+			_mm256_storeu_pd(&d[u + hn].v, zero);
+		}
+	} else {
+		for (u = 0; u < hn; u ++) {
+			fpr a_re, a_im;
+
+			a_re = a[u];
+			a_im = a[u + hn];
+			d[u] = fpr_add(fpr_sqr(a_re), fpr_sqr(a_im));
+			d[u + hn] = fpr_zero;
+		}
+	}
+}
+
+/* see inner.h */
+TARGET_AVX2
+void
 Zf(poly_mulconst)(fpr *a, fpr x, unsigned logn)
 {
 	size_t n, u;

@@ -118,12 +118,46 @@ extern "C" {
  *
  * FORMATS
  *
- * Public and private keys are exchanged as serialized sequences of
- * bytes. Their respective sizes are fixed (for a given degree) and the
- * HAWK_PRIVKEY_SIZE and HAWK_PUBKEY_SIZE macros return that value
- * as constant expressions.
+ * Public and private keys are exchanged using a compressed Gaussian encoding,
+ * part of compress.c. Their respective sizes (for a given degree) follow a
+ * distribution that is close to a normal distribution.
  *
- * There are three formats for signatures:
+ * The HAWK_MIN_SECKEY_SIZE and HAWK_MAX_SECKEY_SIZE arrays give the lower and
+ * upper bound on the encoded secret key size in bytes.
+ *
+ * The HAWK_MIN_PUBKEY_SIZE and HAWK_MAX_PUBKEY_SIZE arrays give the lower and
+ * upper bound on the encoded public key size in bytes.
+ *
+ * Below are the average sizes in number of bytes of secret keys and public
+ * keys, taken over 2000 samples. To arrive at the minimal and maximal sizes,
+ * add -,+5 std.dev. to the average and round to the average.
+ *
+ * Secret key:
+ * logn | Average +/- stddev | min  | max
+ *    1 |    9.45 +/-   3.82 |    0 |   25
+ *    2 |   15.63 +/-   3.66 |    0 |   32
+ *    3 |   25.07 +/-   3.80 |    0 |   40
+ *    4 |   40.91 +/-   3.88 |   28 |   57
+ *    5 |   68.01 +/-   4.13 |   54 |   85
+ *    6 |  115.95 +/-   4.49 |  101 |  135
+ *    7 |  203.78 +/-   4.90 |  187 |  224
+ *    8 |  367.21 +/-   5.69 |  346 |  390
+ *    9 |  678.74 +/-   6.72 |  655 |  707
+ *
+ * Public key:
+ * logn | Average  | stddev. |  Max
+ *    1 |    5.28 +/-   0.51 |    0 |    8
+ *    2 |    5.68 +/-   4.85 |    0 |   14
+ *    3 |    7.61 +/-   9.14 |    0 |   23
+ *    4 |   13.77 +/-  17.46 |    0 |   43
+ *    5 |   38.29 +/-  34.67 |    0 |   81
+ *    6 |  113.53 +/-  49.15 |    0 |  153
+ *    7 |  257.51 +/-  25.43 |    0 |  285
+ *    8 |  503.60 +/-   6.76 |  480 |  532
+ *    9 |  984.60 +/-   8.38 |  955 | 1017
+ *
+ *
+ * There are two formats for signatures:
  *
  *   - COMPRESSED: this is the default format, which yields the shortest
  *     signatures on average. However, the size is variable (see below)
@@ -135,13 +169,6 @@ extern "C" {
  *     signature process enforces that size by restarting the process
  *     until an appropriate size is obtained (such restarts are uncommon
  *     enough that the computational overhead is negligible).
- *
- *   - CT: this is a fixed-size format, which furthermore allows
- *     constant-time processing with regard to the signature value and
- *     message data. This is meant for uncommon situations in which
- *     the signed data is secret but of low entropy, and the public key
- *     is not actually public. The CT format is larger than the
- *     COMPRESSED and PADDED formats.
  *
  * The signature format is selected by the 'sig_type' parameter to
  * the signature generation and verification functions.
@@ -291,25 +318,37 @@ extern "C" {
  * Note: each macro may evaluate its argument 'logn' several times.
  */
 
-/*
- * Maximum private key size (in bytes).
- * In practice, the private key will be shorter.
- */
-#define HAWK_PRIVKEY_SIZE(logn) \
-	(((logn) <= 3 \
-		? (3u << (logn)) \
-		: ((10u - ((logn) >> 1)) << ((logn) - 2)) + (1 << (logn))) \
-	+ 1)
+// TODO: fix compress.c to work with smaller n's, since sigma_pk scales by
+// factor 2 as logn decreases with 2.
+size_t HAWK_MIN_SECKEY_SIZE[10] = {
+	0, // unused
+	0, 0, 0,
+	0, 0, 0,
+	180, 339, 646
+};
 
-/*
- * Maximum public key size (in bytes).
- * In practice, the public key will be shorter.
- */
-#define HAWK_PUBKEY_SIZE(logn) \
-	(((logn) <= 1 \
-		? 4u \
-		: (7u << ((logn) - 2))) \
-	+ 1)
+size_t HAWK_MAX_SECKEY_SIZE[10] = {
+	0, // unused
+	0, 0, 0,
+	0, 0, 0,
+	228, 395, 712
+};
+
+// TODO: fix logn = 7
+size_t HAWK_MIN_PUBKEY_SIZE[10] = {
+	0, // unused
+	0, 0, 0,
+	0, 0, 0,
+	130, 470, 943
+};
+
+size_t HAWK_MAX_PUBKEY_SIZE[10] = {
+	0, // unused
+	0, 0, 0,
+	0, 0, 0,
+	228, 537, 1026
+};
+
 
 /*
  * Maximum signature size (in bytes) when using the COMPRESSED format.
@@ -450,7 +489,7 @@ int shake256_init_prng_from_system(shake256_context *sc);
  * The new private key is written in the buffer pointed to by privkey.
  * The size of that buffer must be specified in privkey_len; if that
  * size is too low, then this function fails with HAWK_ERR_SIZE. The
- * actual private key length can be obtained from the HAWK_PRIVKEY_SIZE()
+ * actual private key length can be obtained from the HAWK_SECKEY_SIZE()
  * macro.
  *
  * If pubkey is not NULL, then the new public key is written in the buffer

@@ -623,6 +623,13 @@ void Zf(poly_muladj_fft)(fpr *restrict a, const fpr *restrict b, unsigned logn);
 void Zf(poly_mulselfadj_fft)(fpr *a, unsigned logn);
 
 /*
+ * Store product of polynomial a with its own adjoint in d. This function works
+ * only in FFT representation.
+ */
+void Zf(poly_prod_selfadj_fft)(fpr *restrict d, const fpr *restrict a,
+	unsigned logn);
+
+/*
  * Multiply polynomial with a real constant. This function works in both
  * normal and FFT representations.
  */

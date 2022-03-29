@@ -160,8 +160,8 @@ Zf(encode_pubkey_huffman)(void *out, size_t max_out_len,
 	acc = acc_len = 0;
 
 	/*
-	 * The first value of q00 is of the order sigma_kg^2 2d,
-	 * but definitely << 8d when sigma_kg = 1.425, by the standard
+	 * The first value of q00 is of the order sigma_pk^2 2d,
+	 * but definitely << 8d when sigma_pk = 1.425, by the standard
 	 * Laurent-Massart bound [1].
 	 * Here, be lazy and print the whole of x[0].
 	 *
@@ -426,6 +426,22 @@ Zf(encode_sig_huffman)(void *out, size_t max_out_len,
  * a Huffman table is not significant but makes the code more complex.
  */
 
+static size_t low_bits_fg[10] = {
+	0, // unused
+	3,
+	3,
+	2,
+	2,
+	1,
+	1,
+	0,
+	0,
+	0
+}; 
+
+static size_t low_bits_FG = 2;
+
+
 /* see inner.h */
 size_t
 Zf(encode_pubkey)(void *out, size_t max_out_len,
@@ -465,8 +481,8 @@ Zf(encode_pubkey)(void *out, size_t max_out_len,
 
 	/**
 	 * Encode q00.
-	 * The first value of q00 is of the order sigma_kg^2 2n,
-	 * but definitely < 2^16 when sigma_kg = 1.425 and n = 512, by the standard
+	 * The first value of q00 is of the order sigma_pk^2 2n,
+	 * but definitely < 2^16 when sigma_pk = 1.425 and n = 512, by the standard
 	 * Laurent-Massart bound (see https://en.wikipedia.org/wiki/Chi-squared_distribution#Concentration).
 	 */
 	if (buf != NULL) {
@@ -915,13 +931,10 @@ poly_enc(uint8_t *buf, size_t max_out_len, uint64_t acc,
 		acc_len += lo_bits + 1;
 
 		/*
-		 * TODO: fix the numbers in this documentation.
-		 *
-		 * Push as many zeros as necessary, then a one. Since the initial w is
-		 * at most 2047, w can only range up to 15 at this point, thus we will
-		 * add at most 16 bits here. With the 8 bits above and possibly up to 7
-		 * bits from previous iterations, we may go up to 31 bits, which will
-		 * fit in the accumulator, which is an uint64_t.
+		 * Push as many zeros as necessary, then a one. If this means the data
+		 * cannot be stored in the buffer acc, return 0 which implies that the
+		 * secret key must be rejected. The lo_bits are tuned such that this
+		 * almost never happens.
 		 */
 		acc <<= (w + 1);
 		acc |= 1;
