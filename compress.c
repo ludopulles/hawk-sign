@@ -426,20 +426,22 @@ Zf(encode_sig_huffman)(void *out, size_t max_out_len,
  * a Huffman table is not significant but makes the code more complex.
  */
 
-static size_t low_bits_fg[10] = {
-	0, // unused
-	3,
-	3,
-	2,
-	2,
-	1,
-	1,
-	0,
-	0,
-	0
+#define MAX_ALLOWED_Q00(logn) (1 << ((28-logn)/2))
+// n = 1,2: 2^13
+// n = 3,4: 2^12
+// n = 5,6: 2^11
+// n = 7,8: 2^10
+// n = 9: 2^9
+
+static const size_t low_bits_q00[10] = {
+	0 /* unused */, 9, 9, 8, 8, 7, 7, 6, 6, 5
+};
+
+static const size_t low_bits_fg[10] = {
+	0 /* unused */, 3, 3, 2, 2, 1, 1, 0, 0, 0
 }; 
 
-static size_t low_bits_FG = 2;
+#define LOW_BITS_FG 2
 
 
 /* see inner.h */
@@ -449,18 +451,20 @@ Zf(encode_pubkey)(void *out, size_t max_out_len,
 {
 	uint8_t *buf;
 	size_t n, u, v;
+	uint16_t w, low_mask;
 	uint32_t acc;
 	unsigned acc_len;
 
 	n = (size_t)1 << logn;
 	buf = (uint8_t *)out;
+	low_mask = (1U << low_bits_q00[logn]) - 1;
 
 	/*
 	 * Make sure coefficient 1 up to n/2 of q00 are within the -512..+511
 	 * range. Moreover, we silently assume q00 is self adjoint.
 	 */
 	for (u = 1; u < n/2; u ++) {
-		if (q00[u] < -512 || q00[u] >= 512) {
+		if (q00[u] < -MAX_ALLOWED_Q00(logn) || q00[u] >= MAX_ALLOWED_Q00(logn)) {
 			return 0;
 		}
 	}
@@ -491,9 +495,8 @@ Zf(encode_pubkey)(void *out, size_t max_out_len,
 		buf[1] = ((uint16_t)q00[0]) >> 8;
 	}
 	v += 2;
-	for (u = 1; u < n/2; u ++) {
-		uint16_t w;
 
+	for (u = 1; u < n/2; u ++) {
 		/*
 		 * Push the sign bit and store |x| - [x<0] in w.
 		 * Note that x = 1,0,-1,-2,... give value for w of 1,0,0,1,... resp.
@@ -503,18 +506,19 @@ Zf(encode_pubkey)(void *out, size_t max_out_len,
 		w ^= -(w >> 15);
 
 		/*
-		 * Push the low 5 bits of w.
+		 * Push the low 5 bits of w, when logn = 9.
 		 */
-		acc = (acc << 5) | (w & 31);
-		w >>= 5;
-		acc_len += 6;
+		acc = (acc << low_bits_q00[logn]) | (w & low_mask);
+		w >>= low_bits_q00[logn];
+		acc_len += low_bits_q00[logn] + 1;
 
 		/*
-		 * Push as many zeros as necessary, then a one. Since the absolute
-		 * value is at most 511, w can only range up to 15 at this point, thus
-		 * we will add at most 16 bits here. With the 6 bits above and possibly
-		 * up to 7 bits from previous iterations, we may go up to 28 bits,
-		 * which will fit in the accumulator, which is an uint32_t.
+		 * Push as many zeros as necessary, then a one.
+		 * For n = 512: Since the absolute value is at most 511, w can only
+		 * range up to 15 at this point, thus we will add at most 16 bits here.
+		 * With the 6 bits above and possibly up to 7 bits from previous
+		 * iterations, we may go up to 28 bits, which will fit in the
+		 * accumulator, which is an uint32_t.
 		 */
 		acc <<= (w + 1);
 		acc |= 1;
@@ -539,8 +543,6 @@ Zf(encode_pubkey)(void *out, size_t max_out_len,
 	 * Encode q10.
 	 */
 	for (u = 0; u < n; u ++) {
-		uint16_t w;
-
 		/*
 		 * Push the sign bit and store |x| - [x<0] in w.
 		 * Note that x = 1,0,-1,-2,... give value for w of 1,0,0,1,... resp.
@@ -605,7 +607,7 @@ Zf(decode_pubkey)(int16_t *q00, int16_t *q10,
 {
 	const uint8_t *buf;
 	size_t n, u, v;
-	uint16_t acc;
+	uint16_t acc, low_mask, high_inc;
 	unsigned acc_len;
 
 #define ENSUREBIT()                                                      \
@@ -620,6 +622,8 @@ Zf(decode_pubkey)(int16_t *q00, int16_t *q10,
 	buf = (uint8_t *)in;
 	n = MKN(logn);
 	acc = acc_len = 0;
+	high_inc = (1U << low_bits_q00[logn]);
+	low_mask = high_inc - 1;
 
 	/*
 	 * Decode q00.
@@ -643,7 +647,7 @@ Zf(decode_pubkey)(int16_t *q00, int16_t *q10,
 		ENSUREBIT();
 		s = GETBIT();
 
-		if (acc_len < 5) {
+		if (acc_len < low_bits_q00[logn]) {
 			if (v >= max_in_len) {
 				return 0;
 			}
@@ -654,7 +658,7 @@ Zf(decode_pubkey)(int16_t *q00, int16_t *q10,
 		/*
 		 * Get 5 least significant bits of w.
 		 */
-		w = (acc >> (acc_len -= 5)) & 31;
+		w = (acc >> (acc_len -= low_bits_q00[logn])) & low_mask;
 
 		/*
 		 * Recover the most significant bits of w: count number of consecutive
@@ -665,8 +669,8 @@ Zf(decode_pubkey)(int16_t *q00, int16_t *q10,
 			if (GETBIT() != 0) {
 				break;
 			}
-			w += 32;
-			if (w >= 512) {
+			w += high_inc;
+			if (w >= MAX_ALLOWED_Q00(logn)) {
 				return 0;
 			}
 		}
@@ -905,13 +909,16 @@ Zf(decode_sig)(int16_t *x, const void *in, size_t max_in_len, unsigned logn,
 }
 
 static size_t
-poly_enc(uint8_t *buf, size_t max_out_len, uint64_t acc,
-	size_t acc_len, size_t v, const int8_t *x, unsigned logn,
-	size_t lo_bits)
+poly_enc(uint8_t *buf, size_t max_out_len, size_t v, const int8_t *x,
+	unsigned logn, size_t lo_bits)
 {
-	size_t n, u;
+	size_t n, u, acc_len;
+	uint64_t acc;
 
 	n = MKN(logn);
+	acc = 0;
+	acc_len = 0;
+
 	for (u = 0; u < n; u ++) {
 		uint8_t w;
 
@@ -956,32 +963,6 @@ poly_enc(uint8_t *buf, size_t max_out_len, uint64_t acc,
 			v ++;
 		}
 	}
-	return v;
-}
-
-/*
- * Optimal choice for sigma_pk = 1.425 is lo_bits_fg = 0, lo_bits_FG = 2
- * Results in |sk| = 1037.2 ± 10.7 bytes, for n=512.
- * Note: G can be recalculated from fG - gF = 1 so do not encode it.
- */
-size_t
-Zf(encode_seckey)(void *out, size_t max_out_len,
-	const int8_t *f, const int8_t *g, const int8_t *F, unsigned logn)
-{
-	uint8_t *buf;
-	size_t v, acc_len;
-	uint64_t acc;
-
-	buf = (uint8_t *)out;
-	acc = 0;
-	acc_len = 0;
-
-	v = poly_enc(buf, max_out_len, acc, acc_len, 0, f, logn, 0);
-	if (v == 0) return 0;
-	v = poly_enc(buf, max_out_len, acc, acc_len, v, g, logn, 0);
-	if (v == 0) return 0;
-	v = poly_enc(buf, max_out_len, acc, acc_len, v, F, logn, 2);
-	if (v == 0) return 0;
 
 	/*
 	 * Flush remaining bits (if any).
@@ -995,16 +976,36 @@ Zf(encode_seckey)(void *out, size_t max_out_len,
 		}
 		v ++;
 	}
-
 	return v;
 }
 
-static size_t
-poly_dec(const uint8_t *buf, size_t max_in_len, uint16_t acc,
-	size_t acc_len, size_t v, int8_t *x, unsigned logn,
-	size_t lo_bits)
+/*
+ * Optimal choice for sigma_pk = 1.425 is lo_bits_fg = 0, lo_bits_FG = 2
+ * Results in |sk| = 1037.2 ± 10.7 bytes, for n=512.
+ * Note: G can be recalculated from fG - gF = 1 so do not encode it.
+ */
+size_t
+Zf(encode_seckey)(void *out, size_t max_out_len,
+	const int8_t *f, const int8_t *g, const int8_t *F, unsigned logn)
 {
-	size_t n, u;
+	uint8_t *buf;
+	size_t v;
+
+	buf = (uint8_t *)out;
+
+	v = poly_enc(buf, max_out_len, 0, f, logn, low_bits_fg[logn]);
+	if (v == 0) return 0;
+	v = poly_enc(buf, max_out_len, v, g, logn, low_bits_fg[logn]);
+	if (v == 0) return 0;
+	return poly_enc(buf, max_out_len, v, F, logn, LOW_BITS_FG);
+}
+
+static size_t
+poly_dec(const uint8_t *buf, size_t max_in_len, size_t v, int8_t *x,
+	unsigned logn, size_t lo_bits)
+{
+	size_t n, u, acc_len;
+	uint16_t acc;
 
 #define ENSUREBIT()                                                      \
 	if (acc_len == 0) {                                                  \
@@ -1016,6 +1017,8 @@ poly_dec(const uint8_t *buf, size_t max_in_len, uint16_t acc,
 #define GETBIT() ((acc >> (--acc_len)) & 1)
 
 	n = MKN(logn);
+	acc = 0;
+	acc_len = 0;
 
 	for (u = 0; u < n; u ++) {
 		uint16_t s, w;
@@ -1060,6 +1063,13 @@ poly_dec(const uint8_t *buf, size_t max_in_len, uint16_t acc,
 		x[u] = w ^ -s;
 	}
 
+	/*
+	 * Unused bits in the last byte must be zero.
+	 */
+	if ((acc & ((1u << acc_len) - 1u)) != 0) {
+		return 0;
+	}
+
 	return v;
 #undef ENSUREBIT
 #undef GETBIT
@@ -1075,26 +1085,13 @@ Zf(decode_seckey)(int8_t *f, int8_t *g, int8_t *F,
 	const void *in, size_t max_in_len, unsigned logn)
 {
 	const uint8_t *buf;
-	size_t v, acc_len;
-	uint16_t acc;
+	size_t v;
 
 	buf = (const uint8_t *)in;
-	acc = 0;
-	acc_len = 0;
 
-	v = poly_dec(buf, max_in_len, acc, acc_len, 0, f, logn, 0);
+	v = poly_dec(buf, max_in_len, 0, f, logn, low_bits_fg[logn]);
 	if (v == 0) return 0;
-	v = poly_dec(buf, max_in_len, acc, acc_len, v, g, logn, 0);
+	v = poly_dec(buf, max_in_len, v, g, logn, low_bits_fg[logn]);
 	if (v == 0) return 0;
-	v = poly_dec(buf, max_in_len, acc, acc_len, v, F, logn, 2);
-	if (v == 0) return 0;
-
-	/*
-	 * Unused bits in the last byte must be zero.
-	 */
-	if ((acc & ((1u << acc_len) - 1u)) != 0) {
-		return 0;
-	}
-
-	return v;
+	return poly_dec(buf, max_in_len, v, F, logn, LOW_BITS_FG);
 }

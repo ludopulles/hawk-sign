@@ -23,7 +23,7 @@ void output_poly(int8_t *p, int logn) {
 }
 
 int main(int argc, char **argv) {
-	uint8_t b[28 * 512];
+	uint8_t b[48 * 512];
 	int8_t f[512], g[512], F[512], G[512];
 	fpr q00[512], q10[512], q11[512];
 	unsigned char shakeseed[48];

@@ -107,6 +107,51 @@
 
 
 /* =================================================================== */
+// yyySUPERCOP+0
+/*
+ * For seed generation from the operating system:
+ *  - On Linux and glibc-2.25+, FreeBSD 12+ and OpenBSD, use getentropy().
+ *  - On Unix-like systems, use /dev/urandom (including as a fallback
+ *    for failed getentropy() calls).
+ *  - On Windows, use CryptGenRandom().
+ */
+
+#ifndef HAWK_RAND_GETENTROPY
+#if (defined __linux__ && defined __GLIBC__ \
+	&& (__GLIBC__ > 2 || (__GLIBC__ == 2 && __GLIBC_MINOR__ >= 25))) \
+	|| (defined __FreeBSD__ && __FreeBSD__ >= 12) \
+	|| defined __OpenBSD__
+#define HAWK_RAND_GETENTROPY   1
+#else
+#define HAWK_RAND_GETENTROPY   0
+#endif
+#endif
+
+#ifndef HAWK_RAND_URANDOM
+#if defined _AIX \
+	|| defined __ANDROID__ \
+	|| defined __FreeBSD__ \
+	|| defined __NetBSD__ \
+	|| defined __OpenBSD__ \
+	|| defined __DragonFly__ \
+	|| defined __linux__ \
+	|| (defined __sun && (defined __SVR4 || defined __svr4__)) \
+	|| (defined __APPLE__ && defined __MACH__)
+#define HAWK_RAND_URANDOM   1
+#else
+#define HAWK_RAND_URANDOM   0
+#endif
+#endif
+
+#ifndef HAWK_RAND_WIN32
+#if defined _WIN32 || defined _WIN64
+#define HAWK_RAND_WIN32   1
+#else
+#define HAWK_RAND_WIN32   0
+#endif
+#endif
+// yyySUPERCOP-
+/* =================================================================== */
 
 /*
  * Compute degree N from logarithm 'logn'.
@@ -900,7 +945,7 @@ Zf(guaranteed_sign)(inner_shake256_context *rng, int16_t *restrict sig,
  * Required space in terms of number of fpr values for an expanded secret key,
  * which can be used in Zf(fft_sign).
  */
-#define EXPANDED_SECKEY_SIZE(logn) (9 << ((logn) - 1))
+#define EXPANDED_SECKEY_SIZE(logn) (9u << ((logn) - 1))
 
 /*
  * Expands a secret key given by the key generation, to produce the secret key

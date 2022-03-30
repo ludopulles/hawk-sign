@@ -33,6 +33,26 @@
 #include "inner.h"
 
 /*
+ * These are the sizes that are allowed for the secret key and private key for
+ * various values of logn.
+ */
+const size_t HAWK_MIN_SECKEY_SIZE[10] = {
+	0 /* unused */, 1, 3, 9, 23, 46, 93, 179, 339, 646
+};
+
+const size_t HAWK_MAX_SECKEY_SIZE[10] = {
+	0 /* unused */, 6, 11, 22, 37, 70, 120, 228, 395, 712
+};
+
+const size_t HAWK_MIN_PUBKEY_SIZE[10] = {
+	0 /* unused */, 3, 7, 13, 28, 57, 117, 235, 475, 943
+};
+
+const size_t HAWK_MAX_PUBKEY_SIZE[10] = {
+	0 /* unused */, 7, 13, 23, 41, 77, 143, 276, 528, 1026
+};
+
+/*
  * The number of bytes that are required for the hash when generating a
  * signature from the hash-then-sign principle on which Hawk is based.
  */
@@ -144,7 +164,7 @@ hawk_keygen_make(shake256_context *rng, unsigned logn, void *privkey,
 	int16_t *q00_num, *q10_num;
 	fpr *q00, *q10, *q11;
 	uint8_t *atmp;
-	size_t n, u, v, sk_len, pk_len;
+	size_t n, u, sk_len, pk_len;
 	uint8_t *sk, *pk;
 	unsigned oldcw;
 
@@ -156,10 +176,11 @@ hawk_keygen_make(shake256_context *rng, unsigned logn, void *privkey,
 	}
 
 	/*
-	 * Check all the buffer sizes.
+	 * Check that the seckey and pubkey buffers are at least as large as the
+	 * allowed encoded sizes, and check the temporary buffer size.
 	 */
-	if (*privkey_len < HAWK_PRIVKEY_SIZE(logn)
-		|| *pubkey_len < HAWK_PUBKEY_SIZE(logn)
+	if (*privkey_len < HAWK_MAX_SECKEY_SIZE[logn]
+		|| *pubkey_len < HAWK_MAX_PUBKEY_SIZE[logn]
 		|| tmp_len < HAWK_TMPSIZE_KEYGEN(logn)) {
 		return HAWK_ERR_SIZE;
 	}
@@ -180,11 +201,10 @@ hawk_keygen_make(shake256_context *rng, unsigned logn, void *privkey,
 	 * These buffers overlap with f, g, F, G but this is fine as we encode the
 	 * public key after the private key is already encoded.
 	 */
-	q00_num = (int16_t *)tmp;
+	q00_num = (int16_t *)align_u16(tmp);
 	q10_num = q00_num + n;
 
-	atmp = (uint8_t *)(q11 + n);// align_u64(G + n);
-	oldcw = set_fpu_cw(2);
+	atmp = (uint8_t *)(q11 + n);
 
 	/*
 	 * Fix the first byte of secret key and private key.
@@ -195,19 +215,19 @@ hawk_keygen_make(shake256_context *rng, unsigned logn, void *privkey,
 	pk = pubkey;
 	pk[0] = 0x00 + logn;
 
-	for (;;) {
+	do {
+		oldcw = set_fpu_cw(2);
 		Zf(keygen)((inner_shake256_context *)rng, f, g, F, G, q00, q10, q11,
 			logn, atmp);
+		set_fpu_cw(oldcw);
 
-		v = Zf(encode_seckey)(sk + 1, *privkey_len - 1, f, g, F, logn);
-		if (v == 0) {
-			/*
-			 * Retry key-generation as the secret key cannot be encoded. This
-			 * only happens with negligible probability.
-			 */
-			continue;
+		sk_len = Zf(encode_seckey)(sk + 1, *privkey_len - 1, f, g, F, logn);
+
+		printf("Keygen:\n");
+		for (size_t u = 0; u < MKN(logn); u++) {
+			printf("%.2f %.2f %.2f\n",
+				*(double *)&q00[u], *(double *)&q10[u], *(double *)&q11[u]);
 		}
-		sk_len = 1 + v; // 1 header byte
 
 		/*
 		 * Destroy the private key basis [[f,g], [F,G]] to store q00, q10.
@@ -222,21 +242,18 @@ hawk_keygen_make(shake256_context *rng, unsigned logn, void *privkey,
 			q10_num[u] = fpr_rint(q10[u]);
 		}
 
-		v = Zf(encode_pubkey)(pk + 1, *pubkey_len - 1, q00_num, q10_num, logn);
-		if (v == 0) {
-			/*
-			 * Retry key-generation as the public key cannot be encoded. This
-			 * only happens with negligible probability.
-			 */
-			continue;
-		}
-		pk_len = 1 + v;
-		break;
-	}
+		pk_len = Zf(encode_pubkey)(pk + 1, *pubkey_len - 1, q00_num, q10_num, logn);
+		/*
+		 * Retry key-generation as the secret key or public key cannot be
+		 * encoded. This only happens with negligible probability.
+		 */
+	} while (sk_len == 0 || pk_len == 0);
 
-	set_fpu_cw(oldcw);
-	*privkey_len = sk_len;
-	*pubkey_len = pk_len;
+	/*
+	 * Do not forgot that there is one header byte in sk and pk.
+	 */
+	*privkey_len = 1 + sk_len;
+	*pubkey_len = 1 + pk_len;
 
 	return 0;
 }
@@ -301,7 +318,8 @@ hawk_expand_privkey(void *expanded_key, size_t expanded_key_len,
 	if (logn < 1 || logn > 9) {
 		return HAWK_ERR_FORMAT;
 	}
-	if (privkey_len > HAWK_PRIVKEY_SIZE(logn)) {
+	if (privkey_len < HAWK_MIN_SECKEY_SIZE[logn]
+		|| privkey_len > HAWK_MAX_SECKEY_SIZE[logn]) {
 		return HAWK_ERR_FORMAT;
 	}
 	if (expanded_key_len < HAWK_EXPANDEDKEY_SIZE(logn)
@@ -408,6 +426,7 @@ hawk_sign_finish(shake256_context *rng, void *sig, size_t *sig_len,
 			return HAWK_ERR_SIZE;
 		} else {
 			*sig_len = u + v;
+			return 0;
 		}
 	}
 
@@ -486,7 +505,8 @@ hawk_sign_dyn_finish(shake256_context *rng, void *sig, size_t *sig_len,
 	if (logn < 1 || logn > 9) {
 		return HAWK_ERR_FORMAT;
 	}
-	if (privkey_len > HAWK_PRIVKEY_SIZE(logn)) {
+	if (privkey_len < HAWK_MIN_SECKEY_SIZE[logn]
+		|| privkey_len > HAWK_MAX_SECKEY_SIZE[logn]) {
 		return HAWK_ERR_FORMAT;
 	}
 
@@ -591,7 +611,8 @@ hawk_verify_finish(const void *sig, size_t sig_len, int sig_type,
 		return HAWK_ERR_BADARG;
 	}
 
-	if (pubkey_len > HAWK_PUBKEY_SIZE(logn)) {
+	if (pubkey_len < HAWK_MIN_PUBKEY_SIZE[logn]
+		|| pubkey_len > HAWK_MAX_PUBKEY_SIZE[logn]) {
 		return HAWK_ERR_FORMAT;
 	}
 	if (tmp_len < HAWK_TMPSIZE_VERIFY(logn)) {
@@ -657,6 +678,11 @@ hawk_verify_finish(const void *sig, size_t sig_len, int sig_type,
 	 * Construct full public key.
 	 */
 	Zf(complete_pubkey)(q00_num, q10_num, q00, q10, q11, logn);
+
+	for (size_t u = 0; u < MKN(logn); u++) {
+		printf("%.2f %.2f %.2f\n",
+			*(double *)&q00[u], *(double *)&q10[u], *(double *)&q11[u]);
+	}
 
 	/*
 	 * Verify signature.

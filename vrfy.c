@@ -280,6 +280,22 @@ Zf(verify_simple_rounding_fft)(const uint8_t *restrict h,
 	Zf(poly_div_autoadj_fft)(t0, q00, logn); // t0 = (h1/2 - s1) q10/q00
 	Zf(iFFT)(t0, logn);
 
+	printf("Verifying signature:\n");
+	for (u = 0; u < n/4; u++) printf("%u ", h[u]);
+	printf("\n");
+	for (u = 0, w = 0; w < n; u ++ ) {
+		uint8_t h0 = h[u];
+		for (v = 0; v < 8; v ++, w ++) {
+			printf("%d ", fpr_rint(fpr_add(fpr_half(fpr_of(h0 & 1)), t0[w])));
+			h0 >>= 1;
+		}
+	}
+	printf("\n");
+	for (u = 0; u < n; u++) {
+		printf("%d ", s1[u]);
+	}
+	printf("\n");
+
 	/**
 	 * Recover s0 with s0 = round(h0/2 + (h1/2 - s1) q10 / q00).
 	 * Put (t0, t1) = (h0 / 2 - s0, h1 / 2 - s1) in FFT representation so we can

@@ -266,8 +266,10 @@ Zf(ffBabai_reduce)(const fpr *restrict f, const fpr *restrict g,
 	Zf(poly_mul_autoadj_fft)(t, q, logn);
 
 	// Since q is self-adjoint, invert real part
-	for (u = 0; u < hn; u++)
+	for (u = 0; u < hn; u++) {
 		q[u] = fpr_inv(q[u]);
+		q[u + hn] = fpr_zero;
+	}
 	// Alternative:
 	// Zf(poly_add_muladj_fft)(q, f, g, f, g, logn);
 

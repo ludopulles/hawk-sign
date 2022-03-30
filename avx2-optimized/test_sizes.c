@@ -18,7 +18,6 @@ long long time_diff(const struct timeval *begin, const struct timeval *end) {
 }
 
 void fpr_to_int16(int16_t *d, fpr *p, size_t logn) {
-	Zf(iFFT)(p, logn);
 	for (size_t u = 0; u < MKN(logn); u++) {
 		d[u] = fpr_rint(p[u]);
 	}
@@ -31,8 +30,49 @@ void fpr_to_int16(int16_t *d, fpr *p, size_t logn) {
 #define MAX_N MKN(MAX_LOGN)
 
 const int n_repetitions = 100;
+
 long long pk_sum[MAX_LOGN+1] = {}, pk_sumsq[MAX_LOGN+1] = {}, pk_min[MAX_LOGN+1] = {}, pk_max[MAX_LOGN+1] = {};
 long long sk_sum[MAX_LOGN+1] = {}, sk_sumsq[MAX_LOGN+1] = {}, sk_min[MAX_LOGN+1] = {}, sk_max[MAX_LOGN+1] = {};
+long long q00_sum[MAX_LOGN+1] = {}, q00_sumsq[MAX_LOGN+1] = {}, q00_min[MAX_LOGN+1] = {}, q00_max[MAX_LOGN+1] = {};
+long long q10_sum[MAX_LOGN+1] = {}, q10_sumsq[MAX_LOGN+1] = {}, q10_min[MAX_LOGN+1] = {}, q10_max[MAX_LOGN+1] = {};
+
+void test_compress(size_t logn) {
+	uint8_t b[48 << MAX_LOGN], encode_buf[10000];
+	int8_t f[MAX_N], g[MAX_N], F[MAX_N], G[MAX_N];
+	int8_t _f[MAX_N], _g[MAX_N], _F[MAX_N];
+	fpr q00[MAX_N], q10[MAX_N], q11[MAX_N];
+	int16_t q00n[MAX_N], q10n[MAX_N], _q00n[MAX_N], _q10n[MAX_N];
+	unsigned char seed[48];
+	inner_shake256_context sc;
+
+	// Initialize a RNG.
+	randombytes(seed, sizeof seed);
+	inner_shake256_init(&sc);
+	inner_shake256_inject(&sc, seed, sizeof seed);
+	inner_shake256_flip(&sc);
+
+	for (int i = 0; i < n_repetitions; i++) {
+		// Generate key pair.
+		Zf(keygen)(&sc, f, g, F, G, q00, q10, q11, logn, b);
+
+		Zf(iFFT)(q00, logn);
+		Zf(iFFT)(q10, logn);
+
+		fpr_to_int16(q00n, q00, logn);
+		fpr_to_int16(q10n, q10, logn);
+
+		int pk_sz = Zf(encode_pubkey)((void *)&encode_buf, 10000, q00n, q10n, logn);
+		assert(pk_sz != 0);
+		int _pksz = Zf(decode_pubkey)(q00n, q10n, (void *)&encode_buf, 10000, logn);
+		assert(_pksz == pk_sz);
+
+		int sk_sz = Zf(encode_seckey)((void *)&encode_buf, 10000, f, g, F, logn);
+		assert(sk_sz != 0);
+		int _sksz = Zf(decode_seckey)(f, g, F, (void *)&encode_buf, 10000, logn);
+		assert(_sksz == sk_sz);
+
+	}
+}
 
 void measure_keygen(size_t logn) {
 	uint8_t b[48 << MAX_LOGN];
@@ -58,9 +98,13 @@ void measure_keygen(size_t logn) {
 		// Generate key pair.
 		Zf(keygen)(&sc, f, g, F, G, q00, q10, q11, logn, b);
 
-		for (size_t u = 0; u < MKN(logn); u++)
-			sq_fg += f[u]*f[u] + g[u]*g[u],
+		for (size_t u = 0; u < MKN(logn); u++) {
+			sq_fg += f[u]*f[u] + g[u]*g[u];
 			sq_FG += F[u]*F[u];
+		}
+
+		Zf(iFFT)(q00, logn);
+		Zf(iFFT)(q10, logn);
 
 		fpr_to_int16(q00n, q00, logn);
 		fpr_to_int16(q10n, q10, logn);
@@ -77,6 +121,17 @@ void measure_keygen(size_t logn) {
 		sk_sumsq[logn] += sk_sz * sk_sz;
 		if (sk_sz < sk_min[logn]) sk_min[logn] = sk_sz;
 		if (sk_sz > sk_max[logn]) sk_max[logn] = sk_sz;
+
+		for  (size_t u = 0; u < MKN(logn); u++) {
+			long long x = fpr_rint(q00[u]);
+			long long y = fpr_rint(q10[u]);
+			if (u != 0) {
+				q00_sum[logn] += x;
+				q00_sumsq[logn] += x*x;
+			}
+			q10_sum[logn] += y;
+			q10_sumsq[logn] += y*y;
+		}
 	}
 
 	gettimeofday(&t1, NULL);
@@ -86,6 +141,12 @@ void measure_keygen(size_t logn) {
 	printf("Sigma_{seckey} ~ %.8f, %.8f\n",
 		sqrt(sq_fg / (2.0 * n_repetitions * MKN(logn))),
 		sqrt(sq_FG / n_repetitions / MKN(logn)));
+
+	printf("sigma_{q00}(%d) = %.8f, sigma_{q10} = %.8f\n",
+		(int) logn,
+		sqrt(q00_sumsq[logn] / (double) n_repetitions / (MKN(logn) - 1)),
+		sqrt(q10_sumsq[logn] / (double) n_repetitions / MKN(logn))
+	);
 }
 
 int main() {
@@ -96,15 +157,19 @@ int main() {
 	printf("Seed: %u\n", seed);
 	srand(seed);
 
-	for (size_t logn = 1; logn <= 9; logn++)
-		pk_min[logn] = sk_min[logn] = 1000 * 1000;
+	for (size_t logn = 1; logn <= 9; logn++) {
+		test_compress(logn);
+	}
 
-	for (size_t logn = 1; logn <= 9; logn++)
+	for (size_t logn = 1; logn <= 9; logn++) {
+		pk_min[logn] = sk_min[logn] = 1000 * 1000;
 		measure_keygen(logn);
+	}
 
 	printf("logn | Average +/- stddev | min  | max \n");
 	double avg, std;
 
+	printf("-----+- Secret key -------+------+-----\n");
 	// Secret key
 	for (size_t logn = 1; logn <= 9; logn++) {
 		avg = (double) sk_sum[logn] / n_repetitions;
@@ -112,6 +177,7 @@ int main() {
 		printf("%4d | %7.2f +/- %6.2f | %4lld | %4lld\n", (int) logn, avg, std, sk_min[logn], sk_max[logn]);
 	}
 
+	printf("-----+- Public key -------+------+-----\n");
 	// Public key
 	for (size_t logn = 1; logn <= 9; logn++) {
 		avg = (double) pk_sum[logn] / n_repetitions;

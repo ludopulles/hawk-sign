@@ -4115,7 +4115,7 @@ Zf(keygen)(inner_shake256_context *rng,
 		Zf(iFFT)(q00, logn); // 1 / Q_00
 
 		// TODO: derive a good bound here, depending on logn and sigma_pk.
-		/* if (fpr_lt(q11[0], fpr_inv(fpr_of(200))) || fpr_lt(fpr_inv(fpr_of(100)), q11[0])) {
+		/* if (fpr_lt(q00[0], fpr_inv(fpr_of(200))) || fpr_lt(fpr_inv(fpr_of(100)), q00[0])) {
 			// Reject keypair as decompression may fail often.
 			continue;
 		} */

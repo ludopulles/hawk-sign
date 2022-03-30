@@ -129,32 +129,32 @@ extern "C" {
  * upper bound on the encoded public key size in bytes.
  *
  * Below are the average sizes in number of bytes of secret keys and public
- * keys, taken over 2000 samples. To arrive at the minimal and maximal sizes,
+ * keys, taken over 10000 samples. To arrive at the minimal and maximal sizes,
  * add -,+5 std.dev. to the average and round to the average.
  *
- * Secret key:
+ * TODO: run test_sizes with fixed compress.c, or where flushing last byte only happens at the end...
+ * TODO: also account for the 1 header byte containing type of key & logn.
  * logn | Average +/- stddev | min  | max
- *    1 |    9.45 +/-   3.82 |    0 |   25
- *    2 |   15.63 +/-   3.66 |    0 |   32
- *    3 |   25.07 +/-   3.80 |    0 |   40
- *    4 |   40.91 +/-   3.88 |   28 |   57
- *    5 |   68.01 +/-   4.13 |   54 |   85
- *    6 |  115.95 +/-   4.49 |  101 |  135
- *    7 |  203.78 +/-   4.90 |  187 |  224
- *    8 |  367.21 +/-   5.69 |  346 |  390
- *    9 |  678.74 +/-   6.72 |  655 |  707
- *
- * Public key:
- * logn | Average  | stddev. |  Max
- *    1 |    5.28 +/-   0.51 |    0 |    8
- *    2 |    5.68 +/-   4.85 |    0 |   14
- *    3 |    7.61 +/-   9.14 |    0 |   23
- *    4 |   13.77 +/-  17.46 |    0 |   43
- *    5 |   38.29 +/-  34.67 |    0 |   81
- *    6 |  113.53 +/-  49.15 |    0 |  153
- *    7 |  257.51 +/-  25.43 |    0 |  285
- *    8 |  503.60 +/-   6.76 |  480 |  532
- *    9 |  984.60 +/-   8.38 |  955 | 1017
+ * -----+- Secret key -------+------+-----
+ *    1 |    3.45 +/-   0.64 |    3 |    7
+ *    2 |    7.49 +/-   0.90 |    6 |   11
+ *    3 |   15.49 +/-   1.33 |   12 |   21
+ *    4 |   29.63 +/-   1.50 |   25 |   36
+ *    5 |   57.83 +/-   2.49 |   50 |   69
+ *    6 |  106.48 +/-   2.88 |   96 |  118
+ *    7 |  203.70 +/-   4.94 |  187 |  223
+ *    8 |  367.20 +/-   5.64 |  346 |  391
+ *    9 |  678.76 +/-   6.66 |  653 |  703
+ * -----+- Public key -------+------+-----
+ *    1 |    5.27 +/-   0.52 |    0 |    8
+ *    2 |    9.59 +/-   0.71 |    9 |   14
+ *    3 |   18.00 +/-   1.03 |   16 |   26
+ *    4 |   34.46 +/-   1.36 |   31 |   42
+ *    5 |   66.70 +/-   2.06 |   60 |   77
+ *    6 |  130.40 +/-   2.69 |  122 |  141
+ *    7 |  255.17 +/-   4.17 |  242 |  274
+ *    8 |  501.60 +/-   5.32 |  485 |  528
+ *    9 |  984.52 +/-   8.32 |  955 | 1019
  *
  *
  * There are two formats for signatures:
@@ -318,36 +318,10 @@ extern "C" {
  * Note: each macro may evaluate its argument 'logn' several times.
  */
 
-// TODO: fix compress.c to work with smaller n's, since sigma_pk scales by
-// factor 2 as logn decreases with 2.
-size_t HAWK_MIN_SECKEY_SIZE[10] = {
-	0, // unused
-	0, 0, 0,
-	0, 0, 0,
-	180, 339, 646
-};
-
-size_t HAWK_MAX_SECKEY_SIZE[10] = {
-	0, // unused
-	0, 0, 0,
-	0, 0, 0,
-	228, 395, 712
-};
-
-// TODO: fix logn = 7
-size_t HAWK_MIN_PUBKEY_SIZE[10] = {
-	0, // unused
-	0, 0, 0,
-	0, 0, 0,
-	130, 470, 943
-};
-
-size_t HAWK_MAX_PUBKEY_SIZE[10] = {
-	0, // unused
-	0, 0, 0,
-	0, 0, 0,
-	228, 537, 1026
-};
+extern const size_t HAWK_MIN_SECKEY_SIZE[10];
+extern const size_t HAWK_MAX_SECKEY_SIZE[10];
+extern const size_t HAWK_MIN_PUBKEY_SIZE[10];
+extern const size_t HAWK_MAX_PUBKEY_SIZE[10];
 
 
 /*
@@ -371,37 +345,38 @@ size_t HAWK_MAX_PUBKEY_SIZE[10] = {
  * Temporary buffer size for key pair generation.
  */
 #define HAWK_TMPSIZE_KEYGEN(logn) \
-	(((logn) <= 3 ? 272u : (28u << (logn))) + (3u << (logn)) + 7)
+	(((logn) <= 3 ? 272u : (48u << (logn))) + (28u << (logn)) + 7)
 
 /*
  * Temporary buffer size for computing the public key from the private key.
  */
-#define HAWK_TMPSIZE_MAKEPUB(logn) \
-	((6u << (logn)) + 1)
+/* #define HAWK_TMPSIZE_MAKEPUB(logn) \
+	((6u << (logn)) + 1) */
 
 /*
  * Temporary buffer size for generating a signature with an expanded key.
  */
 #define HAWK_TMPSIZE_SIGN(logn) \
-	((50u << (logn)) + 7)
+	((logn) <= 3 ? 1U : (1U << ((logn)-3))) + (2u << (logn)) + (26u << (logn)) + 7
+	// ((50u << (logn)) + 7)
 
 /*
  * Temporary buffer size for expanding a private key.
  */
 #define HAWK_TMPSIZE_EXPANDPRIV(logn) \
-	(3u << logn)
+	(3u << (logn))
 
 /*
  * Size of an expanded private key.
  */
 #define HAWK_EXPANDEDKEY_SIZE(logn) \
-	((9u << (logn - 1)) + 8)
+	((36u << (logn)) + 8)
 
 /*
  * Temporary buffer size for verifying a signature.
  */
 #define HAWK_TMPSIZE_VERIFY(logn) \
-	((8u << (logn)) + 1)
+	(logn <= 3 ? 1U : (1U << (logn-3))) + (26u << (logn)) + (16u << (logn))
 
 /* ==================================================================== */
 /*

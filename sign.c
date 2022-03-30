@@ -510,6 +510,7 @@ do_fft_sign(prng *rng, int16_t *restrict s1,
 	 * yielding s1 = (h1 - (-x0 g + x1 f)) / 2.
 	 */
 	Zf(poly_neg)(tx0, logn);
+
 	Zf(poly_add_mul_fft)(tres, tx0, tx1, tg, tf, logn);
 	Zf(iFFT)(tres, logn);
 
@@ -522,6 +523,22 @@ do_fft_sign(prng *rng, int16_t *restrict s1,
 			h1 >>= 1;
 		}
 	}
+
+	Zf(poly_add_mul_fft)(tres, tx0, tx1, tG, tf, logn);
+	printf("Signing signature:\n");
+	for (u = 0; u < n/4; u++) printf("%u ", h[u]);
+	printf("\n");
+	for (u = 0, w = 0; w < n; u ++) {
+		uint8_t h0 = h[u];
+		for (v = 0; v < 8; v ++, w ++) {
+			int s0 = (int16_t)((h0 & 1) + fpr_rint(tres[w])) / 2;
+			printf("%d ", s0);
+			h0 >>= 1;
+		}
+	}
+	printf("\n");
+	for (u = 0; u < n; u++) printf("%d ", s1[u]);
+	printf("\n");
 
 	return 1;
 }
