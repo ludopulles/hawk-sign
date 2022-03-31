@@ -10,7 +10,7 @@ CXX = g++
 CXXFLAGS = --std=c++17 $(CFLAGS)
 
 OBJ = build/compress.o build/fft.o build/ffo.o build/fpr.o build/keygen.o build/rng.o build/sampler.o build/shake.o build/sign.o build/vrfy.o
-PROGS = bin/main bin/test_keygen bin/test_sign bin/config_fg bin/config_FG bin/test_babai bin/test_enum bin/test_compress_sig
+PROGS = bin/main bin/test_keygen bin/test_sign bin/config_fg bin/config_FG bin/test_babai bin/test_enum bin/test_compress_sig bin/speed
 
 HEAD = fpr.h inner.h
 
@@ -22,7 +22,7 @@ bin:
 	-mkdir -p bin
 
 clean:
-	-rm -f $(OBJ) $(PROGS)
+	-rm -f $(OBJ) build/hawk.o $(PROGS)
 
 # Binaries:
 
@@ -35,6 +35,8 @@ bin/config_fg: config_fg.c $(OBJ)
 	$(CC) $(CFLAGS) -o bin/config_fg $(filter-out build/keygen.o,$(OBJ)) config_fg.c $(LIBS)
 bin/config_FG: config_FG.c $(OBJ)
 	$(CC) $(CFLAGS) -o bin/config_FG $(filter-out build/keygen.o,$(OBJ)) config_FG.c $(LIBS)
+bin/speed: speed.c build/hawk.o $(OBJ)
+	$(CC) $(CFLAGS) -o bin/speed speed.c build/hawk.o $(OBJ) $(LIBS)
 
 # C++
 bin/test_sign: test_sign.cpp $(OBJ)
@@ -67,4 +69,7 @@ build/sign.o: sign.c $(HEAD)
 	$(CC) $(CFLAGS) -c -o build/sign.o sign.c
 build/vrfy.o: vrfy.c $(HEAD)
 	$(CC) $(CFLAGS) -c -o build/vrfy.o vrfy.c
+
+build/hawk.o: hawk.c hawk.h $(HEAD)
+	$(CC) $(CFLAGS) -c -o build/hawk.o hawk.c
 

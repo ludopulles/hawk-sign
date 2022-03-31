@@ -345,7 +345,7 @@ extern const size_t HAWK_MAX_PUBKEY_SIZE[10];
  * Temporary buffer size for key pair generation.
  */
 #define HAWK_TMPSIZE_KEYGEN(logn) \
-	(((logn) <= 3 ? 272u : (48u << (logn))) + (28u << (logn)) + 7)
+	(((logn) <= 2 ? 272u : (48u << (logn))) + (28u << (logn)) + 7)
 
 /*
  * Temporary buffer size for computing the public key from the private key.

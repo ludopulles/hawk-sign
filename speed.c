@@ -80,9 +80,6 @@ do_bench(bench_fun bf, void *ctx, double threshold)
 	unsigned long num;
 	int r;
 
-	bf(ctx, 1);
-	return 0.0;
-
 	/*
 	 * Alsways do a few blank runs to "train" the caches and branch
 	 * prediction.
@@ -304,10 +301,15 @@ main(int argc, char *argv[])
 	printf("st = sign (with expanded key), vv = verify\n");
 	printf("keygen in milliseconds, other values in microseconds\n");
 	printf("\n");
-	printf("degree  kg(ms)   ek(us)   sd(us)  st(us)  vv(us)\n");
+	printf("degree  kg(ms)   ek(us)   sd(us)   st(us)   vv(us)\n");
 	fflush(stdout);
-	test_speed_hawk(7, threshold);
-	test_speed_hawk(8, threshold);
-	test_speed_hawk(9, threshold);
+
+	for (unsigned logn = 3; logn <= 9; logn++) {
+		double actual_threshold = threshold;
+		if (logn <= 7) {
+			actual_threshold /= (1u << (7 - logn));
+		}
+		test_speed_hawk(logn, actual_threshold);
+	}
 	return 0;
 }

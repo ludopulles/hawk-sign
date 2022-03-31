@@ -56,7 +56,7 @@ const size_t HAWK_MAX_PUBKEY_SIZE[10] = {
  * The number of bytes that are required for the hash when generating a
  * signature from the hash-then-sign principle on which Hawk is based.
  */
-#define HASH_OUTPUT_SIZE(logn) (logn <= 3 ? 1U : (1U << (logn-3)))
+#define HASH_OUTPUT_SIZE(logn) (logn <= 2 ? 1U : (1U << (logn-2)))
 
 // TODO: set 5 in the compress.c code (depending on logn!).
 #define SIG_LOBITS(logn) (5)
@@ -202,7 +202,10 @@ hawk_keygen_make(shake256_context *rng, unsigned logn, void *privkey,
 
 	/*
 	 * These buffers overlap with f, g, F, G but this is fine as we encode the
-	 * public key after the private key is already encoded.
+	 * public key after the private key is already encoded. Also, the first
+	 * byte of q00 may overlap with q10_num because of alignment, but the data
+	 * of q00[0] is first extracted and only afterwards is the last value of
+	 * q10_num set.
 	 */
 	q00_num = (int16_t *)align_u16(tmp);
 	q10_num = q00_num + n;
@@ -256,11 +259,9 @@ hawk_keygen_make(shake256_context *rng, unsigned logn, void *privkey,
 }
 
 /* see hawk.h */
-// int hawk_make_public(void *pubkey, size_t pubkey_len, const void *privkey,
-//	size_t privkey_len, void *tmp, size_t tmp_len)
-// {
-	// TODO
-// }
+// int
+// hawk_make_public(void *pubkey, size_t pubkey_len, const void *privkey,
+//	size_t privkey_len, void *tmp, size_t tmp_len) { /* TODO */ }
 
 /* see hawk.h */
 int
@@ -481,7 +482,7 @@ hawk_sign_dyn_finish(shake256_context *rng, void *sig, size_t *sig_len,
 {
 	unsigned logn;
 	uint8_t header_byte;
-	void *expanded_key, *atmp;
+	void *atmp;
 	int r;
 
 	/*
@@ -504,18 +505,17 @@ hawk_sign_dyn_finish(shake256_context *rng, void *sig, size_t *sig_len,
 		return HAWK_ERR_FORMAT;
 	}
 
-	expanded_key = (void *)tmp;
 	/*
 	 * Simply expand the secret key and then use the above signing function.
 	 */
 	atmp = tmp + HAWK_EXPANDEDKEY_SIZE(logn);
-	r = hawk_expand_privkey(expanded_key, HAWK_EXPANDEDKEY_SIZE(logn),
+	r = hawk_expand_privkey(tmp, HAWK_EXPANDEDKEY_SIZE(logn),
 		privkey, privkey_len, atmp, HAWK_TMPSIZE_EXPANDPRIV(logn));
 	if (r != 0) {
 		return r;
 	}
 
-	return hawk_sign_finish(rng, sig, sig_len, sig_type, expanded_key,
+	return hawk_sign_finish(rng, sig, sig_len, sig_type, tmp,
 		hash_data, salt, atmp, tmp_len - HAWK_EXPANDEDKEY_SIZE(logn));
 }
 
