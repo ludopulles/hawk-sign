@@ -52,12 +52,6 @@ const size_t HAWK_MAX_PUBKEY_SIZE[10] = {
 	0 /* unused */, 7, 13, 23, 41, 77, 143, 276, 528, 1026
 };
 
-/*
- * The number of bytes that are required for the hash when generating a
- * signature from the hash-then-sign principle on which Hawk is based.
- */
-#define NUM_HASH_BYTES(logn) ((logn) <= 2 ? 1u : (1u << ((logn) - 2)))
-
 // TODO: set 5 in the compress.c code (depending on logn!).
 #define SIG_LOBITS(logn) (5)
 
@@ -357,7 +351,7 @@ hawk_sign_finish(shake256_context *rng, void *sig, size_t *sig_len,
 	uint8_t *es, *hm, *atmp;
 	const fpr *expkey;
 	int16_t *sv;
-	size_t u, v, n, es_len, tu;
+	size_t u, v, n, es_len;
 	unsigned oldcw;
 
 	/*
@@ -380,7 +374,7 @@ hawk_sign_finish(shake256_context *rng, void *sig, size_t *sig_len,
 	case HAWK_SIG_COMPRESSED:
 		break;
 	case HAWK_SIG_PADDED:
-		if (*sig_len < HAWK_SIG_PADDED_SIZE(logn)) {
+		if (es_len < HAWK_SIG_PADDED_SIZE(logn)) {
 			return HAWK_ERR_SIZE;
 		}
 		break;
@@ -390,7 +384,7 @@ hawk_sign_finish(shake256_context *rng, void *sig, size_t *sig_len,
 
 	n = MKN(logn);
 	hm = (uint8_t *)tmp;
-	sv = (int16_t *)align_u16(hm + NUM_HASH_BYTES(logn));
+	sv = (int16_t *)align_u16(hm + HAWK_HASH_SIZE(logn));
 	atmp = align_u64(sv + n);
 
 	/*
@@ -398,20 +392,19 @@ hawk_sign_finish(shake256_context *rng, void *sig, size_t *sig_len,
 	 */
 	shake256_flip(hash_data);
 	inner_shake256_extract((inner_shake256_context *)hash_data, hm,
-		NUM_HASH_BYTES(logn));
+		HAWK_HASH_SIZE(logn));
 
 	/*
 	 * Fix the first byte (containing logn) and 40 bytes for the salt first.
 	 */
 	es = sig;
-	es_len = *sig_len;
 	memcpy(es + 1, salt, 40);
 	u = 41;
 	es[0] = 0x30 + logn;
 
 	if (sig_type == HAWK_SIG_COMPRESSED) {
 		oldcw = set_fpu_cw(2);
-		Zf(fft_sign)((inner_shake256_context *)rng, sv, expkey, hm, logn, atmp);
+		Zf(sign)((inner_shake256_context *)rng, sv, expkey, hm, logn, atmp);
 		set_fpu_cw(oldcw);
 
 		v = Zf(encode_sig)(es + u, es_len - u, sv, logn, SIG_LOBITS(logn));
@@ -427,26 +420,26 @@ hawk_sign_finish(shake256_context *rng, void *sig, size_t *sig_len,
 	 * Now, sig_type is HAWK_SIG_PADDED.
 	 * Compute the signature until one is found that is encodable.
 	 */
-	tu = HAWK_SIG_PADDED_SIZE(logn);
+	es_len = HAWK_SIG_PADDED_SIZE(logn);
 
 	do {
 		oldcw = set_fpu_cw(2);
-		Zf(fft_sign)((inner_shake256_context *)rng, sv, expkey, hm, logn, atmp);
+		Zf(sign)((inner_shake256_context *)rng, sv, expkey, hm, logn, atmp);
 		set_fpu_cw(oldcw);
 
-		v = Zf(encode_sig)(es + u, tu - u, sv, logn, SIG_LOBITS(logn));
+		v = Zf(encode_sig)(es + u, es_len - u, sv, logn, SIG_LOBITS(logn));
 		/*
 		 * If v = 0, the signature does not fit and loop.
 		 */
 	} while (v == 0);
 
-	if (u + v < tu) {
+	if (u + v < es_len) {
 		/*
 		 * Pad with zeros
 		 */
-		memset(es + u + v, 0, tu - (u + v));
+		memset(es + u + v, 0, es_len - (u + v));
 	}
-	*sig_len = tu;
+	*sig_len = es_len;
 	return 0;
 }
 
@@ -475,10 +468,11 @@ hawk_sign_dyn_finish(shake256_context *rng, void *sig, size_t *sig_len,
 	int sig_type, const void *privkey, size_t privkey_len,
 	shake256_context *hash_data, const void *salt, void *tmp, size_t tmp_len)
 {
-	unsigned logn;
-	uint8_t header_byte;
-	void *atmp;
-	int r;
+	unsigned logn, oldcw;
+	size_t n, u, v, es_len;
+	int8_t *f, *g, *F;
+	uint8_t header_byte, *es, *hm, *atmp;
+	int16_t *sv;
 
 	/*
 	 * Get degree from private key header byte, and check
@@ -499,19 +493,99 @@ hawk_sign_dyn_finish(shake256_context *rng, void *sig, size_t *sig_len,
 		|| privkey_len > HAWK_MAX_SECKEY_SIZE[logn]) {
 		return HAWK_ERR_FORMAT;
 	}
-
-	/*
-	 * Simply expand the secret key and then use the above signing function.
-	 */
-	atmp = tmp + HAWK_EXPANDEDKEY_SIZE(logn);
-	r = hawk_expand_privkey(tmp, HAWK_EXPANDEDKEY_SIZE(logn),
-		privkey, privkey_len, atmp, HAWK_TMPSIZE_EXPANDPRIV(logn));
-	if (r != 0) {
-		return r;
+	if (tmp_len < HAWK_TMPSIZE_SIGNDYN(logn)) {
+		return HAWK_ERR_SIZE;
+	}
+	es_len = *sig_len;
+	if (es_len < 41) {
+		return HAWK_ERR_SIZE;
 	}
 
-	return hawk_sign_finish(rng, sig, sig_len, sig_type, tmp,
-		hash_data, salt, atmp, tmp_len - HAWK_EXPANDEDKEY_SIZE(logn));
+	switch (sig_type) {
+	case HAWK_SIG_COMPRESSED:
+		break;
+	case HAWK_SIG_PADDED:
+		if (es_len < HAWK_SIG_PADDED_SIZE(logn)) {
+			return HAWK_ERR_SIZE;
+		}
+		break;
+	default:
+		return HAWK_ERR_BADARG;
+	}
+
+	/*
+	 * Decode private key elements, and complete private key.
+	 */
+	n = MKN(logn);
+	f = (int8_t *)tmp;
+	g = f + n;
+	F = g + n;
+	hm = (uint8_t *)(F + n);
+	sv = (int16_t *)align_u16(hm + HAWK_HASH_SIZE(logn));
+	atmp = align_u64(sv + n);
+
+	v = Zf(decode_seckey)(f, g, F, privkey + 1, privkey_len - 1, logn);
+	if (v == 0) {
+		return HAWK_ERR_FORMAT;
+	}
+
+	/*
+	 * Hash message to a point.
+	 */
+	shake256_flip(hash_data);
+	inner_shake256_extract((inner_shake256_context *)hash_data, hm,
+		HAWK_HASH_SIZE(logn));
+
+	/*
+	 * Fix the first byte (containing logn) and 40 bytes for the salt first.
+	 */
+	es = sig;
+	memcpy(es + 1, salt, 40);
+	u = 41;
+	es[0] = 0x30 + logn;
+
+	if (sig_type == HAWK_SIG_COMPRESSED) {
+		oldcw = set_fpu_cw(2);
+		Zf(sign_dyn)((inner_shake256_context *)rng, sv, f, g, F, NULL, hm,
+			logn, atmp);
+		set_fpu_cw(oldcw);
+
+		v = Zf(encode_sig)(es + u, es_len - u, sv, logn, SIG_LOBITS(logn));
+		if (v == 0) {
+			return HAWK_ERR_SIZE;
+		} else {
+			*sig_len = u + v;
+			return 0;
+		}
+	}
+
+	/*
+	 * Now, sig_type is HAWK_SIG_PADDED.
+	 * Compute the signature until one is found that is encodable.
+	 */
+	es_len = HAWK_SIG_PADDED_SIZE(logn);
+
+	do {
+		oldcw = set_fpu_cw(2);
+		Zf(sign_dyn)((inner_shake256_context *)rng, sv, f, g, F, NULL, hm,
+			logn, atmp);
+		set_fpu_cw(oldcw);
+
+		v = Zf(encode_sig)(es + u, es_len - u, sv, logn, SIG_LOBITS(logn));
+		/*
+		 * If v = 0, the signature does not fit and loop.
+		 */
+	} while (v == 0);
+
+	if (u + v < es_len) {
+		/*
+		 * Pad with zeros
+		 */
+		memset(es + u + v, 0, es_len - (u + v));
+	}
+	*sig_len = es_len;
+	return 0;
+
 }
 
 /* see hawk.h */
@@ -610,7 +684,7 @@ hawk_verify_finish(const void *sig, size_t sig_len, int sig_type,
 
 	n = MKN(logn);
 	hm = (uint8_t *)tmp;
-	sv = (int16_t *)align_u16(hm + NUM_HASH_BYTES(logn));
+	sv = (int16_t *)align_u16(hm + HAWK_HASH_SIZE(logn));
 
 	q00_num = sv + n;
 	q10_num = q00_num + n;
@@ -661,7 +735,7 @@ hawk_verify_finish(const void *sig, size_t sig_len, int sig_type,
 	 */
 	shake256_flip(hash_data);
 	inner_shake256_extract((inner_shake256_context *)hash_data, hm,
-		NUM_HASH_BYTES(logn));
+		HAWK_HASH_SIZE(logn));
 
 	/*
 	 * Construct full public key.

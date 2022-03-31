@@ -1282,3 +1282,77 @@ Zf(poly_merge_fft)(
 		}
 	}
 }
+
+/*
+ * Multiply a 2x2 matrix ((b00, b01), (b10, b11)) with a vector (x0, x1) using
+ * column-notation and store the result in-place in x0, x1. Thus it computes:
+ *
+ *     (x0', x1') := (b00 x0 + b01 x1, b10 x0 + b11 x1).
+ *
+ * All polynomials are in FFT representation.
+ */
+TARGET_AVX2
+ void
+ Zf(poly_matmul_fft)(
+	const fpr *restrict b00, const fpr *restrict b01,
+	const fpr *restrict b10, const fpr *restrict b11,
+	fpr *restrict x0, fpr *restrict x1, unsigned logn)
+{
+	size_t n, hn, u;
+
+	n = (size_t)1 << logn;
+	hn = n >> 1;
+	if (n >= 8) {
+		for (u = 0; u < hn; u += 4) {
+			__m256d b00_re, b00_im, b01_re, b01_im;
+			__m256d b10_re, b10_im, b11_re, b11_im;
+			__m256d x0_re, x0_im, x1_re, x1_im;
+
+			__m256d y0_re, y0_im, y1_re, y1_im;
+			__m256d y2_re, y2_im, y3_re, y3_im;
+
+			b00_re = _mm256_loadu_pd(&b00[u].v);
+			b00_im = _mm256_loadu_pd(&b00[u + hn].v);
+			b01_re = _mm256_loadu_pd(&b01[u].v);
+			b01_im = _mm256_loadu_pd(&b01[u + hn].v);
+			b10_re = _mm256_loadu_pd(&b10[u].v);
+			b10_im = _mm256_loadu_pd(&b10[u + hn].v);
+			b11_re = _mm256_loadu_pd(&b11[u].v);
+			b11_im = _mm256_loadu_pd(&b11[u + hn].v);
+			x0_re = _mm256_loadu_pd(&x0[u].v);
+			x0_im = _mm256_loadu_pd(&x0[u + hn].v);
+			x1_re = _mm256_loadu_pd(&x1[u].v);
+			x1_im = _mm256_loadu_pd(&x1[u + hn].v);
+
+			y0_re = FMSUB(b00_re, x0_re, _mm256_mul_pd(b00_im, x0_im));
+			y0_im = FMADD(b00_im, x0_re, _mm256_mul_pd(b00_re, x0_im));
+			y1_re = FMSUB(b01_re, x1_re, _mm256_mul_pd(b01_im, x1_im));
+			y1_im = FMADD(b01_im, x1_re, _mm256_mul_pd(b01_re, x1_im));
+			y2_re = FMSUB(b10_re, x0_re, _mm256_mul_pd(b10_im, x0_im));
+			y2_im = FMADD(b10_im, x0_re, _mm256_mul_pd(b10_re, x0_im));
+			y3_re = FMSUB(b11_re, x1_re, _mm256_mul_pd(b11_im, x1_im));
+			y3_im = FMADD(b11_im, x1_re, _mm256_mul_pd(b11_re, x1_im));
+
+			_mm256_storeu_pd(&x0[u].v, _mm256_add_pd(y0_re, y1_re));
+			_mm256_storeu_pd(&x0[u + hn].v, _mm256_add_pd(y0_im, y1_im));
+			_mm256_storeu_pd(&x1[u].v, _mm256_add_pd(y2_re, y3_re));
+			_mm256_storeu_pd(&x1[u + hn].v, _mm256_add_pd(y2_im, y3_im));
+		}
+	} else {
+		for (u = 0; u < hn; u ++) {
+			fpr y0_re, y0_im, y1_re, y1_im;
+			fpr y2_re, y2_im, y3_re, y3_im;
+
+			FPC_MUL(y0_re, y0_im, b00[u], b00[u + hn], x0[u], x0[u + hn]);
+			FPC_MUL(y1_re, y1_im, b01[u], b01[u + hn], x1[u], x1[u + hn]);
+			FPC_MUL(y2_re, y2_im, b10[u], b10[u + hn], x0[u], x0[u + hn]);
+			FPC_MUL(y3_re, y3_im, b11[u], b11[u + hn], x1[u], x1[u + hn]);
+
+			x0[u]      = fpr_add(y0_re, y1_re);
+			x0[u + hn] = fpr_add(y0_im, y1_im);
+			x1[u]      = fpr_add(y2_re, y3_re);
+			x1[u + hn] = fpr_add(y2_im, y3_im);
+		}
+	}
+}
+

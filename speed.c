@@ -298,13 +298,13 @@ main(int argc, char *argv[])
 	}
 	printf("time threshold = %.4f s\n", threshold);
 	printf("kg = keygen, ek = expand private key, sd = sign (without expanded key)\n");
-	printf("st = sign (with expanded key), vv = verify\n");
+	printf("ss = sign (with expanded key), vv = verify\n");
 	printf("keygen in milliseconds, other values in microseconds\n");
 	printf("\n");
-	printf("degree  kg(ms)   ek(us)   sd(us)   st(us)   vv(us)\n");
+	printf("degree  kg(ms)   ek(us)   sd(us)   ss(us)   vv(us)\n");
 	fflush(stdout);
 
-	for (unsigned logn = 3; logn <= 9; logn++) {
+	for (unsigned logn = 1; logn <= 9; logn++) {
 		double actual_threshold = threshold;
 		if (logn <= 7) {
 			actual_threshold /= (1u << (7 - logn));

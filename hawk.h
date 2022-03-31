@@ -354,12 +354,22 @@ extern const size_t HAWK_MAX_PUBKEY_SIZE[10];
 	((6u << (logn)) + 1) */
 
 /*
+ * The number of bytes that are required for the hash when signing a message or
+ * verifying a signature using the hash-then-sign principle on which Hawk is
+ * based.
+ */
+#define HAWK_HASH_SIZE(logn) ((logn) <= 2 ? 2u : (1u << ((logn) - 2)))
+/*
+ * Temporary buffer size for generating a signature ("dynamic" variant).
+ */
+#define HAWK_TMPSIZE_SIGNDYN(logn) \
+	(HAWK_HASH_SIZE(logn) + (53u << (logn)) + 7)
+
+/*
  * Temporary buffer size for generating a signature with an expanded key.
  */
 #define HAWK_TMPSIZE_SIGN(logn) \
-	(((logn) <= 2 ? 1u : (1u << ((logn) - 2))) \
-	+ (2u << (logn)) + (26u << (logn)) + 7)
-	// ((50u << (logn)) + 7)
+	(HAWK_HASH_SIZE(logn) + (2u << (logn)) + (26u << (logn)) + 7)
 
 /*
  * Temporary buffer size for expanding a private key.
@@ -377,8 +387,7 @@ extern const size_t HAWK_MAX_PUBKEY_SIZE[10];
  * Temporary buffer size for verifying a signature.
  */
 #define HAWK_TMPSIZE_VERIFY(logn) \
-	(((logn) <= 2 ? 1u : (1u << ((logn) - 2))) \
-	+ (26u << (logn)) + (16u << (logn)))
+	(HAWK_HASH_SIZE(logn) + (42u << (logn)))
 
 /* ==================================================================== */
 /*

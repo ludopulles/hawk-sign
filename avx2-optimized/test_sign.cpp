@@ -24,31 +24,16 @@ void randombytes(unsigned char *x, unsigned long long xlen) {
 		*x = ((unsigned char) rand());
 }
 
-void random_hash(int8_t *h, unsigned logn) {
-	assert(RAND_MAX == INT_MAX); // rand() should generate 31 random bits
-	int x = rand();
-	size_t RAND_BITS = 31, rand_bits = RAND_BITS;
-	for (size_t u = MKN(logn); u -- > 0; ) {
-		if (rand_bits == 0) {
-			x = rand();
-			rand_bits = RAND_BITS;
-		}
-		h[u] = (x & 1);
-		x >>= 1;
-		rand_bits--;
-	}
-}
-
 ll time_diff(const struct timeval *begin, const struct timeval *end) {
 	return 1000000LL * (end->tv_sec - begin->tv_sec) + (end->tv_usec - begin->tv_usec);
 }
 
+#define SECOND_HASH(h, logn) ((h) + ((logn) <= 3 ? 1u : 1u << ((logn) - 3)))
+
 /* Should be moved to vrfy.c */
 /* Requires space for 6 polynomials of size 2^logn */
-int
-Zf(verify_nearest_plane_tree)(const fpr *restrict tree,
-	const int8_t *restrict h0, const int8_t *restrict h1,
-	const int16_t *restrict s1,
+int Zf(verify_nearest_plane_tree)(const fpr *restrict tree,
+	const uint8_t *restrict h, const int16_t *restrict s1,
 	const fpr *restrict q00, const fpr *restrict q10, const fpr *restrict q11,
 	uint32_t bound, unsigned logn, uint8_t *restrict tmp)
 {
@@ -67,11 +52,15 @@ Zf(verify_nearest_plane_tree)(const fpr *restrict tree,
 	t2 = t1 + n;
 	t3 = t2 + n;
 
-	for (u = 0; u < n; u ++) {
-		t0[u] = fpr_half(fpr_of(h0[u] & 1));
-	}
-	for (u = 0; u < n; u ++) {
-		t1[u] = fpr_half(fpr_of((h1[u] & 1) - 2 * s1[u]));
+	size_t w;
+	for (u = 0, w = 0; u < n; w ++) {
+		uint8_t h0 = h[w], h1 = h[n/4 + w];
+		for (size_t v = 0; v < 8; v ++, u ++) {
+			t0[u] = fpr_half(fpr_of(h0 & 1));
+			t1[u] = fpr_half(fpr_of((h1 & 1) - 2 * s1[u]));
+			h0 >>= 1;
+			h1 >>= 1;
+		}
 	}
 
 	Zf(FFT)(t0, logn);
@@ -143,10 +132,9 @@ void output_poly(int16_t *x)
 	printf("\n");
 }
 
-const int num_samples = 200'000;
+const int num_samples = 10'000;
 
 uint8_t pregen_h[num_samples][n / 4] = {};
-int8_t pregen_h0[num_samples][n] = {}, pregen_h1[num_samples][n] = {};
 int16_t pregen_s0[num_samples][n], pregen_s1[num_samples][n], pregen_s[num_samples][n];
 
 void measure_sign_speed(uint32_t bound)
@@ -173,55 +161,40 @@ void measure_sign_speed(uint32_t bound)
 
 	// memset(pregen_h, 0, num_samples * n / 4);
 	for (int rep = 0; rep < num_samples; rep++) {
-		random_hash(pregen_h0[rep], logn);
-		// random_hash(pregen_h1[rep], logn);
-		for (unsigned i = 0; i < n; i++) {
-			pregen_h[rep][i/8] |= pregen_h0[rep][i] << (i % 8);
-			pregen_h[rep][(n + i) / 8] |= pregen_h1[rep][i] << (i % 8);
-		}
+		inner_shake256_extract(&sc, pregen_h[rep], n / 4);
 	}
 
 	// Also pregenerate all signatures
 	gettimeofday(&t0, NULL);
 	for (int rep = 0; rep < num_samples; rep++) {
-		Zf(complete_sign)(&sc, pregen_s0[rep], pregen_s1[rep], f, g, F, G, pregen_h0[rep], pregen_h1[rep], logn, b);
+		Zf(complete_sign)(&sc, pregen_s0[rep], pregen_s1[rep], f, g, F, G, pregen_h[rep], logn, b);
 	}
 	gettimeofday(&t1, NULL);
 	ll cs_us = time_diff(&t0, &t1);
 
 	gettimeofday(&t0, NULL);
 	for (int rep = 0; rep < num_samples; rep++) {
-		Zf(sign)(&sc, s1, f, g, F, G, pregen_h0[rep], pregen_h1[rep], logn, b);
+		Zf(sign_dyn)(&sc, s1, f, g, F, G, pregen_h[rep], logn, b);
 	}
 	gettimeofday(&t1, NULL);
-	ll  s_us = time_diff(&t0, &t1);
+	ll sd_us = time_diff(&t0, &t1);
 
 	gettimeofday(&t0, NULL);
 	for (int rep = 0; rep < num_samples; rep++) {
-		// Zf(guaranteed_sign)(&sc, s1, f, g, F, G, q00, pregen_h0[rep], pregen_h1[rep], logn, b);
-		Zf(expand_seckey)(exp_sk, f, g, F, logn);
-		Zf(fft_sign)(&sc, pregen_s[rep], exp_sk, pregen_h[rep], logn, b);
+		Zf(sign)(&sc, pregen_s[rep], exp_sk, pregen_h[rep], logn, b);
 	}
 	gettimeofday(&t1, NULL);
-	ll gs_us = time_diff(&t0, &t1);
-
-	gettimeofday(&t0, NULL);
-	for (int rep = 0; rep < num_samples; rep++) {
-		Zf(fft_sign)(&sc, pregen_s[rep], exp_sk, pregen_h[rep], logn, b);
-	}
-	gettimeofday(&t1, NULL);
-	ll fs_us = time_diff(&t0, &t1);
+	ll ss_us = time_diff(&t0, &t1);
 
 	printf("  complete_sign: %.1f us/sign\n", (double)cs_us / num_samples);
-	printf("           sign: %.1f us/sign\n", (double) s_us / num_samples);
-	printf("guaranteed_sign: %.1f us/sign\n", (double)gs_us / num_samples);
-	printf("       fft_sign: %.1f us/sign\n", (double)fs_us / num_samples);
+	printf("       sign_dyn: %.1f us/sign\n", (double)sd_us / num_samples);
+	printf("           sign: %.1f us/sign\n", (double)ss_us / num_samples);
 
 	// Run tests:
 	int nr_cor = 0;
 	gettimeofday(&t0, NULL);
 	for (int rep = 0; rep < num_samples; rep++)
-		nr_cor += Zf(complete_verify)(pregen_h0[rep], pregen_h1[rep], pregen_s0[rep], pregen_s1[rep], q00, q10, q11, logn, b);
+		nr_cor += Zf(complete_verify)(pregen_h[rep], pregen_s0[rep], pregen_s1[rep], q00, q10, q11, logn, b);
 	gettimeofday(&t1, NULL);
 	printf("# correct = %d\n", nr_cor);
 	ll cv_us = time_diff(&t0, &t1);
@@ -229,7 +202,7 @@ void measure_sign_speed(uint32_t bound)
 	nr_cor = 0;
 	gettimeofday(&t0, NULL);
 	for (int rep = 0; rep < num_samples; rep++) {
-		nr_cor += Zf(verify_simple_rounding)(pregen_h0[rep], pregen_h1[rep], s0, pregen_s[rep], q00, q10, q11, logn, b);
+		nr_cor += Zf(verify_simple_rounding)(pregen_h[rep], s0, pregen_s[rep], q00, q10, q11, logn, b);
 	}
 	gettimeofday(&t1, NULL);
 	printf("# correct = %d\n", nr_cor);
@@ -247,7 +220,7 @@ void measure_sign_speed(uint32_t bound)
 	nr_cor = 0;
 	gettimeofday(&t0, NULL);
 	for (int rep = 0; rep < num_samples; rep++) {
-		nr_cor += Zf(verify_nearest_plane)(pregen_h0[rep], pregen_h1[rep], pregen_s0[rep], pregen_s[rep], q00, q10, q11, logn, b);
+		nr_cor += Zf(verify_nearest_plane)(pregen_h[rep], pregen_s0[rep], pregen_s[rep], q00, q10, q11, logn, b);
 	}
 	gettimeofday(&t1, NULL);
 	ll vnp_us = time_diff(&t0, &t1);
@@ -260,7 +233,7 @@ void measure_sign_speed(uint32_t bound)
 	nr_cor = 0;
 	gettimeofday(&t0, NULL);
 	for (int rep = 0; rep < num_samples; rep++) {
-		nr_cor += Zf(verify_nearest_plane_tree)(tree, pregen_h0[rep], pregen_h1[rep], pregen_s[rep], q00, q10, q11, bound, logn, b);
+		nr_cor += Zf(verify_nearest_plane_tree)(tree, pregen_h[rep], pregen_s[rep], q00, q10, q11, bound, logn, b);
 	}
 	gettimeofday(&t1, NULL);
 	ll vnpt_us = time_diff(&t0, &t1);
@@ -328,7 +301,7 @@ WorkerResult measure_signatures()
 		Zf(prng_get_bytes)(&rng, h, sizeof h);
 
 		// Compute the signature.
-		Zf(fft_sign)(&sc, s1, exp_sk, h, logn, b);
+		Zf(sign)(&sc, s1, exp_sk, h, logn, b);
 
 		if (!Zf(verify_simple_rounding_fft)(h, s1, q00, q10, q11, logn, b))
 			result.fft_fail++;

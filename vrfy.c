@@ -36,6 +36,33 @@ static const uint32_t l2bound[10] = {
 	0 /* unused */, 32, 64, 129, 258, 517, 1034, 2068, 4136, 8273
 };
 
+#define SECOND_HASH(h, logn) \
+	((h) + ((logn) <= 3 ? 1u : 1u << ((logn) - 3)))
+
+static void
+hash_to_fpr(fpr *p, const uint8_t *h, const int16_t *s, unsigned logn)
+{
+	size_t n, u, v;
+	uint8_t hash;
+
+	n = MKN(logn);
+	if (logn <= 3) {
+		hash = h[0];
+		for (v = 0; v < n; v ++) {
+			p[v] = fpr_of((hash & 1) - (s == NULL ? 0 : 2 * s[v]));
+			hash >>= 1;
+		}
+	} else {
+		for (u = 0; u < n; ) {
+			hash = *h++;
+			for (v = 0; v < 8; v ++, u ++) {
+				p[u] = fpr_of((hash & 1) - (s == NULL ? 0 : 2 * s[u]));
+				hash >>= 1;
+			}
+		}
+	}
+}
+
 /*
  * Add to a polynomial its own adjoint. This function works only in FFT
  * representation.
@@ -99,7 +126,7 @@ Zf(complete_pubkey)(const int16_t *q00_num, const int16_t *q10_num,
 
 /* see inner.h */
 int
-Zf(complete_verify)(const int8_t *restrict h0, const int8_t *restrict h1,
+Zf(complete_verify)(const uint8_t *restrict h,
 	const int16_t *restrict s0, const int16_t *restrict s1,
 	const fpr *restrict q00, const fpr *restrict q10, const fpr *restrict q11,
 	unsigned logn, uint8_t *restrict tmp)
@@ -116,14 +143,9 @@ Zf(complete_verify)(const int8_t *restrict h0, const int8_t *restrict h1,
 	 * Put (t0, t1) = (2 s0 - h0, 2 s1 - h1) in FFT representation so we can
 	 * calculate the l2-norm wrt Q.
 	 */
-	for (u = 0; u < n; u ++) {
-		t0[u] = fpr_of(2 * s0[u] - (h0[u] & 1));
-	}
-	for (u = 0; u < n; u ++) {
-		t1[u] = fpr_of(2 * s1[u] - (h1[u] & 1));
-	}
+	hash_to_fpr(t0, h, s0, logn);
+	hash_to_fpr(t1, SECOND_HASH(h, logn), s1, logn);
 
-	// Takes 50% of time (2us of 4us):
 	Zf(FFT)(t0, logn);
 	Zf(FFT)(t1, logn);
 
@@ -177,20 +199,20 @@ Zf(complete_verify)(const int8_t *restrict h0, const int8_t *restrict h1,
 
 /* see inner.h */
 int
-Zf(verify_simple_rounding)(const int8_t *restrict h0, const int8_t *restrict h1,
+Zf(verify_simple_rounding)(const uint8_t *restrict h,
 	int16_t *restrict s0, const int16_t *restrict s1,
 	const fpr *restrict q00, const fpr *restrict q10, const fpr *restrict q11,
 	unsigned logn, uint8_t *restrict tmp)
 {
-	size_t u, n;
+	size_t n, u, v, w;
+	uint8_t h0;
 	fpr *t0;
 
 	n = MKN(logn);
 	t0 = (fpr *)tmp;
 
-	for (u = 0; u < n; u ++) {
-		t0[u] = fpr_half(fpr_of((h1[u] & 1) - 2 * s1[u]));
-	}
+	hash_to_fpr(t0, SECOND_HASH(h, logn), s1, logn);
+	Zf(poly_mulconst)(t0, fpr_onehalf, logn);
 
 	Zf(FFT)(t0, logn);
 	Zf(poly_mul_fft)(t0, q10, logn); // (h1/2 - s1) q10
@@ -198,16 +220,28 @@ Zf(verify_simple_rounding)(const int8_t *restrict h0, const int8_t *restrict h1,
 	Zf(iFFT)(t0, logn);
 
 	// Recover s0 with s0 = round(h0/2 + (h1/2 - s1) q10 / q00)
-	for (u = 0; u < n; u ++) {
-		s0[u] = fpr_rint(fpr_add(fpr_half(fpr_of(h0[u] & 1)), t0[u]));
+	if (logn <= 3) {
+		h0 = h[0];
+		for (v = 0; v < n; v ++) {
+			s0[v] = fpr_rint(fpr_add(fpr_half(fpr_of(h0 & 1)), t0[v]));
+			h0 >>= 1;
+		}
+	} else {
+		for (u = 0, w = 0; w < n; u ++) {
+			h0 = h[u];
+			for (v = 0; v < 8; v ++, w ++) {
+				s0[w] = fpr_rint(fpr_add(fpr_half(fpr_of(h0 & 1)), t0[w]));
+				h0 >>= 1;
+			}
+		}
 	}
 
-	return Zf(complete_verify)(h0, h1, s0, s1, q00, q10, q11, logn, tmp);
+	return Zf(complete_verify)(h, s0, s1, q00, q10, q11, logn, tmp);
 }
 
 /* see inner.h */
 int
-Zf(verify_nearest_plane)(const int8_t *restrict h0, const int8_t *restrict h1,
+Zf(verify_nearest_plane)(const uint8_t *restrict h,
 	int16_t *restrict s0, const int16_t *restrict s1,
 	const fpr *restrict q00, const fpr *restrict q10, const fpr *restrict q11,
 	unsigned logn, uint8_t *restrict tmp)
@@ -218,18 +252,37 @@ Zf(verify_nearest_plane)(const int8_t *restrict h0, const int8_t *restrict h1,
 	 *     h0 / 2 + (h1 / 2 - s1) * q10 / q00.
 	 */
 
-	size_t n, u;
+	size_t n, u, v, w;
+	uint8_t h0;
+	int16_t s0w;
 	fpr *t0, *t1;
 
 	n = MKN(logn);
 	t0 = (fpr *)tmp;
 	t1 = t0 + n;
-	for (u = 0; u < n; u ++) {
-		t0[u] = fpr_half(fpr_of(h0[u] & 1));
+
+	if (logn <= 3) {
+		h0 = h[0];
+		for (v = 0; v < n; v ++) {
+			s0w = fpr_rint(fpr_add(fpr_half(fpr_of(h0 & 1)), t0[v]));
+			t0[v] = fpr_half(fpr_of((h0 & 1) - 2 * s0w));
+			h0 >>= 1;
+		}
+	} else {
+		for (u = 0, w = 0; w < n; u ++) {
+			h0 = h[u];
+			for (v = 0; v < 8; v ++, w ++) {
+				s0w = fpr_rint(fpr_add(fpr_half(fpr_of(h0 & 1)), t0[w]));
+				t0[w] = fpr_half(fpr_of((h0 & 1) - 2 * s0w));
+				h0 >>= 1;
+			}
+		}
 	}
-	for (u = 0; u < n; u ++) {
-		t1[u] = fpr_half(fpr_of((h1[u] & 1) - 2 * s1[u]));
-	}
+
+	hash_to_fpr(t0, h, NULL, logn);
+	hash_to_fpr(t1, SECOND_HASH(h, logn), s1, logn);
+	Zf(poly_mulconst)(t0, fpr_onehalf, logn);
+	Zf(poly_mulconst)(t1, fpr_onehalf, logn);
 
 	Zf(FFT)(t0, logn);
 	Zf(FFT)(t1, logn);
@@ -248,7 +301,7 @@ Zf(verify_nearest_plane)(const int8_t *restrict h0, const int8_t *restrict h1,
 	/*
 	 * Now run the casual verification.
 	 */
-	return Zf(complete_verify)(h0, h1, s0, s1, q00, q10, q11, logn, tmp);
+	return Zf(complete_verify)(h, s0, s1, q00, q10, q11, logn, tmp);
 }
 
 /* see inner.h */
@@ -259,6 +312,8 @@ Zf(verify_simple_rounding_fft)(const uint8_t *restrict h,
 	unsigned logn, uint8_t *restrict tmp)
 {
 	size_t u, v, w, hn, n;
+	uint8_t h0;
+	int16_t s0w;
 	fpr *t0, *t1, trace;
 
 	n = MKN(logn);
@@ -269,16 +324,8 @@ Zf(verify_simple_rounding_fft)(const uint8_t *restrict h,
 	/*
 	 * t1 = h1 / 2 - s1
 	 */
-	for (u = 0, w = 0; w < n; u ++ ) {
-		uint8_t h1;
-
-		h1 = h[n / 8 + u];
-		for (v = 0; v < 8; v ++, w ++) {
-			t1[w] = fpr_half(fpr_of((h1 & 1) - 2 * s1[w]));
-
-			h1 >>= 1;
-		}
-	}
+	hash_to_fpr(t1, SECOND_HASH(h, logn), s1, logn);
+	Zf(poly_mulconst)(t1, fpr_onehalf, logn);
 
 	Zf(FFT)(t1, logn);
 	Zf(poly_prod_fft)(t0, t1, q10, logn); // t0 = (h1/2 - s1) q10
@@ -290,16 +337,21 @@ Zf(verify_simple_rounding_fft)(const uint8_t *restrict h,
 	 * Put (t0, t1) = (h0 / 2 - s0, h1 / 2 - s1) in FFT representation so we can
 	 * calculate the l2-norm wrt Q.
 	 */
-	for (u = 0, w = 0; w < n; u ++ ) {
-		int s0w;
-		uint8_t h0;
-
-		h0 = h[u];
-		for (v = 0; v < 8; v ++, w ++) {
-			s0w = fpr_rint(fpr_add(fpr_half(fpr_of(h0 & 1)), t0[w]));
-			t0[w] = fpr_half(fpr_of((h0 & 1) - 2 * s0w));
-
+	if (logn <= 3) {
+		h0 = h[0];
+		for (v = 0; v < n; v ++) {
+			s0w = fpr_rint(fpr_add(fpr_half(fpr_of(h0 & 1)), t0[v]));
+			t0[v] = fpr_half(fpr_of((h0 & 1) - 2 * s0w));
 			h0 >>= 1;
+		}
+	} else {
+		for (u = 0, w = 0; w < n; u ++) {
+			h0 = h[u];
+			for (v = 0; v < 8; v ++, w ++) {
+				s0w = fpr_rint(fpr_add(fpr_half(fpr_of(h0 & 1)), t0[w]));
+				t0[w] = fpr_half(fpr_of((h0 & 1) - 2 * s0w));
+				h0 >>= 1;
+			}
 		}
 	}
 

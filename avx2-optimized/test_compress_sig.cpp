@@ -23,21 +23,6 @@ void randombytes(unsigned char *x, unsigned long long xlen) {
 		*x = ((unsigned char) rand());
 }
 
-void random_hash(int8_t *h, unsigned logn) {
-	assert(RAND_MAX == INT_MAX); // rand() should generate 31 random bits
-	int x = rand();
-	size_t RAND_BITS = 31, rand_bits = RAND_BITS;
-	for (size_t u = MKN(logn); u -- > 0; ) {
-		if (rand_bits == 0) {
-			x = rand();
-			rand_bits = RAND_BITS;
-		}
-		h[u] = (x & 1);
-		x >>= 1;
-		rand_bits--;
-	}
-}
-
 long long time_diff(const struct timeval *begin, const struct timeval *end) {
 	return 1000000LL * (end->tv_sec - begin->tv_sec) + (end->tv_usec - begin->tv_usec);
 }
@@ -92,8 +77,8 @@ struct WorkerResult {
 const int n_repetitions = 100;
 
 WorkerResult measure_signatures() {
-	uint8_t b[50 << logn];
-	int8_t f[n], g[n], F[n], G[n], h0[n], h1[n];
+	uint8_t b[50 << logn], h[n / 4];
+	int8_t f[n], g[n], F[n], G[n];
 	int16_t s0[n], s1[n];
 	fpr q00[n], q10[n], q11[n];
 	unsigned char seed[48];
@@ -111,11 +96,10 @@ WorkerResult measure_signatures() {
 		Zf(keygen)(&sc, f, g, F, G, q00, q10, q11, logn, b);
 
 		// make a signature of a random message...
-		random_hash(h0, logn);
-		random_hash(h1, logn);
+		inner_shake256_extract(&sc, h, sizeof h);
 
 		// Compute the signature.
-		Zf(complete_sign)(&sc, s0, s1, f, g, F, G, h0, h1, logn, b);
+		Zf(complete_sign)(&sc, s0, s1, f, g, F, G, h, logn, b);
 
 		for (int lobits = 3; lobits < 10; lobits++) {
 			size_t sz = Zf(encode_sig)(NULL, 0, s1, logn, lobits);

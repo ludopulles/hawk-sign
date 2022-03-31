@@ -37,21 +37,6 @@ void randombytes(unsigned char *x, unsigned long long xlen) {
 		*x = ((unsigned char) rand());
 }
 
-void random_hash(int8_t *h, unsigned logn) {
-	assert(RAND_MAX == INT_MAX); // rand() should generate 31 random bits
-	int x = rand();
-	size_t RAND_BITS = 31, rand_bits = RAND_BITS;
-	for (size_t u = MKN(logn); u -- > 0; ) {
-		if (rand_bits == 0) {
-			x = rand();
-			rand_bits = RAND_BITS;
-		}
-		h[u] = (x & 1);
-		x >>= 1;
-		rand_bits--;
-	}
-}
-
 long long time_diff(const struct timeval *begin, const struct timeval *end) {
 	return 1000000LL * (end->tv_sec - begin->tv_sec) + (end->tv_usec - begin->tv_usec);
 }

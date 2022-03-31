@@ -12,46 +12,8 @@
 #include "inner.h"
 
 // Simple randomness generator:
-void randombytes(unsigned char *x, unsigned long long xlen) {
-	for (; xlen -- > 0; ++x)
-		*x = ((unsigned char) rand());
-}
-
-void random_hash(int8_t *h, unsigned logn) {
-	assert(RAND_MAX == INT_MAX); // rand() should generate 31 random bits
-	int x = rand();
-	size_t RAND_BITS = 31, rand_bits = RAND_BITS;
-	for (size_t u = MKN(logn); u -- > 0; ) {
-		if (rand_bits == 0) {
-			x = rand();
-			rand_bits = RAND_BITS;
-		}
-		h[u] = (x & 1);
-		x >>= 1;
-		rand_bits--;
-	}
-}
-
 long long time_diff(const struct timeval *begin, const struct timeval *end) {
 	return 1000000LL * (end->tv_sec - begin->tv_sec) + (end->tv_usec - begin->tv_usec);
-}
-
-void to_sage(const char *varname, const int8_t *f, unsigned logn) {
-	printf("%s = %d", varname, f[0]);
-	for (size_t u = 1; u < MKN(logn); u ++) {
-		if (f[u] > 0) printf("+%d*z^%zu", f[u], u);
-		if (f[u] < 0) printf("-%d*z^%zu", -f[u], u);
-	}
-	printf("\n");
-}
-
-void to_sage16(const char *varname, const int16_t *f, unsigned logn) {
-	printf("%s = %d", varname, f[0]);
-	for (size_t u = 1; u < MKN(logn); u ++) {
-		if (f[u] > 0) printf("+%d*z^%zu", f[u], u);
-		if (f[u] < 0) printf("-%d*z^%zu", -f[u], u);
-	}
-	printf("\n");
 }
 
 // =============================================================================
@@ -77,7 +39,7 @@ void benchmark() {
 	const int n_repetitions = 10000;
 
 	// Initialize a RNG.
-	randombytes(seed, sizeof seed);
+	Zf(get_seed)(seed, sizeof seed);
 	inner_shake256_init(&sc);
 	inner_shake256_inject(&sc, seed, sizeof seed);
 	inner_shake256_flip(&sc);
@@ -98,11 +60,10 @@ void benchmark() {
 
 	for (int rep = 0; rep < n_repetitions; rep++) {
 		// make a signature of a random message...
-		randombytes(h, n / 4);
+		inner_shake256_extract(&sc, h, sizeof h);
 
 		// Compute the signature.
-		// Zf(sign)(&sc, sig, f, g, F, G, h0, h1, logn, tmp.b);
-		Zf(fft_sign)(&sc, sig, exp_sk, h, logn, tmp.b);
+		Zf(sign)(&sc, sig, exp_sk, h, logn, tmp.b);
 	}
 
 	gettimeofday(&t1, NULL);
@@ -125,7 +86,7 @@ void test_valid_signature() {
 	fpr exp_sk[EXPANDED_SECKEY_SIZE(logn)]; // if logn is not known at compile-time, take fixed value
 
 	// Initialize a RNG.
-	randombytes(seed, sizeof seed);
+	Zf(get_seed)(seed, sizeof seed);
 	inner_shake256_init(&sc);
 	inner_shake256_inject(&sc, seed, sizeof seed);
 	inner_shake256_flip(&sc);
@@ -136,10 +97,10 @@ void test_valid_signature() {
 
 	for (int rep = 0; rep < 1000; rep++) {
 		// make a signature of a random message...
-		randombytes(h, n / 4);
+		inner_shake256_extract(&sc, h, sizeof h);
 
 		// Compute the signature.
-		Zf(fft_sign)(&sc, sig, exp_sk, h, logn, tmp.b);
+		Zf(sign)(&sc, sig, exp_sk, h, logn, tmp.b);
 
 		assert(Zf(verify_simple_rounding_fft)(h, sig, q00, q10, q11, logn, tmp.b));
 		for (size_t u = 0; u < n; u ++)
@@ -157,12 +118,10 @@ int8_t valid_sigma(fpr sigma_sig) {
 }
 
 int main() {
-	unsigned seed = time(NULL);
-
 	// const fpr sigma_kg  = fpr_div(fpr_of(1425), fpr_of(1000));
-	const fpr sigma_sig = fpr_div(fpr_of(1292), fpr_of(1000));
+	// const fpr sigma_sig = fpr_div(fpr_of(1292), fpr_of(1000));
 	// verif_margin ~ 1 + √(64 * ln(2) / N)   (see scheme.sage)
-	const fpr verif_margin = fpr_add(fpr_one, fpr_sqrt(fpr_mul(fpr_log2, fpr_div(fpr_of(64), fpr_of(n)))));
+	// const fpr verif_margin = fpr_add(fpr_one, fpr_sqrt(fpr_mul(fpr_log2, fpr_div(fpr_of(64), fpr_of(n)))));
 	// verif_bound = (verif_margin * 2 * sigma_sig)^2 * (2*d) * d
 	// Here, the vector (x0, x1) \in Z^{2d} is sampled from a Discrete Gaussian with sigma equal to 2*sigma_sig
 	// and lattice coset (h%2) + 2Z^{2d}, so it has a SQUARED norm of around ~(2sigma_sig)^2 * 2d.
@@ -177,9 +136,6 @@ int main() {
 
 	// sigmas used in FALCON:
 	// for (int i = 1; i <= 10; i++) printf("%d: %.2f\n", i, 1.17 * sqrt(Q / (2 << i)));
-
-	printf("Seed: %u\n", seed);
-	srand(seed);
 	// assert(valid_sigma(sigma_kg) && valid_sigma(sigma_sig));
 
 	benchmark();

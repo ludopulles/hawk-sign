@@ -26,21 +26,6 @@ void randombytes(unsigned char *x, unsigned long long xlen) {
 		*x = ((unsigned char) rand());
 }
 
-void random_hash(int8_t *h, unsigned logn) {
-	assert(RAND_MAX == INT_MAX); // rand() should generate 31 random bits
-	int x = rand();
-	size_t RAND_BITS = 31, rand_bits = RAND_BITS;
-	for (size_t u = MKN(logn); u -- > 0; ) {
-		if (rand_bits == 0) {
-			x = rand();
-			rand_bits = RAND_BITS;
-		}
-		h[u] = (x & 1);
-		x >>= 1;
-		rand_bits--;
-	}
-}
-
 ll time_diff(const struct timeval *begin, const struct timeval *end) {
 	return 1000000LL * (end->tv_sec - begin->tv_sec) + (end->tv_usec - begin->tv_usec);
 }
@@ -160,10 +145,10 @@ struct WorkerResult {
 
 constexpr int SCALE = 1 << 8;
 
-WorkerResult measure_signatures(fpr isigma_kg, fpr isigma_sig, uint32_t bound)
+WorkerResult measure_signatures()
 {
-	uint8_t b[100 << logn];
-	int8_t f[n], g[n], F[n], G[n], h[n];
+	uint8_t b[100 << logn], h[n/4];
+	int8_t f[n], g[n], F[n], G[n];
 	int16_t s0[n], s1[n], rec_s0[n], rec_s1[n];
 	fpr q00[n], q10[n], q11[n];
 	unsigned char seed[48];
@@ -179,16 +164,16 @@ WorkerResult measure_signatures(fpr isigma_kg, fpr isigma_sig, uint32_t bound)
 	result.iters = num_samples;
 
 	// Generate key pair.
-	Zf(keygen)(&sc, f, g, F, G, q00, q10, q11, isigma_kg, logn, b);
+	Zf(keygen)(&sc, f, g, F, G, q00, q10, q11, logn, b);
 
 	for (int rep = 0; rep < num_samples; rep++) {
 		// make a signature of a random message...
-		random_hash(h, logn);
+		inner_shake256_extract(&sc, h, sizeof h);
 
 		// Compute the signature.
-		Zf(guaranteed_sign)(&sc, s1, f, g, q00, h, isigma_sig, bound, logn, b);
-		assert(Zf(verify_simple_rounding)(h, s0, s1, q00, q10, q11, bound, logn, b));
-		assert(Zf(verify_nearest_plane)(h, s0, s1, q00, q10, q11, bound, logn, b));
+		Zf(sign_dyn)(&sc, s1, f, g, F, G, h, logn, b);
+		assert(Zf(verify_simple_rounding)(h, s0, s1, q00, q10, q11, logn, b));
+		assert(Zf(verify_nearest_plane)(h, s0, s1, q00, q10, q11, logn, b));
 
 		/*
 		 * Pretend, we are dropping the most significant bits of s1
@@ -205,7 +190,7 @@ WorkerResult measure_signatures(fpr isigma_kg, fpr isigma_sig, uint32_t bound)
 		fpr *tmp_g11 = tmp_g10 + n;
 
 		for (size_t u = 0; u < n; u++) {
-			t0[u] = fpr_half(fpr_of(h[u]));
+			t0[u] = fpr_half(fpr_of((h[u >> 3] >> (u & 7)) & 1));
 			t1[u] = fpr_div(fpr_of(-s1[u]), fpr_of(SCALE));
 		}
 
@@ -247,7 +232,7 @@ WorkerResult measure_signatures(fpr isigma_kg, fpr isigma_sig, uint32_t bound)
 		}
 		printf("\n"); */
 
-		bool works = Zf(verify_simple_rounding)(h, rec_s0, rec_s1, q00, q10, q11, bound, logn, b);
+		bool works = Zf(verify_simple_rounding)(h, rec_s0, rec_s1, q00, q10, q11, logn, b);
 		// printf("Valid recovery: %d\n", works);
 		result.babai_fail += !works;
 	}
@@ -257,16 +242,9 @@ WorkerResult measure_signatures(fpr isigma_kg, fpr isigma_sig, uint32_t bound)
 WorkerResult tot;
 std::mutex mx;
 
-constexpr fpr sigma_kg  = { v: 1.425 };
-constexpr fpr sigma_sig = { v: 1.292 };
-constexpr fpr verif_margin = { v: 1.1 };
-
-const uint32_t bound = fpr_floor(fpr_mul(fpr_sqr(fpr_mul(verif_margin, fpr_double(sigma_sig))), fpr_double(fpr_of(n))));
-
 void work()
 {
-	WorkerResult result = measure_signatures(fpr_inv(sigma_kg), fpr_inv(sigma_sig), bound);
-
+	WorkerResult result = measure_signatures();
 	{
 		std::lock_guard<std::mutex> guard(mx);
 		tot.combine(result);

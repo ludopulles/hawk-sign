@@ -76,12 +76,12 @@ int main() {
 /*
  * Table below incarnates two discrete Gaussian distribution:
  *    D(x) = exp(-((x - mu)^2)/(2*sigma^2))
- * where sigma = 1.292 and mu is 0 or 1/2.
+ * where sigma = 1.292 and mu is 0 or 1 / 2.
  * Element 0 of the first table is P(x = 0) and 2*P(x = 1) in the second table.
  * For k > 0, element k is P(x >= k+1 | x > 0) in the first table, and
  * P(x >= k+2 | x > 1) in the second table.
  * For constant-time principle, mu = 0 is in the even indices and
- * mu = 1/2 is in the odd indices.
+ * mu = 1 / 2 is in the odd indices.
  * Probabilities are scaled up by 2^63.
  */
 static const uint64_t gauss_1292[26] = {
@@ -174,307 +174,161 @@ mkgauss_1292(prng *rng, uint8_t double_mu)
 static void
 smallints_to_fpr(fpr *r, const int8_t *t, unsigned logn)
 {
-	for (size_t u = MKN(logn); u --> 0; ) {
+	size_t u;
+
+	u = MKN(logn);
+	while (u --> 0) {
 		r[u] = fpr_of(t[u]);
 	}
 }
 
 /*
- * Sample a vector (x0, x1) that is congruent to (t0, t1) = B * (h0, h1)^t modulo 2 from
- * a Discrete Gaussian with lattice coset 2Z^{2n} + (t0, t1) and standard deviation 1.292.
- * Returns whether or not (x0, x1) has a squared l2-norm less than bound.
- *
- * Note: tmp[] must have space for at least 48 * 2^logn bytes.
+ * The hash of a message is a point in {0,1}^{2n}, so it consists of 2n bits,
+ * which is n/4 bytes.
+ * Therefore, the first component ranges from byte 0 to byte n / 8 - 1,
+ * and the second component ranges from byte n / 8 to n / 4 - 1.
+ * However, if logn <= 3, the second component is just byte 1.
  */
-static int
-sample_short(prng *rng, int8_t *restrict x0, int8_t *restrict x1,
+#define SECOND_HASH(h, logn) \
+	((h) + ((logn) <= 3 ? 1u : 1u << ((logn) - 3)))
+
+static void
+hash_to_fpr(fpr *p, const uint8_t *h, unsigned logn)
+{
+	size_t n, u, v;
+	uint8_t hash;
+
+	n = MKN(logn);
+
+	if (logn <= 3) {
+		hash = *h;
+		for (v = 0; v < n; v ++) {
+			p[v] = fpr_of(hash & 1);
+			hash >>= 1;
+		}
+	} else {
+		for (u = 0; u < n; ) {
+			hash = *h++;
+			for (v = 0; v < 8; v ++, u ++) {
+				p[u] = fpr_of(hash & 1);
+				hash >>= 1;
+			}
+		}
+	}
+}
+
+/*
+ * Returns the vector s = (h - noise) / 2 which gives a lattice point s that is
+ * close to h / 2, assuming that noise has a small norm. This function assumes
+ * that noise is in coefficient representation and integral (up to rounding
+ * errors).
+ */
+static void
+noise_to_lattice(int16_t *s, const uint8_t *h, const fpr *noise, unsigned logn)
+{
+	size_t n, u, v;
+	uint8_t hash;
+
+	n = MKN(logn);
+	if (logn <= 3) {
+		hash = *h;
+		for (v = 0; v < n; v ++) {
+			s[v] = (int16_t) ((int64_t)(hash & 1) - fpr_rint(noise[v])) / 2;
+			hash >>= 1;
+		}
+	} else {
+		for (u = 0; u < n; ) {
+			hash = *h++;
+			for (v = 0; v < 8; v ++, u ++) {
+				s[u] = (int16_t) ((int64_t)(hash & 1) - fpr_rint(noise[u])) / 2;
+				hash >>= 1;
+			}
+		}
+	}
+}
+
+static inline void
+construct_basis(
 	const int8_t *restrict f, const int8_t *restrict g,
 	const int8_t *restrict F, const int8_t *restrict G,
-	const int8_t *restrict h0, const int8_t *restrict h1,
-	unsigned logn, uint8_t *restrict tmp)
+	fpr *restrict bf, fpr *restrict bg, fpr *restrict bF, fpr *restrict bG,
+	unsigned logn)
+{
+	smallints_to_fpr(bf, f, logn);
+	smallints_to_fpr(bg, g, logn);
+	smallints_to_fpr(bF, F, logn);
+	Zf(FFT)(bf, logn);
+	Zf(FFT)(bg, logn);
+	Zf(FFT)(bF, logn);
+
+	if (G == NULL) {
+		size_t u, hn;
+
+		/*
+		 * Compute G = (1 + gF) / f, where all polynomials are in FFT representation.
+		 */
+		hn = MKN(logn) >> 1;
+		Zf(poly_prod_fft)(bG, bg, bF, logn);
+		for (u = 0; u < hn; u++) {
+			bG[u] = fpr_add(bG[u], fpr_one);
+		}
+		Zf(poly_div_fft)(bG, bf, logn);
+	} else {
+		smallints_to_fpr(bG, G, logn);
+		Zf(FFT)(bG, logn);
+	}
+}
+
+/*
+ * Sample a vector (x0, x1) congruent to (t0, t1) = B * (h0, h1) (mod 2) from a
+ * discrete Gaussian with lattice coset 2Z^{2n} + (t0, t1) and standard
+ * deviation 1.292. Returns whether or not (x0, x1) has a squared l2-norm less
+ * than the allowed bound for a signature.
+ *
+ * If this squared l2-norm is less than the allowed bound, the values in
+ * (x0, x1) are put in FFT representation.
+ */
+static int
+sample_short(prng *rng, fpr *restrict x0, fpr *restrict x1,
+	const fpr *restrict bf, const fpr *restrict bg,
+	const fpr *restrict bF, const fpr *restrict bG,
+	const uint8_t *restrict h, unsigned logn)
 {
 	size_t n, u;
 	int32_t norm, z;
-	fpr *t0, *t1, *t2, *t3, *t4, *t5;
 
 	n = MKN(logn);
 	norm = 0;
-	t0 = (fpr *)tmp;
-	t1 = t0 + n;
-	t2 = t1 + n;
-	t3 = t2 + n;
-	t4 = t3 + n;
-	t5 = t4 + n;
+
+	hash_to_fpr(x0, h, logn);
+	hash_to_fpr(x1, SECOND_HASH(h, logn), logn);
+	Zf(FFT)(x0, logn);
+	Zf(FFT)(x1, logn);
 
 	/*
-	 * Set the target vector to B * (h0, h1)^T.
+	 * Set the target vector to (t0, t1) = B * (h0, h1), i.e.:
+	 *     t0 = f h0 + F h1,
+	 *     t1 = g h0 + G h1.
 	 */
-	for (u = 0; u < n; u++) {
-		t0[u] = fpr_of(h0[u] & 1);
-		t1[u] = fpr_of(h1[u] & 1);
-		t2[u] = fpr_of(f[u] & 1);
-		t3[u] = fpr_of(g[u] & 1);
-		t4[u] = fpr_of(F[u] & 1);
-		t5[u] = fpr_of(G[u] & 1);
-	}
-
-	Zf(FFT)(t0, logn);
-	Zf(FFT)(t1, logn);
-	Zf(FFT)(t2, logn);
-	Zf(FFT)(t3, logn);
-	Zf(FFT)(t4, logn);
-	Zf(FFT)(t5, logn);
-
-	Zf(poly_mul_fft)(t2, t0, logn); // f h0
-	Zf(poly_mul_fft)(t3, t0, logn); // g h0
-	Zf(poly_mul_fft)(t4, t1, logn); // F h1
-	Zf(poly_mul_fft)(t5, t1, logn); // G h1
-	Zf(poly_add)(t2, t4, logn); // f h0 + F h1
-	Zf(poly_add)(t3, t5, logn); // g h0 + G h1
-
-	Zf(iFFT)(t2, logn);
-	Zf(iFFT)(t3, logn);
+	Zf(poly_matmul_fft)(bf, bF, bg, bG, x0, x1, logn);
 
 	/*
 	 * Sample and write the result in (x0, x1). Gaussian smoothing is used to
 	 * not reveal information on the secret basis.
 	 */
+	Zf(iFFT)(x0, logn);
+	Zf(iFFT)(x1, logn);
+
 	for (u = 0; u < n; u ++) {
-		z = fpr_rint(t2[u]) & 1;
+		z = fpr_rint(x0[u]) & 1;
 		z = mkgauss_1292(rng, z);
-		x0[u] = (int8_t) z;
+		x0[u] = fpr_of(z);
 		norm += z*z;
 	}
 	for (u = 0; u < n; u ++) {
-		z = fpr_rint(t3[u]) & 1;
+		z = fpr_rint(x1[u]) & 1;
 		z = mkgauss_1292(rng, z);
-		x1[u] = (int8_t) z;
-		norm += z*z;
-	}
-
-	/*
-	 * Test whether the l2-norm of (x0, x1) is below the given bound. The
-	 * code below uses only 32-bit operations to compute the squared norm,
-	 * since the max. value is 2n * 128^2 <= 2^24 (when logn <= 9).
-	 * For a large enough verification margin, it is unlikely that the
-	 * norm of the gaussian (x0, x1) is too large.
-	 */
-	return (uint32_t)norm <= l2bound[logn];
-}
-
-/*
- * Compute signature of (h0, h1): a vector (s0, s1) that is close to (h0, h1)/2 wrt Q.
- * Here, s0 is not returned.
- * When 0 is returned, signing failed.
- * When 1 is returned, there exists some s0 for which (s0, s1) is a signature
- * but reconstructing s0 might still fail.
- *
- * Note: tmp[] must have space for at least 50 * 2^logn bytes.
- */
-static int
-do_sign(prng *rng, int16_t *restrict s1,
-	const int8_t *restrict f, const int8_t *restrict g,
-	const int8_t *restrict F, const int8_t *restrict G,
-	const int8_t *restrict h0, const int8_t *restrict h1,
-	unsigned logn, uint8_t *restrict tmp)
-{
-	size_t n, u;
-	int8_t *x0, *x1;
-	fpr *t0, *t1, *t2;
-
-	n = MKN(logn);
-	t0 = (fpr *)tmp;
-	t1 = t0 + n;
-	t2 = t1 + n;
-	x0 = (int8_t *)tmp;
-	x1 = x0 + n;
-
-	if (!sample_short(rng, x0, x1, f, g, F, G, h0, h1, logn,
-			(uint8_t *)(x1 + n))) {
-		return 0;
-	}
-
-	/*
-	 * Note that (x0, x1) == B (h0, h1) (mod 2) so we obtain a lattice point
-	 * (s0, s1) that is close to (h0, h1)/2 wrt Q by calculating:
-	 *     (s0, s1) = ((h0, h1) - B^{-1} (x0, x1)) / 2.
-	 */
-	smallints_to_fpr(t1, x1, logn);
-	smallints_to_fpr(t2, x0, logn);
-	// Now override x0, x1
-	smallints_to_fpr(t0, f, logn);
-	Zf(FFT)(t0, logn);
-	Zf(FFT)(t1, logn);
-	Zf(FFT)(t2, logn);
-	Zf(poly_mul_fft)(t0, t1, logn);
-	smallints_to_fpr(t1, g, logn);
-	Zf(FFT)(t1, logn);
-	Zf(poly_mul_fft)(t1, t2, logn);
-	Zf(poly_sub)(t0, t1, logn); // s1 = x1 f - x0 g.
-
-	Zf(iFFT)(t0, logn);
-	for (u = 0; u < n; u ++) {
-		s1[u] = (int16_t) (h1[u] - fpr_rint(t0[u])) / 2;
-	}
-
-	return 1;
-}
-
-/*
- * Compute signature of (h0, h1): a vector (s0, s1) that is close to (h0, h1)/2 wrt Q.
- * Here, s0 is not returned.
- * 1 is returned iff (s0, s1) is a valid signature and s0 can be recovered from
- * s1 with simple rounding.
- *
- * Note: tmp[] must have space for at least 50 * 2^logn bytes.
- */
-static int
-do_guaranteed_sign(prng *rng, int16_t *restrict s1,
-	const int8_t *restrict f, const int8_t *restrict g,
-	const int8_t *restrict F, const int8_t *restrict G,
-	const fpr *restrict q00, const int8_t *restrict h0, const int8_t *restrict h1,
-	unsigned logn, uint8_t *restrict tmp)
-{
-	size_t n, u;
-	int8_t *x0, *x1;
-	fpr *tf, *tg, *tx0, *tx1, *t4;
-
-	n = MKN(logn);
-	tf = (fpr *)tmp;
-	tg = tf + n;
-	tx0 = tg + n;
-	tx1 = tx0 + n;
-	t4 = tx1 + n;
-
-	x0 = (int8_t *)tmp;
-	x1 = x0 + n;
-
-	if (!sample_short(rng, x0, x1, f, g, F, G, h0, h1, logn,
-			(uint8_t*)(x1 + n))) {
-		return 0;
-	}
-
-	/*
-	 * Note that (x0, x1) == B (h, 0) (mod 2) so we obtain a lattice point
-	 * (s0, s1) that is close to (h0, h1)/2 wrt Q by calculating:
-	 *     (s0, s1) = ((h, 0) - B^{-1} (x0, x1)) / 2.
-	 */
-	smallints_to_fpr(tx0, x0, logn);
-	smallints_to_fpr(tx1, x1, logn);
-	// Now override x0, x1:
-	smallints_to_fpr(tf, f, logn);
-	smallints_to_fpr(tg, g, logn);
-
-	Zf(FFT)(tx0, logn);
-	Zf(FFT)(tx1, logn);
-	Zf(FFT)(tf, logn);
-	Zf(FFT)(tg, logn);
-
-	Zf(poly_add_muladj_fft)(t4, tx0, tx1, tf, tg, logn);
-	Zf(poly_div_autoadj_fft)(t4, q00, logn);
-	Zf(iFFT)(t4, logn); // err / 2 = (f^* x0 + g^* x1) / q00
-
-	// If err / 2 is not in (-.5,.5)^n, simple rounding will fail
-	for (u = 0; u < n; u++) {
-		if (!fpr_lt(fpr_neg(fpr_one), t4[u]) || !fpr_lt(t4[u], fpr_one)) {
-			return 0;
-		}
-	}
-
-	Zf(poly_mul_fft)(tf, tx1, logn);
-	Zf(poly_mul_fft)(tg, tx0, logn);
-	Zf(poly_sub)(tf, tg, logn); // s1 = x1 f - x0 g.
-
-	Zf(iFFT)(tf, logn);
-	for (u = 0; u < n; u ++) {
-		s1[u] = (int16_t) (h1[u] - fpr_rint(tf[u])) / 2;
-	}
-
-	return 1;
-}
-
-/*
- * Compute signature of h: a vector (s0, s1) that is close to (h0, h1)/2 wrt Q.
- * Here, s0 is not returned.
- * 1 is returned iff (s0, s1) is a valid signature and s0 can be recovered from
- * s1 with simple rounding.
- *
- * Note: tmp[] must have space for at least 26 * 2^logn bytes.
- */
-static int
-do_fft_sign(prng *rng, int16_t *restrict s1,
-	const fpr *restrict expanded_seckey, const uint8_t *restrict h,
-	unsigned logn, uint8_t *restrict tmp)
-{
-	size_t n, u, v, w;
-	int8_t *x0, *x1;
-	const fpr *tf, *tg, *tF, *tG, *tiq00;
-	fpr *tx0, *tx1, *tres;
-	int32_t norm, z;
-
-
-	n = MKN(logn);
-	norm = 0;
-
-	tf = expanded_seckey;
-	tg = tf + n;
-	tF = tg + n;
-	tG = tF + n;
-	tiq00 = tG + n;
-
-	tx0 = (fpr *)tmp;
-	tx1 = tx0 + n;
-	tres = tx1 + n;
-	x0 = (int8_t *)(tres + n);
-	x1 = x0 + n;
-
-	/*
-	 * Set the target vector to (h0, h1) B (row-notation).
-	 */
-	for (u = 0, w = 0; w < n; u ++ ) {
-		uint8_t h0, h1;
-
-		h0 = h[u];
-		h1 = h[n / 8 + u];
-		for (v = 0; v < 8; v ++, w ++) {
-			tx0[w] = fpr_of(h0 & 1);
-			tx1[w] = fpr_of(h1 & 1);
-			h0 >>= 1;
-			h1 >>= 1;
-		}
-	}
-
-	/*
-	 * Sample (x0, x1) according to a discrete gaussian distribution on 2
-	 * Z^{2n} + (h0, h1) B with standard deviation 2 sigma_{sig}. Gaussian
-	 * smoothing is used to not reveal information on the secret basis.
-	 */
-	Zf(FFT)(tx0, logn);
-	Zf(FFT)(tx1, logn);
-
-	/*
-	 * First, calculate the 0th component of (h0, h1) B, and sample x0.
-	 */
-	Zf(poly_add_mul_fft)(tres, tx0, tx1, tf, tF, logn);
-	Zf(iFFT)(tres, logn);
-
-	for (u = 0; u < n; u ++) {
-		z = fpr_rint(tres[u]) & 1;
-		z = mkgauss_1292(rng, z);
-		x0[u] = (int8_t) z;
-		norm += z*z;
-	}
-
-	/*
-	 * Second, calculate the 1th component of (h0, h1) B, and sample x1.
-	 */
-	Zf(poly_add_mul_fft)(tres, tx0, tx1, tg, tG, logn);
-	Zf(iFFT)(tres, logn);
-
-	for (u = 0; u < n; u ++) {
-		z = fpr_rint(tres[u]) & 1;
-		z = mkgauss_1292(rng, z);
-		x1[u] = (int8_t) z;
+		x1[u] = fpr_of(z);
 		norm += z*z;
 	}
 
@@ -486,66 +340,146 @@ do_fft_sign(prng *rng, int16_t *restrict s1,
 	 * norm of the gaussian (x0, x1) is too large.
 	 */
 	if ((uint32_t)norm > l2bound[logn]) {
-		// Norm is too large, so signature would not be valid.
 		return 0;
 	}
 
-	smallints_to_fpr(tx0, x0, logn);
-	smallints_to_fpr(tx1, x1, logn);
-	Zf(FFT)(tx0, logn);
-	Zf(FFT)(tx1, logn);
-
 	/*
-	 * Calculate the rounding errors that occur when we want to recover s0 from
-	 * s1 during verification of this signature. These errors should be of
-	 * absolute value at most 1/2.
-	 * The errors are calculated by:
-	 *
-	 *     (f^* x0 + g^* x1) / (f^* f + g^* g).
-	 *
-	 * If err / 2 is not in (-.5,.5)^n, verification will reconstruct a
-	 * different s0 so the signature may not be valid anymore.
+	 * Norm of (x0, x1) is acceptable.
 	 */
-	Zf(poly_add_muladj_fft)(tres, tx0, tx1, tf, tg, logn);
-	Zf(poly_mul_autoadj_fft)(tres, tiq00, logn);
-	Zf(iFFT)(tres, logn);
-
-	for (u = 0; u < n; u++) {
-		if (!fpr_lt(fpr_neg(fpr_one), tres[u]) || !fpr_lt(tres[u], fpr_one)) {
-			return 0;
-		}
-	}
-
-	/*
-	 * In row-notation, (x0, x1) == (h0, h1) B (mod 2) holds while it also has
-	 * a small norm since the discrete gaussian distribution has small standard
-	 * deviation. Thus, (s0, s1) := ((h0, h1) - (x0, x1) B^{-1}) / 2 is a
-	 * lattice point that is close to (h0, h1)/2 with respect to the quadratic
-	 * form Q.
-	 *
-	 * Note: B = [[f, g], [F, G]] with det. 1 so B^{-1} = [[G, -g], [-F, f]]
-	 * yielding s1 = (h1 - (-x0 g + x1 f)) / 2.
-	 */
-	Zf(poly_neg)(tx0, logn);
-	Zf(poly_add_mul_fft)(tres, tx0, tx1, tg, tf, logn);
-	Zf(iFFT)(tres, logn);
-
-	for (u = 0, w = 0; w < n; u ++) {
-		uint8_t h1;
-
-		h1 = h[n / 8 + u];
-		for (v = 0; v < 8; v ++, w ++) {
-			s1[w] = ((int16_t)(h1 & 1) - fpr_rint(tres[w])) / 2;
-			h1 >>= 1;
-		}
-	}
+	Zf(FFT)(x0, logn);
+	Zf(FFT)(x1, logn);
 
 	return 1;
 }
 
 /*
  * Compute signature of (h0, h1): a vector (s0, s1) that is close to
- * (h0, h1)/2 wrt Q. If 1 is returned, (s0, s1) is a valid signature.
+ * (h0, h1) / 2 wrt Q. Here, s0 is not returned.
+ * 1 is returned iff (s0, s1) is a valid signature and s0 can be recovered from
+ * s1 with simple rounding.
+ *
+ * Note: tmp[] must have space for at least 48 * 2^logn bytes.
+ */
+static int
+do_sign_dyn(prng *rng, int16_t *restrict s1,
+	const int8_t *restrict f, const int8_t *restrict g,
+	const int8_t *restrict F, const int8_t *restrict G,
+	const uint8_t *restrict h, unsigned logn, uint8_t *restrict tmp)
+{
+	size_t n, u;
+	fpr *x0, *x1, *bf, *bg, *bF, *bG;
+
+	n = MKN(logn);
+	bf = (fpr *) tmp;
+	bg = bf + n;
+	bF = bg + n;
+	bG = bF + n;
+	x0 = bG + n;
+	x1 = x0 + n;
+
+	construct_basis(f, g, F, G, bf, bg, bF, bG, logn);
+
+	if (!sample_short(rng, x0, x1, bf, bg, bF, bG, h, logn)) {
+		return 0;
+	}
+
+	/*
+	 * Compute *twice* the rounding error, which is given by:
+	 *
+	 *     (f* x0 + g* x1) / (f* f + g* g).
+	 *
+	 * If the above quantity is in the (-1, 1)^n box, simple rounding works for
+	 * recovering s0. Otherwise, reject this signature.
+	 */
+	Zf(poly_add_muladj_fft)(bF, x0, x1, bf, bg, logn);
+	Zf(poly_invnorm2_fft)(bG, bf, bg, logn);
+	Zf(poly_mul_autoadj_fft)(bF, bG, logn);
+	Zf(iFFT)(bF, logn);
+
+	for (u = 0; u < n; u++) {
+		if (!fpr_lt(fpr_neg(fpr_one), bF[u]) || !fpr_lt(bF[u], fpr_one)) {
+			return 0;
+		}
+	}
+
+	/*
+	 * Compute s1 in (s0, s1) = ((h0, h1) - B^{-1} (x0, x1)) / 2, so
+	 *
+	 *     s1 = (h1 - (x0 * (-g) + x1 f)) / 2.
+	 */
+	Zf(poly_neg)(bg, logn);
+	Zf(poly_add_mul_fft)(bF, x0, x1, bg, bf, logn);
+	Zf(iFFT)(bF, logn);
+	noise_to_lattice(s1, SECOND_HASH(h, logn), bF, logn);
+	return 1;
+}
+
+/*
+ * Compute signature of h: a vector (s0, s1) that is close to (h0, h1) / 2 wrt Q.
+ * Here, s0 is not returned.
+ * 1 is returned iff (s0, s1) is a valid signature and s0 can be recovered from
+ * s1 with simple rounding.
+ *
+ * Note: tmp[] must have space for at least 24 * 2^logn bytes.
+ */
+static int
+do_sign(prng *rng, int16_t *restrict s1,
+	const fpr *restrict expanded_seckey, const uint8_t *restrict h,
+	unsigned logn, uint8_t *restrict tmp)
+{
+	size_t n, u;
+	const fpr *bf, *bg, *bF, *bG, *biq00;
+	fpr *x0, *x1, *res;
+
+	n = MKN(logn);
+
+	bf = expanded_seckey;
+	bg = bf + n;
+	bF = bg + n;
+	bG = bF + n;
+	biq00 = bG + n;
+
+	x0 = (fpr *)tmp;
+	x1 = x0 + n;
+	res = x1 + n;
+
+	if (!sample_short(rng, x0, x1, bf, bg, bF, bG, h, logn)) {
+		return 0;
+	}
+
+	/*
+	 * Compute *twice* the rounding error, which is given by:
+	 *
+	 *     (f* x0 + g* x1) / (f* f + g* g).
+	 *
+	 * If the above quantity is in the (-1, 1)^n box, simple rounding works for
+	 * recovering s0. Otherwise, reject this signature.
+	 */
+	Zf(poly_add_muladj_fft)(res, x0, x1, bf, bg, logn);
+	Zf(poly_mul_autoadj_fft)(res, biq00, logn);
+	Zf(iFFT)(res, logn);
+
+	for (u = 0; u < n; u++) {
+		if (!fpr_lt(fpr_neg(fpr_one), res[u]) || !fpr_lt(res[u], fpr_one)) {
+			return 0;
+		}
+	}
+
+	/*
+	 * Compute s1 in (s0, s1) = ((h0, h1) - B^{-1} (x0, x1)) / 2, so
+	 *
+	 *     s1 = (h1 - (x0 * (-g) + x1 f)) / 2.
+	 */
+	Zf(poly_neg)(x0, logn);
+	Zf(poly_add_mul_fft)(res, x0, x1, bg, bf, logn);
+	Zf(iFFT)(res, logn);
+	noise_to_lattice(s1, SECOND_HASH(h, logn), res, logn);
+	return 1;
+}
+
+/*
+ * Compute signature of (h0, h1): a vector (s0, s1) that is close to
+ * (h0, h1) / 2 wrt Q. If 1 is returned, (s0, s1) is a valid signature.
  *
  * Note: tmp[] must have space for at least 50 * 2^logn bytes
  */
@@ -554,129 +488,54 @@ do_complete_sign(prng *rng,
 	int16_t *restrict s0, int16_t *restrict s1,
 	const int8_t *restrict f, const int8_t *restrict g,
 	const int8_t *restrict F, const int8_t *restrict G,
-	const int8_t *restrict h0, const int8_t *restrict h1, unsigned logn,
-	uint8_t *restrict tmp)
+	const uint8_t *restrict h, unsigned logn, uint8_t *restrict tmp)
 {
-	size_t n, u;
-	int8_t *x0, *x1;
-	fpr *t0, *t1, *t2, *t3, *t4;
+	size_t n;
+	fpr *x0, *x1, *bf, *bg, *bF, *bG;
 
 	n = MKN(logn);
-	t0 = (fpr *)tmp;
-	t1 = t0 + n;
-	t2 = t1 + n;
-	t3 = t2 + n;
-	t4 = t3 + n;
-	x0 = (int8_t *)tmp;
+	bf = (fpr *)tmp;
+	bg = bf + n;
+	bF = bg + n;
+	bG = bF + n;
+	x0 = bG + n;
 	x1 = x0 + n;
 
-	if (!sample_short(rng, x0, x1, f, g, F, G, h0, h1, logn,
-			(uint8_t *)(x1 + n))) {
+	construct_basis(f, g, F, G, bf, bg, bF, bG, logn);
+
+	if (!sample_short(rng, x0, x1, bf, bg, bF, bG, h, logn)) {
 		return 0;
 	}
 
 	/*
-	 * Get the signature corresponding to that tiny vector, i.e.
-	 * s = x * B^{-1}. Thus s0 = x0 G - x1 F and s1 = -x0 g + x1 f.
+	 * Calculate B^{-1} (x0, x1) = ((-G) x0 + F x1, g x0 + (-f) x1).
 	 */
-	smallints_to_fpr(t2, x0, logn);
-	smallints_to_fpr(t3, x1, logn);
-	// Now override x0, x1
-	smallints_to_fpr(t0, G, logn);
-	smallints_to_fpr(t1, f, logn);
-	Zf(FFT)(t0, logn);
-	Zf(FFT)(t1, logn);
-	Zf(FFT)(t2, logn);
-	Zf(FFT)(t3, logn);
-
-	Zf(poly_mul_fft)(t0, t2, logn); // t0 = x0 G
-	Zf(poly_mul_fft)(t1, t3, logn); // t1 = x1 f
-
-	smallints_to_fpr(t4, F, logn);
-	Zf(FFT)(t4, logn);
-	Zf(poly_mul_fft)(t3, t4, logn);
-	Zf(poly_sub)(t0, t3, logn); // t0 = x0 G - x1 F
-
-	smallints_to_fpr(t4, g, logn);
-	Zf(FFT)(t4, logn);
-	Zf(poly_mul_fft)(t2, t4, logn);
-	Zf(poly_sub)(t1, t2, logn); // t1 = x1 f - x0 g
+	Zf(poly_neg)(bF, logn);
+	Zf(poly_neg)(bg, logn);
+	Zf(poly_matmul_fft)(bG, bF, bg, bf, x0, x1, logn);
 
 	/*
-	 * Extract the signature from t0, t1
+	 * Extract the signature from x0, t1
 	 */
-	Zf(iFFT)(t0, logn);
-	Zf(iFFT)(t1, logn);
+	Zf(iFFT)(x0, logn);
+	Zf(iFFT)(x1, logn);
 
-	for (u = 0; u < n; u ++) {
-		s0[u] = (int16_t) (h0[u] - fpr_rint(t0[u])) / 2;
-		s1[u] = (int16_t) (h1[u] - fpr_rint(t1[u])) / 2;
-	}
-	// Now (s0, s1) is a lattice that is close to (h0, h1)/2 wrt Q.
+	noise_to_lattice(s0, h, x0, logn);
+	noise_to_lattice(s1, SECOND_HASH(h, logn), x1, logn);
 	return 1;
 }
 
 /* =================================================================== */
-/*
- * Use a fast PRNG for gaussian sampling during signing.
- */
-
-/* see inner.h */
-void
-Zf(sign)(inner_shake256_context *rng, int16_t *restrict sig,
-	const int8_t *restrict f, const int8_t *restrict g,
-	const int8_t *restrict F, const int8_t *restrict G,
-	const int8_t *restrict h0, const int8_t *restrict h1,
-	unsigned logn, uint8_t *restrict tmp)
-{
-	prng p;
-	do {
-		Zf(prng_init)(&p, rng);
-	} while (!do_sign(&p, sig, f, g, F, G, h0, h1, logn, tmp));
-}
-
-/* see inner.h */
-void
-Zf(guaranteed_sign)(inner_shake256_context *rng, int16_t *restrict sig,
-	const int8_t *restrict f, const int8_t *restrict g,
-	const int8_t *restrict F, const int8_t *restrict G,
-	const fpr *restrict q00, const int8_t *restrict h0,
-	const int8_t *restrict h1, unsigned logn,
-	uint8_t *restrict tmp)
-{
-	prng p;
-	do {
-		Zf(prng_init)(&p, rng);
-	} while (!do_guaranteed_sign(&p, sig, f, g, F, G, q00, h0, h1, logn, tmp));
-}
-
-/* see inner.h */
-void
-Zf(complete_sign)(inner_shake256_context *rng,
-	int16_t *restrict s0, int16_t *restrict s1,
-	const int8_t *restrict f, const int8_t *restrict g,
-	const int8_t *restrict F, const int8_t *restrict G,
-	const int8_t *restrict h0, const int8_t *restrict h1,
-	unsigned logn, uint8_t *restrict tmp)
-{
-	prng p;
-	do {
-		Zf(prng_init)(&p, rng);
-	} while (!do_complete_sign(&p, s0, s1, f, g, F, G, h0, h1, logn, tmp));
-}
-
 
 /* see inner.h */
 void
 Zf(expand_seckey)(fpr *restrict expanded_seckey,
 	const int8_t *f, const int8_t *g, const int8_t *F, unsigned logn)
 {
-	size_t n, hn, u;
+	size_t n;
 	fpr *bf, *bg, *bF, *bG, *biq00;
 
 	n = MKN(logn);
-	hn = n >> 1;
-
 	bf = expanded_seckey;
 	bg = bf + n;
 	bF = bg + n;
@@ -686,37 +545,50 @@ Zf(expand_seckey)(fpr *restrict expanded_seckey,
 	/*
 	 * We load the private key elements directly into the 2x2 matrix B.
 	 */
-	smallints_to_fpr(bf, f, logn);
-	smallints_to_fpr(bg, g, logn);
-	smallints_to_fpr(bF, F, logn);
-
-	/*
-	 * Compute the FFT for the key elements
-	 */
-	Zf(FFT)(bf, logn);
-	Zf(FFT)(bg, logn);
-	Zf(FFT)(bF, logn);
-
-	/*
-	 * Compute G = (1 + gF) / f
-	 */
-	Zf(poly_prod_fft)(bG, bg, bF, logn);
-	for (u = 0; u < hn; u++)
-		bG[u] = fpr_add(bG[u], fpr_one);
-	Zf(poly_div_fft)(bG, bf, logn);
-
+	construct_basis(f, g, F, NULL, bf, bg, bF, bG, logn);
 	Zf(poly_invnorm2_fft)(biq00, bf, bg, logn);
+}
+
+/*
+ * Use a fast PRNG for gaussian sampling during signing.
+ */
+
+/* see inner.h */
+void
+Zf(sign_dyn)(inner_shake256_context *rng, int16_t *restrict sig,
+	const int8_t *restrict f, const int8_t *restrict g,
+	const int8_t *restrict F, const int8_t *restrict G,
+	const uint8_t *restrict h, unsigned logn, uint8_t *restrict tmp)
+{
+	prng p;
+	do {
+		Zf(prng_init)(&p, rng);
+	} while (!do_sign_dyn(&p, sig, f, g, F, G, h, logn, tmp));
 }
 
 /* see inner.h */
 void
-Zf(fft_sign)(inner_shake256_context *rng, int16_t *restrict sig,
+Zf(complete_sign)(inner_shake256_context *rng,
+	int16_t *restrict s0, int16_t *restrict s1,
+	const int8_t *restrict f, const int8_t *restrict g,
+	const int8_t *restrict F, const int8_t *restrict G,
+	const uint8_t *restrict h, unsigned logn, uint8_t *restrict tmp)
+{
+	prng p;
+	do {
+		Zf(prng_init)(&p, rng);
+	} while (!do_complete_sign(&p, s0, s1, f, g, F, G, h, logn, tmp));
+}
+
+/* see inner.h */
+void
+Zf(sign)(inner_shake256_context *rng, int16_t *restrict sig,
 	const fpr *restrict expanded_seckey, const uint8_t *restrict h,
 	unsigned logn, uint8_t *restrict tmp)
 {
 	prng p;
 	do {
 		Zf(prng_init)(&p, rng);
-	} while (!do_fft_sign(&p, sig, expanded_seckey, h, logn, tmp));
+	} while (!do_sign(&p, sig, expanded_seckey, h, logn, tmp));
 }
 

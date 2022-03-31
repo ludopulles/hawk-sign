@@ -77,7 +77,7 @@ static void smallints_to_fpr(fpr *r, const int8_t *t, unsigned logn)
 	}
 }
 
-bool mock_fft_sign(prng *rng, const fpr *restrict expanded_seckey, const uint8_t *restrict h,
+bool mock_sign(prng *rng, const fpr *restrict expanded_seckey, const uint8_t *restrict h,
 	uint32_t bound, unsigned logn, uint8_t *restrict tmp, vector<double> &lens)
 {
 	size_t n, u, v, w;
@@ -253,9 +253,9 @@ void work(int id) {
 		Zf(prng_get_bytes)(&p, h, n / 4);
 
 		// Make sure that sign.c may fail on generating a signature that does not decompress correctly.
-		// Zf(fft_sign)(&rng, sig, expkey, h, bound, logn, tmp);
-		// if (!Zf(verify_simple_rounding_fft)(h, sig, q00, q10, q11, bound, logn, tmp)) fails++;
-		fails += !mock_fft_sign(&p, expkey, h, bound, logn, tmp, _lens);
+		// Zf(sign)(&rng, sig, expkey, h, logn, tmp);
+		// if (!Zf(verify_simple_rounding_fft)(h, sig, q00, q10, q11, logn, tmp)) fails++;
+		fails += !mock_sign(&p, expkey, h, bound, logn, tmp, _lens);
 	}
 
 	result += fails;

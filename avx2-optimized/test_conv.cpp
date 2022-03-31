@@ -727,7 +727,6 @@ int main() {
 	int8_t x0[n], x1[n];
 
 	fpr q00[n], q10[n], q11[n];
-	int16_t sig[n];
 	unsigned char seed[48];
 	inner_shake256_context sc;
 
@@ -743,7 +742,7 @@ int main() {
 	gettimeofday(&t0, NULL);
 
 	// Generate key pair.
-	Zf(keygen)(&sc, f, g, F, G, q00, q10, q11, fpr_of(1), logn, tmp);
+	Zf(keygen)(&sc, f, g, F, G, q00, q10, q11, logn, tmp);
 
 	gettimeofday(&t1, NULL);
 	printf("Key generation took %lld microseconds\n", time_diff(&t0, &t1));

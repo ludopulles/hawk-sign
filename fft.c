@@ -790,3 +790,38 @@ Zf(poly_merge_fft)(
 		f[(u << 1) + 1 + hn] = t_im;
 	}
 }
+
+/*
+ * Multiply a 2x2 matrix ((b00, b01), (b10, b11)) with a vector (x0, x1) using
+ * column-notation and store the result in-place in x0, x1. Thus it computes:
+ *
+ *     (x0', x1') := (b00 x0 + b01 x1, b10 x0 + b11 x1).
+ *
+ * All polynomials are in FFT representation.
+ */
+ void
+ Zf(poly_matmul_fft)(
+	const fpr *restrict b00, const fpr *restrict b01,
+	const fpr *restrict b10, const fpr *restrict b11,
+	fpr *restrict x0, fpr *restrict x1, unsigned logn)
+{
+	size_t n, hn, u;
+
+	n = (size_t)1 << logn;
+	hn = n >> 1;
+	for (u = 0; u < hn; u ++) {
+		fpr y0_re, y0_im, y1_re, y1_im;
+		fpr y2_re, y2_im, y3_re, y3_im;
+
+		FPC_MUL(y0_re, y0_im, b00[u], b00[u + hn], x0[u], x0[u + hn]);
+		FPC_MUL(y1_re, y1_im, b01[u], b01[u + hn], x1[u], x1[u + hn]);
+		FPC_MUL(y2_re, y2_im, b10[u], b10[u + hn], x0[u], x0[u + hn]);
+		FPC_MUL(y3_re, y3_im, b11[u], b11[u + hn], x1[u], x1[u + hn]);
+
+		x0[u]      = fpr_add(y0_re, y1_re);
+		x0[u + hn] = fpr_add(y0_im, y1_im);
+		x1[u]      = fpr_add(y2_re, y3_re);
+		x1[u + hn] = fpr_add(y2_im, y3_im);
+	}
+}
+

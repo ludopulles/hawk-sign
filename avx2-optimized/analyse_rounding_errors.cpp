@@ -51,21 +51,6 @@ void randombytes(unsigned char *x, unsigned long long xlen) {
 		*x = ((unsigned char) rand());
 }
 
-void random_hash(int8_t *h, unsigned logn) {
-	assert(RAND_MAX == INT_MAX); // rand() should generate 31 random bits
-	int x = rand();
-	size_t RAND_BITS = 31, rand_bits = RAND_BITS;
-	for (size_t u = MKN(logn); u -- > 0; ) {
-		if (rand_bits == 0) {
-			x = rand();
-			rand_bits = RAND_BITS;
-		}
-		h[u] = (x & 1);
-		x >>= 1;
-		rand_bits--;
-	}
-}
-
 ll time_diff(const struct timeval *begin, const struct timeval *end) {
 	return 1000000LL * (end->tv_sec - begin->tv_sec) + (end->tv_usec - begin->tv_usec);
 }
@@ -143,8 +128,8 @@ int approximate_fail_prob(inner_shake256_context *rng,
 	for (u = 0; u < 1024; u++) {
 		inner_shake256_extract(rng, h, n / 4);
 		// Make sure that sign.c may fail on generating a signature that does not decompress correctly.
-		Zf(fft_sign)(rng, sig, expkey, h, bound, logn, tmp);
-		if (!Zf(verify_simple_rounding_fft)(h, sig, q00, q10, q11, bound, logn, tmp))
+		Zf(sign)(rng, sig, expkey, h, logn, tmp);
+		if (!Zf(verify_simple_rounding_fft)(h, sig, q00, q10, q11, logn, tmp))
 			fails++;
 	}
 	return fails;

@@ -533,60 +533,51 @@ int Zf(gaussian0_sampler)(prng *p);
  * the seed for the key generation, while the largest is storing the basis as
  * 16bit integers. Here, a middle-way is chosen.
  */
-size_t
-Zf(encode_seckey)(void *out, size_t max_out_len,
+size_t Zf(encode_seckey)(void *out, size_t max_out_len,
 	const int8_t *f, const int8_t *g, const int8_t *F, unsigned logn);
 
 /*
  * Inverse of Zf(encode_seckey). To calculate G, use Zf(expand_seckey).
  */
-size_t
-Zf(decode_seckey)(int8_t *f, int8_t *g, int8_t *F,
+size_t Zf(decode_seckey)(int8_t *f, int8_t *g, int8_t *F,
 	const void *in, size_t max_in_len,  unsigned logn);
 
 /*
  * Encode the Gram matrix of the NTRU-basis with determinant 1.
  */
-size_t
-Zf(encode_pubkey)(void *out, size_t max_out_len,
+size_t Zf(encode_pubkey)(void *out, size_t max_out_len,
 	const int16_t *q00, const int16_t *q10, unsigned logn);
 
 /*
  * Decode the Gram matrix of the NTRU-basis with determinant 1.
  * The q11 can be recovered by q11 = (1 + q10 q10^*) / q00.
  */
-size_t
-Zf(decode_pubkey)(int16_t *q00, int16_t *q10,
+size_t Zf(decode_pubkey)(int16_t *q00, int16_t *q10,
 	const void *in, size_t max_in_len, unsigned logn);
 
 /*
  * Encode a signature s1 by outputting 'lo_bits' bits of the lowest signficant
  * bits of x[i] and using unary for the other most significant bits.
  */
-size_t
-Zf(encode_sig)(void *out, size_t max_out_len, const int16_t *x, unsigned logn,
+size_t Zf(encode_sig)(void *out, size_t max_out_len, const int16_t *x, unsigned logn,
 	size_t lo_bits);
 
 /*
  * Decode a signature s1.
  */
-size_t
-Zf(decode_sig)(int16_t *x, const void *in, size_t max_in_len, unsigned logn,
+size_t Zf(decode_sig)(int16_t *x, const void *in, size_t max_in_len, unsigned logn,
 	size_t lo_bits);
 
 /*
  * TODO: remove Huffman-table compression
  */
-size_t
-Zf(encode_pubkey_huffman)(void *out, size_t max_out_len,
+size_t Zf(encode_pubkey_huffman)(void *out, size_t max_out_len,
 	const int16_t *q00, const int16_t *q10, unsigned logn);
 
-size_t
-Zf(decode_pubkey_huffman)(int16_t *q00, int16_t *q10,
+size_t Zf(decode_pubkey_huffman)(int16_t *q00, int16_t *q10,
 	const void *in, size_t max_in_len, unsigned logn);
 
-size_t
-Zf(encode_sig_huffman)(void *out, size_t max_out_len, const int16_t *x,
+size_t Zf(encode_sig_huffman)(void *out, size_t max_out_len, const int16_t *x,
 	unsigned logn);
 
 /* ==================================================================== */
@@ -776,16 +767,27 @@ void Zf(poly_merge_fft)(fpr *restrict f,
  * Add to a polynomial its own adjoint. This function works only in FFT
  * representation.
  */
-void
-Zf(poly_addselfadj_fft)(fpr *a, unsigned logn);
+void Zf(poly_addselfadj_fft)(fpr *a, unsigned logn);
 
 /*
  * Add polynomial b to polynomial a, where b is autoadjoint. Both a and b
  * are in FFT representation. Since b is autoadjoint, all its FFT
  * coefficients are real, and the array b contains only N/2 elements.
  */
-void
-Zf(poly_add_autoadj_fft)(fpr *a, fpr *b, unsigned logn);
+void Zf(poly_add_autoadj_fft)(fpr *a, fpr *b, unsigned logn);
+
+/*
+ * Multiply a 2x2 matrix ((b00, b01), (b10, b11)) with a vector (x0, x1) using
+ * column-notation and store the result in-place in x0, x1. Thus it computes:
+ *
+ *     (x0', x1') := (b00 x0 + b01 x1, b10 x0 + b11 x1).
+ *
+ * All polynomials are in FFT representation.
+ */
+ void Zf(poly_matmul_fft)(
+	const fpr *restrict b00, const fpr *restrict b01,
+	const fpr *restrict b10, const fpr *restrict b11,
+	fpr *restrict x0, fpr *restrict x1, unsigned logn);
 
 /* ==================================================================== */
 /*
@@ -810,8 +812,7 @@ Zf(poly_add_autoadj_fft)(fpr *a, fpr *b, unsigned logn);
  * Input arrays MUST NOT overlap. tmp[] should have room for at least
  * three polynomials of 2^logn elements each.
  */
-void
-Zf(ffLDL_fft)(fpr *restrict tree, const fpr *restrict q00, unsigned logn,
+void Zf(ffLDL_fft)(fpr *restrict tree, const fpr *restrict q00, unsigned logn,
 	fpr *restrict tmp);
 
 /*
@@ -819,8 +820,7 @@ Zf(ffLDL_fft)(fpr *restrict tree, const fpr *restrict q00, unsigned logn,
  * Result is stored in z. Note: tmp[] must have space for at least two
  * polynomials of size 2^logn.
  */
-void
-Zf(ffNearestPlane_tree)(fpr *restrict z, const fpr *restrict tree,
+void Zf(ffNearestPlane_tree)(fpr *restrict z, const fpr *restrict tree,
 	const fpr *restrict t, unsigned logn, fpr *restrict tmp);
 
 /*
@@ -829,8 +829,7 @@ Zf(ffNearestPlane_tree)(fpr *restrict z, const fpr *restrict tree,
  * and g get modified in this function. tmp[] must have space for at least
  * 2 polynomials of size 2^logn.
  */
-void
-Zf(ffNearestPlane_dyn)(fpr *restrict t, fpr *restrict g, unsigned logn,
+void Zf(ffNearestPlane_dyn)(fpr *restrict t, fpr *restrict g, unsigned logn,
 	fpr *restrict tmp);
 
 /*
@@ -838,8 +837,7 @@ Zf(ffNearestPlane_dyn)(fpr *restrict t, fpr *restrict g, unsigned logn,
  * the result in Fn, Gn as well (in coefficient representation). Note:
  * tmp[] must have space for at least 4 polynomials of size 2^logn.
  */
-void
-Zf(ffBabai_reduce)(const fpr *restrict f, const fpr *restrict g,
+void Zf(ffBabai_reduce)(const fpr *restrict f, const fpr *restrict g,
 	fpr *restrict F, fpr *restrict G, int8_t *restrict Fn,
 	int8_t *restrict Gn, unsigned logn, fpr *tmp);
 
@@ -882,8 +880,7 @@ Zf(complete_private)(const int8_t *restrict f, const int8_t *restrict g,
  * Note: tmp[] must have space for at least 48 * 2^logn bytes.
  * If Babai reduction is not done, at least 28 2^logn bytes are needed.
  */
-void
-Zf(keygen)(inner_shake256_context *rng,
+void Zf(keygen)(inner_shake256_context *rng,
 	int8_t *restrict f, int8_t *restrict g, // secret key
 	int8_t *restrict F, int8_t *restrict G, // secret key
 	fpr *restrict q00, fpr *restrict q10, fpr *restrict q11, // public key
@@ -895,76 +892,57 @@ Zf(keygen)(inner_shake256_context *rng,
  */
 
 /*
- * Compute a signature of hm: the signature is a vector (s0, s1) that is close
- * to (hm/2, 0) with respect to the quadratic form Q.
- * Here 'close' means that the squared l2-norm of (2 s0 - hm, 2 s1) wrt Q
- * is at most a specified bound depending on logn.
+ * Compute a signature of h: the signature is a vector (s0, s1) that is close
+ * to (h0, h1) / 2 with respect to the quadratic form Q.
+ * If during generation the distance is too large, s0 and s1 are untouched and
+ * 0 is returned; the caller should then try again. Otherwise, 1 is returned
+ * and (s0, s1) contain a valid signature for (h0, h1).
  *
- * If during generation it is not short enough, s0 and s1 are untouched and 0
- * is returned; the caller should then try again.
- * Otherwise, 1 is returned and s0, s1 contain a valid signature for hm.
- *
- * Note: tmp[] must have space for at least 40 * 2^logn bytes.
+ * Note: tmp[] must have space for at least 48 * 2^logn bytes.
  */
-void
-Zf(complete_sign)(inner_shake256_context *rng,
+void Zf(complete_sign)(inner_shake256_context *rng,
 	int16_t *restrict s0, int16_t *restrict s1,
 	const int8_t *restrict f, const int8_t *restrict g,
 	const int8_t *restrict F, const int8_t *restrict G,
-	const int8_t *restrict h0, const int8_t *restrict h1, unsigned logn,
-	uint8_t *restrict tmp);
+	const uint8_t *restrict h, unsigned logn, uint8_t *restrict tmp);
 
 /*
- * Similar to Zf(complete_sign), except that s0 is not returned.
- * If Zf(sign) returns 1, a signature is only valid with high probability.
+ * Similar to Zf(complete_sign), except that only s1 is returned, but not s0.
+ * However, it is guaranteed that simple rounding will recover s0 succesfully
+ * when 1 is returned.
  *
- * Note: tmp[] must have space for at least 40 * 2^logn bytes.
+ * Note: tmp[] must have space for at least 48 * 2^logn bytes.
  */
-void
-Zf(sign)(inner_shake256_context *rng, int16_t *restrict sig,
+void Zf(sign_dyn)(inner_shake256_context *rng, int16_t *restrict sig,
 	const int8_t *restrict f, const int8_t *restrict g,
 	const int8_t *restrict F, const int8_t *restrict G,
-	const int8_t *restrict h0, const int8_t *restrict h1, unsigned logn,
-	uint8_t *restrict tmp);
+	const uint8_t *restrict h, unsigned logn, uint8_t *restrict tmp);
 
 /*
- * Similar to Zf(sign), except that the signature is always valid when 1 is
- * returned.
- *
- * Note: tmp[] must have space for at least 24 * 2^logn bytes.
- */
-void
-Zf(guaranteed_sign)(inner_shake256_context *rng, int16_t *restrict sig,
-	const int8_t *restrict f, const int8_t *restrict g,
-	const int8_t *restrict F, const int8_t *restrict G,
-	const fpr *restrict q00, const int8_t *restrict h0,
-	const int8_t *restrict h1, unsigned logn, uint8_t *restrict tmp);
-
-/*
- * Required space in terms of number of fpr values for an expanded secret key,
- * which can be used in Zf(fft_sign).
+ * Required space in terms of number of floating point values for an expanded
+ * secret key when calling Zf(expand_seckey). This expanded secret key can be
+ * used in Zf(sign).
  */
 #define EXPANDED_SECKEY_SIZE(logn) (9u << ((logn) - 1))
 
 /*
  * Expands a secret key given by the key generation, to produce the secret key
- * basis [[f,g], [F,G]] in FFT-representation, as well as 1/(f^* f + g^* g).
+ * basis [[f,g], [F,G]] and 1/(f^* f + g^* g) in FFT-representation.
  *
- * Note: expanded_seckey[] must have space for at least 4.5 2^logn fprs, since
- * there are 4 polynomials in the basis and 1/(f* f + g* g) is self-adjoint.
+ * Note: expanded_seckey[] must have space for at least
+ * EXPANDED_SECKEY_SIZE(logn) floating point values, since there are 4
+ * polynomials in the basis and 1/(f* f + g* g) is self-adjoint.
  */
-void
-Zf(expand_seckey)(fpr *restrict expanded_seckey,
+void Zf(expand_seckey)(fpr *restrict expanded_seckey,
 	const int8_t *f, const int8_t *g, const int8_t *F, unsigned logn);
 
 /*
- * Generates a signature of a message with hash h[] (of n / 8 bytes long),
+ * Generates a signature of a message with hash h[] (of n / 4 bytes long),
  * which is guaranteed to be a valid signature.
  *
- * Note: tmp[] must have space for at least 26 * 2^logn bytes.
+ * Note: tmp[] must have space for at least 24 * 2^logn bytes.
  */
-void
-Zf(fft_sign)(inner_shake256_context *rng, int16_t *restrict sig,
+void Zf(sign)(inner_shake256_context *rng, int16_t *restrict sig,
 	const fpr *restrict expanded_seckey, const uint8_t *restrict h,
 	unsigned logn, uint8_t *restrict tmp);
 
@@ -978,8 +956,7 @@ Zf(fft_sign)(inner_shake256_context *rng, int16_t *restrict sig,
  * key, which is q00, q10 and q11 in FFT representation.
  * Note here that q11 is reconstructed using the rule q00 q11 - q10 q01 = 1.
  */
-void
-Zf(complete_pubkey)(const int16_t *q00_num, const int16_t *q10_num,
+void Zf(complete_pubkey)(const int16_t *q00_num, const int16_t *q10_num,
 	fpr *q00, fpr *q10, fpr *q11, unsigned logn);
 
 /*
@@ -990,7 +967,7 @@ Zf(complete_pubkey)(const int16_t *q00_num, const int16_t *q10_num,
  * Note: tmp[] must have space for at least 16 * 2^logn bytes.
  */
 int
-Zf(complete_verify)(const int8_t *restrict h0, const int8_t *restrict h1,
+Zf(complete_verify)(const uint8_t *restrict h,
 	const int16_t *restrict s0, const int16_t *restrict s1,
 	const fpr *restrict q00, const fpr *restrict q10, const fpr *restrict q11,
 	unsigned logn, uint8_t *restrict tmp);
@@ -1001,7 +978,7 @@ Zf(complete_verify)(const int8_t *restrict h0, const int8_t *restrict h1,
  *     s0 = round((hm%2) / 2 - s1 q10 / q00).
  */
 int
-Zf(verify_simple_rounding)(const int8_t *restrict h0, const int8_t *restrict h1,
+Zf(verify_simple_rounding)(const uint8_t *restrict h,
 	int16_t *restrict s0, const int16_t *restrict s1,
 	const fpr *restrict q00, const fpr *restrict q10, const fpr *restrict q11,
 	unsigned logn, uint8_t *restrict tmp);
@@ -1014,7 +991,7 @@ Zf(verify_simple_rounding)(const int8_t *restrict h0, const int8_t *restrict h1,
  * the GSO'ed basis generated by (f, g) and (F, G).
  */
 int
-Zf(verify_nearest_plane)(const int8_t *restrict h0, const int8_t *restrict h1,
+Zf(verify_nearest_plane)(const uint8_t *restrict h,
 	int16_t *restrict s0, const int16_t *restrict s1,
 	const fpr *restrict q00, const fpr *restrict q10, const fpr *restrict q11,
 	unsigned logn, uint8_t *restrict tmp);

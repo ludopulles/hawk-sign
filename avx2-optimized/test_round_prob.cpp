@@ -24,21 +24,6 @@ void randombytes(unsigned char *x, unsigned long long xlen) {
 		*x = ((unsigned char) rand());
 }
 
-void random_hash(int8_t *h, unsigned logn) {
-	assert(RAND_MAX == INT_MAX); // rand() should generate 31 random bits
-	int x = rand();
-	size_t RAND_BITS = 31, rand_bits = RAND_BITS;
-	for (size_t u = MKN(logn); u -- > 0; ) {
-		if (rand_bits == 0) {
-			x = rand();
-			rand_bits = RAND_BITS;
-		}
-		h[u] = (x & 1);
-		x >>= 1;
-		rand_bits--;
-	}
-}
-
 ll time_diff(const struct timeval *begin, const struct timeval *end) {
 	return 1000000LL * (end->tv_sec - begin->tv_sec) + (end->tv_usec - begin->tv_usec);
 }
@@ -57,7 +42,7 @@ void output_poly(int16_t *x) {
 
 const int num_samples = 512;
 
-void measure_sign_speed(fpr isigma_kg, fpr isigma_sig, uint32_t bound)
+void measure_sign_speed()
 {
 	uint8_t b[48 << logn];
 	int8_t f[n], g[n], F[n], G[n], h[n];
@@ -79,10 +64,10 @@ void measure_sign_speed(fpr isigma_kg, fpr isigma_sig, uint32_t bound)
 
 	// One key generation
 	for (int rep = 0; rep < num_samples; rep++) {
-		Zf(keygen)(&sc, f, g, F, G, q00, q10, q11, isigma_kg, logn, b);
+		Zf(keygen)(&sc, f, g, F, G, q00, q10, q11, logn, b);
 
-		random_hash(h, logn);
-		Zf(complete_sign)(&sc, s0, s1, f, g, F, G, h, isigma_sig, bound, logn, b);
+		inner_shake256_extract(&sc, h, sizeof h);
+		Zf(complete_sign)(&sc, s0, s1, f, g, F, G, h, logn, b);
 
 		// calculate error (s0 q00 + s1 q10) / q00
 		for (size_t u = 0; u < n; u++) {
@@ -119,10 +104,6 @@ void measure_sign_speed(fpr isigma_kg, fpr isigma_sig, uint32_t bound)
 
 }
 
-constexpr fpr sigma_kg  = { v: 1.425 };
-constexpr fpr sigma_sig = { v: 1.292 };
-constexpr fpr verif_margin = { v: 1.1 };
-
 int main() {
 	// set seed
 	struct timeval tv;
@@ -131,7 +112,6 @@ int main() {
 	printf("Seed: %u\n", seed);
 	srand(seed);
 
-	uint32_t bound = fpr_floor(fpr_mul(fpr_sqr(fpr_mul(verif_margin, fpr_double(sigma_sig))), fpr_double(fpr_of(n))));
-	measure_sign_speed(fpr_inv(sigma_kg), fpr_inv(sigma_sig), bound);
+	measure_sign_speed();
 	return 0;
 }
