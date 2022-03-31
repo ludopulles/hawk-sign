@@ -116,11 +116,13 @@ void test_valid_signature(uint32_t bound) {
 		uint64_t dummy_u64;
 		fpr dummy_fpr;
 	} tmp;
-	int8_t f[512], g[512], F[512], G[512], h0[512], h1[512];
+	int8_t f[512], g[512], F[512], G[512];
+	uint8_t h[512/4];
 	fpr q00[512], q10[512], q11[512];
-	int16_t sig[512], s0[512];
+	int16_t sig[512];
 	unsigned char seed[48];
 	inner_shake256_context sc;
+	fpr exp_sk[EXPANDED_SECKEY_SIZE(logn)]; // if logn is not known at compile-time, take fixed value
 
 	// Initialize a RNG.
 	randombytes(seed, sizeof seed);
@@ -130,19 +132,19 @@ void test_valid_signature(uint32_t bound) {
 
 	// Generate key pair.
 	Zf(keygen)(&sc, f, g, F, G, q00, q10, q11, logn, tmp.b);
+	Zf(expand_seckey)(exp_sk, f, g, F, logn);
 
 	for (int rep = 0; rep < 1000; rep++) {
 		// make a signature of a random message...
-		random_hash(h0, logn);
-		random_hash(h1, logn);
+		randombytes(h, n / 4);
 
 		// Compute the signature.
-		Zf(sign)(&sc, sig, f, g, F, G, h0, h1, bound, logn, tmp.b);
+		Zf(fft_sign)(&sc, sig, exp_sk, h, bound, logn, tmp.b);
 
-		assert(Zf(verify_simple_rounding)(h0, h1, s0, sig, q00, q10, q11, bound, logn, tmp.b));
+		assert(Zf(verify_simple_rounding_fft)(h, sig, q00, q10, q11, bound, logn, tmp.b));
 		for (size_t u = 0; u < n; u ++)
 			sig[u] = 0;
-		assert(!Zf(verify_simple_rounding)(h0, h1, s0, sig, q00, q10, q11, bound, logn, tmp.b));
+		assert(!Zf(verify_simple_rounding_fft)(h, sig, q00, q10, q11, bound, logn, tmp.b));
 	}
 
 	printf("Valid signatures were signed.\n");
@@ -157,7 +159,7 @@ int8_t valid_sigma(fpr sigma_sig) {
 int main() {
 	unsigned seed = time(NULL);
 
-	const fpr sigma_kg  = fpr_div(fpr_of(1425), fpr_of(1000));
+	// const fpr sigma_kg  = fpr_div(fpr_of(1425), fpr_of(1000));
 	const fpr sigma_sig = fpr_div(fpr_of(1292), fpr_of(1000));
 	// verif_margin ~ 1 + √(64 * ln(2) / N)   (see scheme.sage)
 	const fpr verif_margin = fpr_add(fpr_one, fpr_sqrt(fpr_mul(fpr_log2, fpr_div(fpr_of(64), fpr_of(n)))));
@@ -174,13 +176,6 @@ int main() {
 	//     >>> r = 1.425 / 1.292
 	//     >>> (1 + eps) * r**(2*d) * math.exp(-d*(r*r-1))
 	//     2.7387274647723652e-05
-
-#ifdef __AVX2__
-	const fpr sigma_FALCON = fpr_sqrt(fpr_div(fpr_of(117*117*12289), fpr_of(100*100*2*n))); // 1.17 √(q/2n)
-	printf("Sigma: %.3f vs %.3f of falcon\n", sigma_kg.v, sigma_FALCON.v);
-	printf("Verif margin: %.2f, bound: %u\n", verif_margin.v, bound);
-#else
-#endif
 
 	// sigmas used in FALCON:
 	// for (int i = 1; i <= 10; i++) printf("%d: %.2f\n", i, 1.17 * sqrt(Q / (2 << i)));

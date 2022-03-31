@@ -500,17 +500,16 @@ do_fft_sign(prng *rng, int16_t *restrict s1,
 	}
 
 	/*
-	 * In row-notation, (x0, x1) == (h0, h1) B (mod 2) holds while it also
-	 * close to (h, 0) B since the discrete gaussian distribution has small
-	 * standard deviation. Thus, (s0, s1) := ((h0, h1) - (x0, x1) B^{-1}) / 2
-	 * is a lattice point that is close to (h0, h1)/2 with respect to the
-	 * quadratic form Q.
+	 * In row-notation, (x0, x1) == (h0, h1) B (mod 2) holds while it also has
+	 * a small norm since the discrete gaussian distribution has small standard
+	 * deviation. Thus, (s0, s1) := ((h0, h1) - (x0, x1) B^{-1}) / 2 is a
+	 * lattice point that is close to (h0, h1)/2 with respect to the quadratic
+	 * form Q.
 	 *
 	 * Note: B = [[f, g], [F, G]] with det. 1 so B^{-1} = [[G, -g], [-F, f]]
 	 * yielding s1 = (h1 - (-x0 g + x1 f)) / 2.
 	 */
 	Zf(poly_neg)(tx0, logn);
-
 	Zf(poly_add_mul_fft)(tres, tx0, tx1, tg, tf, logn);
 	Zf(iFFT)(tres, logn);
 
@@ -519,26 +518,10 @@ do_fft_sign(prng *rng, int16_t *restrict s1,
 
 		h1 = h[n / 8 + u];
 		for (v = 0; v < 8; v ++, w ++) {
-			s1[w] = (int16_t)((h1 & 1) - fpr_rint(tres[w])) / 2;
+			s1[w] = ((int16_t)(h1 & 1) - fpr_rint(tres[w])) / 2;
 			h1 >>= 1;
 		}
 	}
-
-	Zf(poly_add_mul_fft)(tres, tx0, tx1, tG, tf, logn);
-	printf("Signing signature:\n");
-	for (u = 0; u < n/4; u++) printf("%u ", h[u]);
-	printf("\n");
-	for (u = 0, w = 0; w < n; u ++) {
-		uint8_t h0 = h[u];
-		for (v = 0; v < 8; v ++, w ++) {
-			int s0 = (int16_t)((h0 & 1) + fpr_rint(tres[w])) / 2;
-			printf("%d ", s0);
-			h0 >>= 1;
-		}
-	}
-	printf("\n");
-	for (u = 0; u < n; u++) printf("%d ", s1[u]);
-	printf("\n");
 
 	return 1;
 }

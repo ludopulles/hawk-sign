@@ -60,8 +60,11 @@ const size_t HAWK_MAX_PUBKEY_SIZE[10] = {
 
 // TODO: set 5 in the compress.c code (depending on logn!).
 #define SIG_LOBITS(logn) (5)
-// TODO: fix the correct bound here.
-#define L2BOUND(logn) (10000)
+
+// l2bound(logn) = floor( (verif_margin * 2 sigma_sig)^2 * 2n ).
+static const size_t l2bound[10] = {
+	0 /* unused */, 32, 64, 129, 258, 517, 1034, 2068, 4136, 8273
+};
 
 /* see hawk.h */
 void
@@ -222,12 +225,6 @@ hawk_keygen_make(shake256_context *rng, unsigned logn, void *privkey,
 		set_fpu_cw(oldcw);
 
 		sk_len = Zf(encode_seckey)(sk + 1, *privkey_len - 1, f, g, F, logn);
-
-		printf("Keygen:\n");
-		for (size_t u = 0; u < MKN(logn); u++) {
-			printf("%.2f %.2f %.2f\n",
-				*(double *)&q00[u], *(double *)&q10[u], *(double *)&q11[u]);
-		}
 
 		/*
 		 * Destroy the private key basis [[f,g], [F,G]] to store q00, q10.
@@ -418,7 +415,7 @@ hawk_sign_finish(shake256_context *rng, void *sig, size_t *sig_len,
 
 	if (sig_type == HAWK_SIG_COMPRESSED) {
 		oldcw = set_fpu_cw(2);
-		Zf(fft_sign)((inner_shake256_context *)rng, sv, expkey, hm, L2BOUND(logn), logn, atmp);
+		Zf(fft_sign)((inner_shake256_context *)rng, sv, expkey, hm, l2bound[logn], logn, atmp);
 		set_fpu_cw(oldcw);
 
 		v = Zf(encode_sig)(es + u, es_len - u, sv, logn, SIG_LOBITS(logn));
@@ -436,28 +433,25 @@ hawk_sign_finish(shake256_context *rng, void *sig, size_t *sig_len,
 	 */
 	tu = HAWK_SIG_PADDED_SIZE(logn);
 
-	for (;;) {
+	do {
 		oldcw = set_fpu_cw(2);
-		Zf(fft_sign)((inner_shake256_context *)rng, sv, expkey, hm, L2BOUND(logn), logn, atmp);
+		Zf(fft_sign)((inner_shake256_context *)rng, sv, expkey, hm, l2bound[logn], logn, atmp);
 		set_fpu_cw(oldcw);
 
 		v = Zf(encode_sig)(es + u, tu - u, sv, logn, SIG_LOBITS(logn));
-		if (v == 0) {
-			/*
-			 * Signature does not fit, loop.
-			 */
-			continue;
-		}
+		/*
+		 * If v = 0, the signature does not fit and loop.
+		 */
+	} while (v == 0);
 
-		if (u + v < tu) {
-			/*
-			 * Pad with zeros
-			 */
-			memset(es + u + v, 0, tu - (u + v));
-		}
-		*sig_len = tu;
-		return 0;
+	if (u + v < tu) {
+		/*
+		 * Pad with zeros
+		 */
+		memset(es + u + v, 0, tu - (u + v));
 	}
+	*sig_len = tu;
+	return 0;
 }
 
 /* see hawk.h */
@@ -679,15 +673,10 @@ hawk_verify_finish(const void *sig, size_t sig_len, int sig_type,
 	 */
 	Zf(complete_pubkey)(q00_num, q10_num, q00, q10, q11, logn);
 
-	for (size_t u = 0; u < MKN(logn); u++) {
-		printf("%.2f %.2f %.2f\n",
-			*(double *)&q00[u], *(double *)&q10[u], *(double *)&q11[u]);
-	}
-
 	/*
 	 * Verify signature.
 	 */
-	if (!Zf(verify_simple_rounding_fft)(hm, sv, q00, q10, q11, L2BOUND(logn),
+	if (!Zf(verify_simple_rounding_fft)(hm, sv, q00, q10, q11, l2bound[logn],
 			logn, atmp)) {
 		return HAWK_ERR_BADSIG;
 	}
