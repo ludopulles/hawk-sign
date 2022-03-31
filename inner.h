@@ -822,7 +822,7 @@ Zf(keygen)(inner_shake256_context *rng,
  * Compute a signature of hm: the signature is a vector (s0, s1) that is close
  * to (hm/2, 0) with respect to the quadratic form Q.
  * Here 'close' means that the squared l2-norm of (2 s0 - hm, 2 s1) wrt Q
- * is at most `bound`.
+ * is at most a specified bound depending on logn.
  *
  * If during generation it is not short enough, s0 and s1 are untouched and 0
  * is returned; the caller should then try again.
@@ -835,8 +835,8 @@ Zf(complete_sign)(inner_shake256_context *rng,
 	int16_t *restrict s0, int16_t *restrict s1,
 	const int8_t *restrict f, const int8_t *restrict g,
 	const int8_t *restrict F, const int8_t *restrict G,
-	const int8_t *restrict h0, const int8_t *restrict h1, uint32_t bound,
-	unsigned logn, uint8_t *restrict tmp);
+	const int8_t *restrict h0, const int8_t *restrict h1, unsigned logn,
+	uint8_t *restrict tmp);
 
 /*
  * Similar to Zf(complete_sign), except that s0 is not returned.
@@ -848,8 +848,8 @@ void
 Zf(sign)(inner_shake256_context *rng, int16_t *restrict sig,
 	const int8_t *restrict f, const int8_t *restrict g,
 	const int8_t *restrict F, const int8_t *restrict G,
-	const int8_t *restrict h0, const int8_t *restrict h1, uint32_t bound,
-	unsigned logn, uint8_t *restrict tmp);
+	const int8_t *restrict h0, const int8_t *restrict h1, unsigned logn,
+	uint8_t *restrict tmp);
 
 /*
  * Similar to Zf(sign), except that the signature is always valid when 1 is
@@ -862,14 +862,13 @@ Zf(guaranteed_sign)(inner_shake256_context *rng, int16_t *restrict sig,
 	const int8_t *restrict f, const int8_t *restrict g,
 	const int8_t *restrict F, const int8_t *restrict G,
 	const fpr *restrict q00, const int8_t *restrict h0,
-	const int8_t *restrict h1, uint32_t bound, unsigned logn,
-	uint8_t *restrict tmp);
+	const int8_t *restrict h1, unsigned logn, uint8_t *restrict tmp);
 
 /*
  * Required space in terms of number of fpr values for an expanded secret key,
  * which can be used in Zf(fft_sign).
  */
-#define EXPANDED_SECKEY_SIZE(logn) (9 << ((logn) - 1))
+#define EXPANDED_SECKEY_SIZE(logn) (9u << ((logn) - 1))
 
 /*
  * Expands a secret key given by the key generation, to produce the secret key
@@ -891,7 +890,7 @@ Zf(expand_seckey)(fpr *restrict expanded_seckey,
 void
 Zf(fft_sign)(inner_shake256_context *rng, int16_t *restrict sig,
 	const fpr *restrict expanded_seckey, const uint8_t *restrict h,
-	uint32_t bound, unsigned logn, uint8_t *restrict tmp);
+	unsigned logn, uint8_t *restrict tmp);
 
 /* ==================================================================== */
 /*
@@ -910,7 +909,7 @@ Zf(complete_pubkey)(const int16_t *q00_num, const int16_t *q10_num,
 /*
  * Verify if a signature (s0, s1) is valid for a message hm.
  * The signature is accepted iff the squared l2-norm of (2s0 - hm, 2s1) is at
- * most bound.
+ * most a specified bound depending on logn.
  *
  * Note: tmp[] must have space for at least 16 * 2^logn bytes.
  */
@@ -918,7 +917,7 @@ int
 Zf(complete_verify)(const int8_t *restrict h0, const int8_t *restrict h1,
 	const int16_t *restrict s0, const int16_t *restrict s1,
 	const fpr *restrict q00, const fpr *restrict q10, const fpr *restrict q11,
-	uint32_t bound, unsigned logn, uint8_t *restrict tmp);
+	unsigned logn, uint8_t *restrict tmp);
 
 /*
  * Similar to Zf(complete_verify), except that it takes s1 as signature,
@@ -929,7 +928,7 @@ int
 Zf(verify_simple_rounding)(const int8_t *restrict h0, const int8_t *restrict h1,
 	int16_t *restrict s0, const int16_t *restrict s1,
 	const fpr *restrict q00, const fpr *restrict q10, const fpr *restrict q11,
-	uint32_t bound, unsigned logn, uint8_t *restrict tmp);
+	unsigned logn, uint8_t *restrict tmp);
 
 /*
  * Similar to Zf(complete_verify), except that it takes s1 as signature,
@@ -942,20 +941,20 @@ int
 Zf(verify_nearest_plane)(const int8_t *restrict h0, const int8_t *restrict h1,
 	int16_t *restrict s0, const int16_t *restrict s1,
 	const fpr *restrict q00, const fpr *restrict q10, const fpr *restrict q11,
-	uint32_t bound, unsigned logn, uint8_t *restrict tmp);
+	unsigned logn, uint8_t *restrict tmp);
 
 /*
  * Verify if a signature (s0, s1) is valid for a hashed message h of length
  * n / 4 bytes, where s0 is reconstructed with simple rounding.
  * The signature is accepted iff the squared l2-norm of (h0 - 2s0, h1 - 2s1) is
- * at most bound wrt quadratic form Q.
+ * at most a specified bound depending on logn wrt quadratic form Q.
  *
  * Note: tmp[] must have space for at least 16 * 2^logn bytes.
  */
 int
 Zf(verify_simple_rounding_fft)(const uint8_t *restrict h,
 	const int16_t *restrict s1, const fpr *restrict q00,
-	const fpr *restrict q10, const fpr *restrict q11, uint32_t bound,
-	unsigned logn, uint8_t *restrict tmp);
+	const fpr *restrict q10, const fpr *restrict q11, unsigned logn,
+	uint8_t *restrict tmp);
 
 #endif

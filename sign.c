@@ -34,7 +34,24 @@
 
 // =============================================================================
 
-/** To generate the values in the table below, run the following code:
+/*
+ * This number indicates the maximum l2-norm that is allowed for the small
+ * error (from a valid signature) that is chosen around the target point during
+ * signature generation.
+ * The coefficients of this error are distributed according to a discrete
+ * gaussian over the integers that have the same parity as the target
+ * coefficient and with standard deviation 2 sigma_sig. To compute these
+ * values, use:
+ *
+ *     l2bound(logn) = floor( (verif_margin * 2 sigma_sig)^2 * 2n ).
+ *
+ * Here, we have taken verif_margin = 1.1 and sigma_sig = 1.292.
+ */
+static const uint32_t l2bound[10] = {
+	0 /* unused */, 32, 64, 129, 258, 517, 1034, 2068, 4136, 8273
+};
+
+/* To generate the values in the table below, run the following code:
 
 #include<bits/stdc++.h>
 int main() {
@@ -174,7 +191,7 @@ sample_short(prng *rng, int8_t *restrict x0, int8_t *restrict x1,
 	const int8_t *restrict f, const int8_t *restrict g,
 	const int8_t *restrict F, const int8_t *restrict G,
 	const int8_t *restrict h0, const int8_t *restrict h1,
-	uint32_t bound, unsigned logn, uint8_t *restrict tmp)
+	unsigned logn, uint8_t *restrict tmp)
 {
 	size_t n, u;
 	int32_t norm, z;
@@ -242,7 +259,7 @@ sample_short(prng *rng, int8_t *restrict x0, int8_t *restrict x1,
 	 * For a large enough verification margin, it is unlikely that the
 	 * norm of the gaussian (x0, x1) is too large.
 	 */
-	return (uint32_t)norm <= bound;
+	return (uint32_t)norm <= l2bound[logn];
 }
 
 /*
@@ -258,7 +275,7 @@ static int
 do_sign(prng *rng, int16_t *restrict s1,
 	const int8_t *restrict f, const int8_t *restrict g,
 	const int8_t *restrict F, const int8_t *restrict G,
-	const int8_t *restrict h0, const int8_t *restrict h1, uint32_t bound,
+	const int8_t *restrict h0, const int8_t *restrict h1,
 	unsigned logn, uint8_t *restrict tmp)
 {
 	size_t n, u;
@@ -272,7 +289,7 @@ do_sign(prng *rng, int16_t *restrict s1,
 	x0 = (int8_t *)tmp;
 	x1 = x0 + n;
 
-	if (!sample_short(rng, x0, x1, f, g, F, G, h0, h1, bound, logn,
+	if (!sample_short(rng, x0, x1, f, g, F, G, h0, h1, logn,
 			(uint8_t *)(x1 + n))) {
 		return 0;
 	}
@@ -316,7 +333,7 @@ do_guaranteed_sign(prng *rng, int16_t *restrict s1,
 	const int8_t *restrict f, const int8_t *restrict g,
 	const int8_t *restrict F, const int8_t *restrict G,
 	const fpr *restrict q00, const int8_t *restrict h0, const int8_t *restrict h1,
-	uint32_t bound, unsigned logn, uint8_t *restrict tmp)
+	unsigned logn, uint8_t *restrict tmp)
 {
 	size_t n, u;
 	int8_t *x0, *x1;
@@ -332,7 +349,7 @@ do_guaranteed_sign(prng *rng, int16_t *restrict s1,
 	x0 = (int8_t *)tmp;
 	x1 = x0 + n;
 
-	if (!sample_short(rng, x0, x1, f, g, F, G, h0, h1, bound, logn,
+	if (!sample_short(rng, x0, x1, f, g, F, G, h0, h1, logn,
 			(uint8_t*)(x1 + n))) {
 		return 0;
 	}
@@ -387,7 +404,7 @@ do_guaranteed_sign(prng *rng, int16_t *restrict s1,
 static int
 do_fft_sign(prng *rng, int16_t *restrict s1,
 	const fpr *restrict expanded_seckey, const uint8_t *restrict h,
-	uint32_t bound, unsigned logn, uint8_t *restrict tmp)
+	unsigned logn, uint8_t *restrict tmp)
 {
 	size_t n, u, v, w;
 	int8_t *x0, *x1;
@@ -435,7 +452,7 @@ do_fft_sign(prng *rng, int16_t *restrict s1,
 	Zf(FFT)(tx0, logn);
 	Zf(FFT)(tx1, logn);
 
-	/**
+	/*
 	 * First, calculate the 0th component of (h0, h1) B, and sample x0.
 	 */
 	Zf(poly_add_mul_fft)(tres, tx0, tx1, tf, tF, logn);
@@ -448,7 +465,7 @@ do_fft_sign(prng *rng, int16_t *restrict s1,
 		norm += z*z;
 	}
 
-	/**
+	/*
 	 * Second, calculate the 1th component of (h0, h1) B, and sample x1.
 	 */
 	Zf(poly_add_mul_fft)(tres, tx0, tx1, tg, tG, logn);
@@ -468,7 +485,7 @@ do_fft_sign(prng *rng, int16_t *restrict s1,
 	 * For a large enough verification margin, it is unlikely that the
 	 * norm of the gaussian (x0, x1) is too large.
 	 */
-	if ((uint32_t)norm >= bound) {
+	if ((uint32_t)norm > l2bound[logn]) {
 		// Norm is too large, so signature would not be valid.
 		return 0;
 	}
@@ -478,7 +495,7 @@ do_fft_sign(prng *rng, int16_t *restrict s1,
 	Zf(FFT)(tx0, logn);
 	Zf(FFT)(tx1, logn);
 
-	/**
+	/*
 	 * Calculate the rounding errors that occur when we want to recover s0 from
 	 * s1 during verification of this signature. These errors should be of
 	 * absolute value at most 1/2.
@@ -527,8 +544,8 @@ do_fft_sign(prng *rng, int16_t *restrict s1,
 }
 
 /*
- * Compute signature of (h0, h1): a vector (s0, s1) that is close to (h0, h1)/2 wrt Q.
- * If 1 is returned, (s0, s1) is a valid signature.
+ * Compute signature of (h0, h1): a vector (s0, s1) that is close to
+ * (h0, h1)/2 wrt Q. If 1 is returned, (s0, s1) is a valid signature.
  *
  * Note: tmp[] must have space for at least 50 * 2^logn bytes
  */
@@ -537,8 +554,8 @@ do_complete_sign(prng *rng,
 	int16_t *restrict s0, int16_t *restrict s1,
 	const int8_t *restrict f, const int8_t *restrict g,
 	const int8_t *restrict F, const int8_t *restrict G,
-	const int8_t *restrict h0, const int8_t *restrict h1, uint32_t bound,
-	unsigned logn, uint8_t *restrict tmp)
+	const int8_t *restrict h0, const int8_t *restrict h1, unsigned logn,
+	uint8_t *restrict tmp)
 {
 	size_t n, u;
 	int8_t *x0, *x1;
@@ -553,7 +570,7 @@ do_complete_sign(prng *rng,
 	x0 = (int8_t *)tmp;
 	x1 = x0 + n;
 
-	if (!sample_short(rng, x0, x1, f, g, F, G, h0, h1, bound, logn,
+	if (!sample_short(rng, x0, x1, f, g, F, G, h0, h1, logn,
 			(uint8_t *)(x1 + n))) {
 		return 0;
 	}
@@ -610,12 +627,12 @@ Zf(sign)(inner_shake256_context *rng, int16_t *restrict sig,
 	const int8_t *restrict f, const int8_t *restrict g,
 	const int8_t *restrict F, const int8_t *restrict G,
 	const int8_t *restrict h0, const int8_t *restrict h1,
-	uint32_t bound, unsigned logn, uint8_t *restrict tmp)
+	unsigned logn, uint8_t *restrict tmp)
 {
 	prng p;
 	do {
 		Zf(prng_init)(&p, rng);
-	} while (!do_sign(&p, sig, f, g, F, G, h0, h1, bound, logn, tmp));
+	} while (!do_sign(&p, sig, f, g, F, G, h0, h1, logn, tmp));
 }
 
 /* see inner.h */
@@ -624,13 +641,13 @@ Zf(guaranteed_sign)(inner_shake256_context *rng, int16_t *restrict sig,
 	const int8_t *restrict f, const int8_t *restrict g,
 	const int8_t *restrict F, const int8_t *restrict G,
 	const fpr *restrict q00, const int8_t *restrict h0,
-	const int8_t *restrict h1, uint32_t bound, unsigned logn,
+	const int8_t *restrict h1, unsigned logn,
 	uint8_t *restrict tmp)
 {
 	prng p;
 	do {
 		Zf(prng_init)(&p, rng);
-	} while (!do_guaranteed_sign(&p, sig, f, g, F, G, q00, h0, h1, bound, logn, tmp));
+	} while (!do_guaranteed_sign(&p, sig, f, g, F, G, q00, h0, h1, logn, tmp));
 }
 
 /* see inner.h */
@@ -640,13 +657,12 @@ Zf(complete_sign)(inner_shake256_context *rng,
 	const int8_t *restrict f, const int8_t *restrict g,
 	const int8_t *restrict F, const int8_t *restrict G,
 	const int8_t *restrict h0, const int8_t *restrict h1,
-	uint32_t bound, unsigned logn, uint8_t *restrict tmp)
+	unsigned logn, uint8_t *restrict tmp)
 {
 	prng p;
 	do {
 		Zf(prng_init)(&p, rng);
-	} while (!do_complete_sign(&p, s0, s1, f, g, F, G,
-			h0, h1, bound, logn, tmp));
+	} while (!do_complete_sign(&p, s0, s1, f, g, F, G, h0, h1, logn, tmp));
 }
 
 
@@ -681,7 +697,7 @@ Zf(expand_seckey)(fpr *restrict expanded_seckey,
 	Zf(FFT)(bg, logn);
 	Zf(FFT)(bF, logn);
 
-	/**
+	/*
 	 * Compute G = (1 + gF) / f
 	 */
 	Zf(poly_prod_fft)(bG, bg, bF, logn);
@@ -696,11 +712,11 @@ Zf(expand_seckey)(fpr *restrict expanded_seckey,
 void
 Zf(fft_sign)(inner_shake256_context *rng, int16_t *restrict sig,
 	const fpr *restrict expanded_seckey, const uint8_t *restrict h,
-	uint32_t bound, unsigned logn, uint8_t *restrict tmp)
+	unsigned logn, uint8_t *restrict tmp)
 {
 	prng p;
 	do {
 		Zf(prng_init)(&p, rng);
-	} while (!do_fft_sign(&p, sig, expanded_seckey, h, bound, logn, tmp));
+	} while (!do_fft_sign(&p, sig, expanded_seckey, h, logn, tmp));
 }
 

@@ -126,7 +126,7 @@ begin_sign:
 	Zf(FFT)(tx0, logn);
 	Zf(FFT)(tx1, logn);
 
-	/**
+	/*
 	 * First, calculate the 0th component of (h0, h1) B, and sample x0.
 	 */
 	Zf(poly_add_mul_fft)(tres, tx0, tx1, tf, tF, logn);
@@ -139,7 +139,7 @@ begin_sign:
 		norm += z*z;
 	}
 
-	/**
+	/*
 	 * Second, calculate the 1th component of (h0, h1) B, and sample x1.
 	 */
 	Zf(poly_add_mul_fft)(tres, tx0, tx1, tg, tG, logn);
@@ -171,7 +171,7 @@ begin_sign:
 	Zf(FFT)(tx0, logn);
 	Zf(FFT)(tx1, logn);
 
-	/**
+	/*
 	 * Calculate the rounding errors that occur when we want to recover s0 from
 	 * s1 during verification of this signature. These errors should be of
 	 * absolute value at most 1/2.

@@ -56,15 +56,10 @@ const size_t HAWK_MAX_PUBKEY_SIZE[10] = {
  * The number of bytes that are required for the hash when generating a
  * signature from the hash-then-sign principle on which Hawk is based.
  */
-#define HASH_OUTPUT_SIZE(logn) (logn <= 2 ? 1U : (1U << (logn-2)))
+#define NUM_HASH_BYTES(logn) ((logn) <= 2 ? 1u : (1u << ((logn) - 2)))
 
 // TODO: set 5 in the compress.c code (depending on logn!).
 #define SIG_LOBITS(logn) (5)
-
-// l2bound(logn) = floor( (verif_margin * 2 sigma_sig)^2 * 2n ).
-static const size_t l2bound[10] = {
-	0 /* unused */, 32, 64, 129, 258, 517, 1034, 2068, 4136, 8273
-};
 
 /* see hawk.h */
 void
@@ -395,7 +390,7 @@ hawk_sign_finish(shake256_context *rng, void *sig, size_t *sig_len,
 
 	n = MKN(logn);
 	hm = (uint8_t *)tmp;
-	sv = (int16_t *)align_u16(hm + HASH_OUTPUT_SIZE(logn));
+	sv = (int16_t *)align_u16(hm + NUM_HASH_BYTES(logn));
 	atmp = align_u64(sv + n);
 
 	/*
@@ -403,7 +398,7 @@ hawk_sign_finish(shake256_context *rng, void *sig, size_t *sig_len,
 	 */
 	shake256_flip(hash_data);
 	inner_shake256_extract((inner_shake256_context *)hash_data, hm,
-		HASH_OUTPUT_SIZE(logn));
+		NUM_HASH_BYTES(logn));
 
 	/*
 	 * Fix the first byte (containing logn) and 40 bytes for the salt first.
@@ -416,7 +411,7 @@ hawk_sign_finish(shake256_context *rng, void *sig, size_t *sig_len,
 
 	if (sig_type == HAWK_SIG_COMPRESSED) {
 		oldcw = set_fpu_cw(2);
-		Zf(fft_sign)((inner_shake256_context *)rng, sv, expkey, hm, l2bound[logn], logn, atmp);
+		Zf(fft_sign)((inner_shake256_context *)rng, sv, expkey, hm, logn, atmp);
 		set_fpu_cw(oldcw);
 
 		v = Zf(encode_sig)(es + u, es_len - u, sv, logn, SIG_LOBITS(logn));
@@ -436,7 +431,7 @@ hawk_sign_finish(shake256_context *rng, void *sig, size_t *sig_len,
 
 	do {
 		oldcw = set_fpu_cw(2);
-		Zf(fft_sign)((inner_shake256_context *)rng, sv, expkey, hm, l2bound[logn], logn, atmp);
+		Zf(fft_sign)((inner_shake256_context *)rng, sv, expkey, hm, logn, atmp);
 		set_fpu_cw(oldcw);
 
 		v = Zf(encode_sig)(es + u, tu - u, sv, logn, SIG_LOBITS(logn));
@@ -548,7 +543,7 @@ hawk_verify_start(shake256_context *hash_data, const void *sig, size_t sig_len)
 	}
 	shake256_init(hash_data);
 	/*
-	 * First inject the salt in the 
+	 * First inject the salt in the SHAKE context.
 	 */
 	shake256_inject(hash_data, (const uint8_t *)sig + 1, 40);
 	return 0;
@@ -615,7 +610,7 @@ hawk_verify_finish(const void *sig, size_t sig_len, int sig_type,
 
 	n = MKN(logn);
 	hm = (uint8_t *)tmp;
-	sv = (int16_t *)align_u16(hm + HASH_OUTPUT_SIZE(logn));
+	sv = (int16_t *)align_u16(hm + NUM_HASH_BYTES(logn));
 
 	q00_num = sv + n;
 	q10_num = q00_num + n;
@@ -666,7 +661,7 @@ hawk_verify_finish(const void *sig, size_t sig_len, int sig_type,
 	 */
 	shake256_flip(hash_data);
 	inner_shake256_extract((inner_shake256_context *)hash_data, hm,
-		HASH_OUTPUT_SIZE(logn));
+		NUM_HASH_BYTES(logn));
 
 	/*
 	 * Construct full public key.
@@ -676,8 +671,7 @@ hawk_verify_finish(const void *sig, size_t sig_len, int sig_type,
 	/*
 	 * Verify signature.
 	 */
-	if (!Zf(verify_simple_rounding_fft)(hm, sv, q00, q10, q11, l2bound[logn],
-			logn, atmp)) {
+	if (!Zf(verify_simple_rounding_fft)(hm, sv, q00, q10, q11, logn, atmp)) {
 		return HAWK_ERR_BADSIG;
 	}
 	return 0;

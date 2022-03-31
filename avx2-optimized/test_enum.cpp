@@ -159,7 +159,7 @@ size_t Zf(huffman_encode)(void *out, size_t max_out_len, const int16_t *x, unsig
 }
 
 
-/** see codec.c, Zf(comp_encode) */
+/* see codec.c, Zf(comp_encode) */
 size_t
 Zf(encode_q00)(
 	void *out, size_t max_out_len,
@@ -284,7 +284,7 @@ Zf(encode_q00)(
 	return v;
 }
 
-/** see codec.c, Zf(comp_encode) */
+/* see codec.c, Zf(comp_encode) */
 size_t
 Zf(encode_q10)(void *out, size_t max_out_len, const int16_t *x, unsigned logn, const int lim, const int lo_bits) {
 	uint8_t *buf = (uint8_t *)out;

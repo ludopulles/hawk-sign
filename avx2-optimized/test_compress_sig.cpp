@@ -91,7 +91,7 @@ struct WorkerResult {
 
 const int n_repetitions = 100;
 
-WorkerResult measure_signatures(uint32_t bound) {
+WorkerResult measure_signatures() {
 	uint8_t b[50 << logn];
 	int8_t f[n], g[n], F[n], G[n], h0[n], h1[n];
 	int16_t s0[n], s1[n];
@@ -115,7 +115,7 @@ WorkerResult measure_signatures(uint32_t bound) {
 		random_hash(h1, logn);
 
 		// Compute the signature.
-		Zf(complete_sign)(&sc, s0, s1, f, g, F, G, h0, h1, bound, logn, b);
+		Zf(complete_sign)(&sc, s0, s1, f, g, F, G, h0, h1, logn, b);
 
 		for (int lobits = 3; lobits < 10; lobits++) {
 			size_t sz = Zf(encode_sig)(NULL, 0, s1, logn, lobits);
@@ -138,12 +138,8 @@ mutex mx;
 constexpr fpr sigma_sig = { v: 1.292 };
 constexpr fpr verif_margin = { v: 1.1 };
 
-uint32_t getbound() {
-	return fpr_floor(fpr_mul(fpr_sqr(fpr_mul(verif_margin, fpr_double(sigma_sig))), fpr_double(fpr_of(n))));
-}
-
 void work() {
-	WorkerResult result = measure_signatures(getbound());
+	WorkerResult result = measure_signatures();
 
 	{
 		lock_guard<mutex> guard(mx);

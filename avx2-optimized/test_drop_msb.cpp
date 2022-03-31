@@ -190,7 +190,7 @@ WorkerResult measure_signatures(fpr isigma_kg, fpr isigma_sig, uint32_t bound)
 		assert(Zf(verify_simple_rounding)(h, s0, s1, q00, q10, q11, bound, logn, b));
 		assert(Zf(verify_nearest_plane)(h, s0, s1, q00, q10, q11, bound, logn, b));
 
-		/**
+		/*
 		 * Pretend, we are dropping the most significant bits of s1
 		 * However, Babai's NP is deterministic and translation invariant,
 		 * so adding SCALE * f(X) to s1(X) does not change the outcome: 

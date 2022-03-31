@@ -10,7 +10,7 @@ void randombytes(unsigned char *x, unsigned long long xlen) {
 }
 
 
-/** To generate the values in the table below, run the following code:
+/* To generate the values in the table below, run the following code:
 
 #include<bits/stdc++.h>
 int main() {

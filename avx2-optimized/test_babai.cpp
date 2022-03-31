@@ -212,7 +212,7 @@ Zf(huffman_encode_large)(void *out, size_t max_out_len, const int16_t *x,
 }
 
 
-/** see codec.c, Zf(comp_encode) */
+/* see codec.c, Zf(comp_encode) */
 size_t
 Zf(encode_q10)(void *out, size_t max_out_len, const int16_t *x,
 	unsigned logn, const int lim, const int lo_bits)

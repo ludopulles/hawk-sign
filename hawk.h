@@ -357,7 +357,8 @@ extern const size_t HAWK_MAX_PUBKEY_SIZE[10];
  * Temporary buffer size for generating a signature with an expanded key.
  */
 #define HAWK_TMPSIZE_SIGN(logn) \
-	((logn) <= 3 ? 1U : (1U << ((logn)-3))) + (2u << (logn)) + (26u << (logn)) + 7
+	(((logn) <= 2 ? 1u : (1u << ((logn) - 2))) \
+	+ (2u << (logn)) + (26u << (logn)) + 7)
 	// ((50u << (logn)) + 7)
 
 /*
@@ -376,7 +377,8 @@ extern const size_t HAWK_MAX_PUBKEY_SIZE[10];
  * Temporary buffer size for verifying a signature.
  */
 #define HAWK_TMPSIZE_VERIFY(logn) \
-	(logn <= 3 ? 1U : (1U << (logn-3))) + (26u << (logn)) + (16u << (logn))
+	(((logn) <= 2 ? 1u : (1u << ((logn) - 2))) \
+	+ (26u << (logn)) + (16u << (logn)))
 
 /* ==================================================================== */
 /*

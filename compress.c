@@ -483,7 +483,7 @@ Zf(encode_pubkey)(void *out, size_t max_out_len,
 	v = 0;
 
 
-	/**
+	/*
 	 * Encode q00.
 	 * The first value of q00 is of the order sigma_pk^2 2n,
 	 * but definitely < 2^16 when sigma_pk = 1.425 and n = 512, by the standard
@@ -539,7 +539,7 @@ Zf(encode_pubkey)(void *out, size_t max_out_len,
 		}
 	}
 
-	/**
+	/*
 	 * Encode q10.
 	 */
 	for (u = 0; u < n; u ++) {
@@ -687,7 +687,7 @@ Zf(decode_pubkey)(int16_t *q00, int16_t *q10,
 		q00[u] = -q00[n - u];
 	}
 
-	/**
+	/*
 	 * Decode q10.
 	 */
 	for (u = 0; u < n; u ++) {

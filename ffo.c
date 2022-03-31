@@ -273,7 +273,7 @@ Zf(ffBabai_reduce)(const fpr *restrict f, const fpr *restrict g,
 	// Alternative:
 	// Zf(poly_add_muladj_fft)(q, f, g, f, g, logn);
 
-	/**
+	/*
 	 * Now execute Babai with target t and Gram matrix q, where
 	 *     t = (F adj(f) + G adj(g)) / (f adj(f) + g adj(g)),
 	 *     q = f adj(f) + g adj(g).

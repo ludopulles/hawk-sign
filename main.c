@@ -59,7 +59,7 @@ void to_sage16(const char *varname, const int16_t *f, unsigned logn) {
 // =============================================================================
 const size_t logn = 9, n = MKN(logn);
 
-void benchmark(uint32_t bound) {
+void benchmark() {
 	union {
 		uint8_t b[50 * 512];
 		uint64_t dummy_u64;
@@ -101,8 +101,8 @@ void benchmark(uint32_t bound) {
 		randombytes(h, n / 4);
 
 		// Compute the signature.
-		// Zf(sign)(&sc, sig, f, g, F, G, h0, h1, bound, logn, tmp.b);
-		Zf(fft_sign)(&sc, sig, exp_sk, h, bound, logn, tmp.b);
+		// Zf(sign)(&sc, sig, f, g, F, G, h0, h1, logn, tmp.b);
+		Zf(fft_sign)(&sc, sig, exp_sk, h, logn, tmp.b);
 	}
 
 	gettimeofday(&t1, NULL);
@@ -110,7 +110,7 @@ void benchmark(uint32_t bound) {
 	printf("Lilipu sign/s = %.1f\n", sign_ps);
 }
 
-void test_valid_signature(uint32_t bound) {
+void test_valid_signature() {
 	union {
 		uint8_t b[50 * 512];
 		uint64_t dummy_u64;
@@ -139,12 +139,12 @@ void test_valid_signature(uint32_t bound) {
 		randombytes(h, n / 4);
 
 		// Compute the signature.
-		Zf(fft_sign)(&sc, sig, exp_sk, h, bound, logn, tmp.b);
+		Zf(fft_sign)(&sc, sig, exp_sk, h, logn, tmp.b);
 
-		assert(Zf(verify_simple_rounding_fft)(h, sig, q00, q10, q11, bound, logn, tmp.b));
+		assert(Zf(verify_simple_rounding_fft)(h, sig, q00, q10, q11, logn, tmp.b));
 		for (size_t u = 0; u < n; u ++)
 			sig[u] = 0;
-		assert(!Zf(verify_simple_rounding_fft)(h, sig, q00, q10, q11, bound, logn, tmp.b));
+		assert(!Zf(verify_simple_rounding_fft)(h, sig, q00, q10, q11, logn, tmp.b));
 	}
 
 	printf("Valid signatures were signed.\n");
@@ -167,8 +167,6 @@ int main() {
 	// Here, the vector (x0, x1) \in Z^{2d} is sampled from a Discrete Gaussian with sigma equal to 2*sigma_sig
 	// and lattice coset (h%2) + 2Z^{2d}, so it has a SQUARED norm of around ~(2sigma_sig)^2 * 2d.
 	// Using trace(s Q s^H) = trace(x x^H) = ||x||^2 [K:\QQ] = ||x||^2 d, we arrive at the verif_bound.
-	uint32_t bound = fpr_floor(fpr_mul(fpr_double(fpr_of(n)),
-		fpr_sqr(fpr_mul(verif_margin, fpr_double(sigma_sig)))));
 
 	// verif_margin = sigma_kg/sigma_sig:
 	// fail probability < 0.00003
@@ -184,7 +182,7 @@ int main() {
 	srand(seed);
 	// assert(valid_sigma(sigma_kg) && valid_sigma(sigma_sig));
 
-	benchmark(bound);
-	test_valid_signature(bound);
+	benchmark();
+	test_valid_signature();
 	return 0;
 }

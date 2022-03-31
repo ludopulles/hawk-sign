@@ -31,6 +31,11 @@
 
 #include "inner.h"
 
+/* see sign.c */
+static const uint32_t l2bound[10] = {
+	0 /* unused */, 32, 64, 129, 258, 517, 1034, 2068, 4136, 8273
+};
+
 /*
  * Add to a polynomial its own adjoint. This function works only in FFT
  * representation.
@@ -97,7 +102,7 @@ int
 Zf(complete_verify)(const int8_t *restrict h0, const int8_t *restrict h1,
 	const int16_t *restrict s0, const int16_t *restrict s1,
 	const fpr *restrict q00, const fpr *restrict q10, const fpr *restrict q11,
-	uint32_t bound, unsigned logn, uint8_t *restrict tmp)
+	unsigned logn, uint8_t *restrict tmp)
 {
 	size_t u, hn, n;
 	fpr *t0, *t1, trace;
@@ -107,7 +112,7 @@ Zf(complete_verify)(const int8_t *restrict h0, const int8_t *restrict h1,
 	t0 = (fpr *)tmp;
 	t1 = t0 + n;
 
-	/**
+	/*
 	 * Put (t0, t1) = (2 s0 - h0, 2 s1 - h1) in FFT representation so we can
 	 * calculate the l2-norm wrt Q.
 	 */
@@ -167,7 +172,7 @@ Zf(complete_verify)(const int8_t *restrict h0, const int8_t *restrict h1,
 	 *     `Tr(s* Q s) / n (=Tr(x^* x)/n = sum_i x_i^2) <= bound`.
 	 */
 	return fpr_lt(fpr_zero, trace) && fpr_lt(trace, fpr_ptwo31m1)
-		&& (uint32_t)fpr_rint(trace) <= bound;
+		&& (uint32_t)fpr_rint(trace) <= l2bound[logn];
 }
 
 /* see inner.h */
@@ -175,7 +180,7 @@ int
 Zf(verify_simple_rounding)(const int8_t *restrict h0, const int8_t *restrict h1,
 	int16_t *restrict s0, const int16_t *restrict s1,
 	const fpr *restrict q00, const fpr *restrict q10, const fpr *restrict q11,
-	uint32_t bound, unsigned logn, uint8_t *restrict tmp)
+	unsigned logn, uint8_t *restrict tmp)
 {
 	size_t u, n;
 	fpr *t0;
@@ -197,7 +202,7 @@ Zf(verify_simple_rounding)(const int8_t *restrict h0, const int8_t *restrict h1,
 		s0[u] = fpr_rint(fpr_add(fpr_half(fpr_of(h0[u] & 1)), t0[u]));
 	}
 
-	return Zf(complete_verify)(h0, h1, s0, s1, q00, q10, q11, bound, logn, tmp);
+	return Zf(complete_verify)(h0, h1, s0, s1, q00, q10, q11, logn, tmp);
 }
 
 /* see inner.h */
@@ -205,7 +210,7 @@ int
 Zf(verify_nearest_plane)(const int8_t *restrict h0, const int8_t *restrict h1,
 	int16_t *restrict s0, const int16_t *restrict s1,
 	const fpr *restrict q00, const fpr *restrict q10, const fpr *restrict q11,
-	uint32_t bound, unsigned logn, uint8_t *restrict tmp)
+	unsigned logn, uint8_t *restrict tmp)
 {
 	/*
 	 * This works better than simple rounding.
@@ -240,17 +245,17 @@ Zf(verify_nearest_plane)(const int8_t *restrict h0, const int8_t *restrict h1,
 		s0[u] = fpr_rint(t0[u]);
 	}
 
-	/**
+	/*
 	 * Now run the casual verification.
 	 */
-	return Zf(complete_verify)(h0, h1, s0, s1, q00, q10, q11, bound, logn, tmp);
+	return Zf(complete_verify)(h0, h1, s0, s1, q00, q10, q11, logn, tmp);
 }
 
 /* see inner.h */
 int
 Zf(verify_simple_rounding_fft)(const uint8_t *restrict h,
 	const int16_t *restrict s1, const fpr *restrict q00,
-	const fpr *restrict q10, const fpr *restrict q11, uint32_t bound,
+	const fpr *restrict q10, const fpr *restrict q11,
 	unsigned logn, uint8_t *restrict tmp)
 {
 	size_t u, v, w, hn, n;
@@ -261,7 +266,7 @@ Zf(verify_simple_rounding_fft)(const uint8_t *restrict h,
 	t0 = (fpr *)tmp;
 	t1 = t0 + n;
 
-	/**
+	/*
 	 * t1 = h1 / 2 - s1
 	 */
 	for (u = 0, w = 0; w < n; u ++ ) {
@@ -280,7 +285,7 @@ Zf(verify_simple_rounding_fft)(const uint8_t *restrict h,
 	Zf(poly_div_autoadj_fft)(t0, q00, logn); // t0 = (h1/2 - s1) q10/q00
 	Zf(iFFT)(t0, logn);
 
-	/**
+	/*
 	 * Recover s0 with s0 = round(h0/2 + (h1/2 - s1) q10 / q00).
 	 * Put (t0, t1) = (h0 / 2 - s0, h1 / 2 - s1) in FFT representation so we can
 	 * calculate the l2-norm wrt Q.
@@ -301,7 +306,7 @@ Zf(verify_simple_rounding_fft)(const uint8_t *restrict h,
 	Zf(FFT)(t0, logn);
 
 	trace = fpr_zero;
-	/**
+	/*
 	 * Calculate normalized trace( (t0, t1)^* Q (t0, t1) )
 	 * Note that the trace is by definition the sum under its n embeddings, and
 	 * the complex embeddings are exactly what the FFT give us.
@@ -341,10 +346,10 @@ Zf(verify_simple_rounding_fft)(const uint8_t *restrict h,
 	 */
 	trace = fpr_div(trace, fpr_of(n));
 
-	// We need to divide the bound by 2^2 since the 'lattice-errors' above are
-	// halved.
-	// TODO: adjust bound calculation to floor( (verif_margin sigma_sig)^2 * 2n).
-	bound /= 4;
+	/*
+	 * We need to multiply trace by 2^2 since the 'lattice-errors' above were halved.
+	 */
+	trace = fpr_mul(trace, fpr_of(4));
 
 	/*
 	 * First check whether the norm is in range [0, 2^31).
@@ -352,6 +357,6 @@ Zf(verify_simple_rounding_fft)(const uint8_t *restrict h,
 	 *     `Tr(s* Q s) / n (=Tr(x^* x)/n = sum_i x_i^2) <= bound`.
 	 */
 	return fpr_lt(fpr_zero, trace) && fpr_lt(trace, fpr_ptwo31m1)
-		&& (uint32_t)fpr_rint(trace) <= bound;
+		&& (uint32_t)fpr_rint(trace) <= l2bound[logn];
 }
 
