@@ -390,7 +390,7 @@ do_sign(prng *rng, int16_t *restrict s1,
 	unsigned logn, uint8_t *restrict tmp)
 {
 	size_t n, u;
-	const fpr *bf, *bg, *bF, *bG, *biq00;
+	const fpr *bf, *bg, *bF, *bG, *invq00;
 	fpr *x0, *x1, *res;
 
 	n = MKN(logn);
@@ -399,7 +399,7 @@ do_sign(prng *rng, int16_t *restrict s1,
 	bg = bf + n;
 	bF = bg + n;
 	bG = bF + n;
-	biq00 = bG + n;
+	invq00 = bG + n;
 
 	x0 = (fpr *)tmp;
 	x1 = x0 + n;
@@ -418,7 +418,7 @@ do_sign(prng *rng, int16_t *restrict s1,
 	 * recovering s0. Otherwise, reject this signature.
 	 */
 	Zf(poly_add_muladj_fft)(res, x0, x1, bf, bg, logn);
-	Zf(poly_mul_autoadj_fft)(res, biq00, logn);
+	Zf(poly_mul_autoadj_fft)(res, invq00, logn);
 	Zf(iFFT)(res, logn);
 
 	for (u = 0; u < n; u++) {
@@ -495,20 +495,20 @@ Zf(expand_seckey)(fpr *restrict expanded_seckey,
 	const int8_t *f, const int8_t *g, const int8_t *F, unsigned logn)
 {
 	size_t n;
-	fpr *bf, *bg, *bF, *bG, *biq00;
+	fpr *bf, *bg, *bF, *bG, *invq00;
 
 	n = MKN(logn);
 	bf = expanded_seckey;
 	bg = bf + n;
 	bF = bg + n;
 	bG = bF + n;
-	biq00 = bG + n;
+	invq00 = bG + n;
 
 	/*
 	 * We load the private key elements directly into the 2x2 matrix B.
 	 */
 	construct_basis(f, g, F, NULL, bf, bg, bF, bG, logn);
-	Zf(poly_invnorm2_fft)(biq00, bf, bg, logn);
+	Zf(poly_invnorm2_fft)(invq00, bf, bg, logn);
 }
 
 /*

@@ -905,11 +905,11 @@ void Zf(sign)(inner_shake256_context *rng, int16_t *restrict sig,
  */
 
 /*
- * Given q00_num, q10_num in integer representation, compute the full public
+ * Given iq00, iq10 in integer representation, compute the full public
  * key, which is q00, q10 and q11 in FFT representation.
  * Note here that q11 is reconstructed using the rule q00 q11 - q10 q01 = 1.
  */
-void Zf(complete_pubkey)(const int16_t *q00_num, const int16_t *q10_num,
+void Zf(complete_pubkey)(const int16_t *iq00, const int16_t *iq10,
 	fpr *q00, fpr *q10, fpr *q11, unsigned logn);
 
 /*

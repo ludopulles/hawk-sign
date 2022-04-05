@@ -75,7 +75,7 @@ bool mock_sign(prng *rng, const fpr *restrict expanded_seckey, const uint8_t *re
 {
 	size_t n, u, v, w;
 	int8_t *x0, *x1;
-	const fpr *tf, *tg, *tF, *tG, *tiq00;
+	const fpr *tf, *tg, *tF, *tG, *invq00;
 	fpr *tx0, *tx1, *tres;
 	int32_t norm, z;
 
@@ -87,7 +87,7 @@ begin_sign:
 	tg = tf + n;
 	tF = tg + n;
 	tG = tF + n;
-	tiq00 = tG + n;
+	invq00 = tG + n;
 
 	tx0 = (fpr *)tmp;
 	tx1 = tx0 + n;
@@ -174,7 +174,7 @@ begin_sign:
 	 * different s0 so the signature may not be valid anymore.
 	 */
 	Zf(poly_add_muladj_fft)(tres, tx0, tx1, tf, tg, logn);
-	Zf(poly_mul_autoadj_fft)(tres, tiq00, logn);
+	Zf(poly_mul_autoadj_fft)(tres, invq00, logn);
 	Zf(iFFT)(tres, logn);
 
 	// double norm2 = 0.0;

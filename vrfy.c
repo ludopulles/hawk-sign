@@ -144,22 +144,21 @@ has_short_trace(fpr *t0, fpr *t1,
 
 /* see inner.h */
 void
-Zf(complete_pubkey)(const int16_t *restrict q00_num,
-	const int16_t *restrict q10_num, fpr *restrict q00, fpr *restrict q10,
-	fpr *restrict q11, unsigned logn)
+Zf(complete_pubkey)(const int16_t *restrict iq00, const int16_t *restrict iq10,
+	fpr *restrict q00, fpr *restrict q10, fpr *restrict q11, unsigned logn)
 {
 	size_t u, n, hn;
 
 	n = MKN(logn);
 	hn = n >> 1;
 
-	// doing this in reverse, allows q00_num, q10_num to overlap with the begin
+	// doing this in reverse, allows iq00, iq10 to overlap with the begin
 	// of q00.
 	for (u = n; u -- > 0; ) {
-		q10[u] = fpr_of(q10_num[u]);
+		q10[u] = fpr_of(iq10[u]);
 	}
 	for (u = n; u -- > 0; ) {
-		q00[u] = fpr_of(q00_num[u]);
+		q00[u] = fpr_of(iq00[u]);
 	}
 
 	Zf(FFT)(q00, logn);

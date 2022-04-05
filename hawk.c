@@ -139,11 +139,10 @@ hawk_keygen_make(shake256_context *rng, unsigned logn, void *privkey,
 	size_t tmp_len)
 {
 	int8_t *f, *g, *F, *G;
-	int16_t *q00_num, *q10_num;
+	int16_t *iq00, *iq10;
 	fpr *q00, *q10, *q11;
-	uint8_t *atmp;
-	size_t n, u, sk_len, pk_len;
-	uint8_t *sk, *pk;
+	uint8_t *sk, *pk, *atmp;
+	size_t n, sk_len, pk_len, max_pk_len;
 	unsigned oldcw;
 
 	/*
@@ -178,12 +177,12 @@ hawk_keygen_make(shake256_context *rng, unsigned logn, void *privkey,
 	/*
 	 * These buffers overlap with f, g, F, G but this is fine as we encode the
 	 * public key after the private key is already encoded. Also, the first
-	 * byte of q00 may overlap with q10_num because of alignment, but the data
+	 * byte of q00 may overlap with iq10 because of alignment, but the data
 	 * of q00[0] is first extracted and only afterwards is the last value of
-	 * q10_num set.
+	 * iq10 set.
 	 */
-	q00_num = align_i16(tmp);
-	q10_num = q00_num + n;
+	iq00 = align_i16(tmp);
+	iq10 = iq00 + n;
 
 	atmp = (uint8_t *)(q11 + n);
 
@@ -194,9 +193,11 @@ hawk_keygen_make(shake256_context *rng, unsigned logn, void *privkey,
 	sk[0] = 0x50 + logn;
 
 	pk = pubkey;
-	pk_len = 0;
 	if (pubkey != NULL) {
 		pk[0] = 0x00 + logn;
+		max_pk_len = *pubkey_len - 1;
+	} else {
+		max_pk_len = HAWK_MAX_PUBKEY_SIZE[logn] - 1;
 	}
 
 	do {
@@ -210,24 +211,20 @@ hawk_keygen_make(shake256_context *rng, unsigned logn, void *privkey,
 		/*
 		 * Destroy the private key basis [[f,g], [F,G]] to store q00, q10.
 		 */
-		Zf(iFFT)(q00, logn);
-		Zf(iFFT)(q10, logn);
+		Zf(fft_to_int16)(iq00, q00, logn);
+		Zf(fft_to_int16)(iq10, q10, logn);
+		pk_len = Zf(encode_pubkey)(pk + 1, max_pk_len, iq00, iq10, logn);
 
-		for (u = 0; u < n; u++) {
-			q00_num[u] = fpr_rint(q00[u]);
-		}
-		for (u = 0; u < n; u++) {
-			q10_num[u] = fpr_rint(q10[u]);
-		}
-
-		if (pubkey != NULL) {
-			pk_len = Zf(encode_pubkey)(pk + 1, *pubkey_len - 1, q00_num, q10_num, logn);
-		}
 		/*
 		 * Retry key-generation as the secret key or public key cannot be
-		 * encoded. This only happens with negligible probability.
+		 * encoded, is shorter or is larger than the allowed size. This only
+		 * happens with negligible probability.
 		 */
-	} while (sk_len == 0 || pk_len == 0);
+	} while (sk_len == 0 || pk_len == 0
+		|| 1 + sk_len < HAWK_MIN_SECKEY_SIZE[logn]
+		|| 1 + sk_len > HAWK_MAX_SECKEY_SIZE[logn]
+		|| 1 + pk_len < HAWK_MIN_PUBKEY_SIZE[logn]
+		|| 1 + pk_len > HAWK_MAX_PUBKEY_SIZE[logn]);
 
 	/*
 	 * Do not forgot that there is one header byte in sk and pk.
@@ -250,8 +247,8 @@ hawk_make_public(void *pubkey, size_t *pubkey_len, const void *privkey,
 	unsigned logn;
 	size_t v, n;
 	int8_t *f, *g, *F;
-	int16_t *q00, *q10;
-	fpr *bq00, *bq10;
+	int16_t *iq00, *iq10;
+	fpr *q00, *q10;
 
 	/*
 	 * Get degree from private key header byte, and check
@@ -293,23 +290,23 @@ hawk_make_public(void *pubkey, size_t *pubkey_len, const void *privkey,
 	/*
 	 * Compute public key.
 	 */
-	q00 = align_i16(tmp);
+	iq00 = align_i16(tmp);
+	iq10 = iq00 + n;
+	q00 = align_fpr(iq10 + n);
 	q10 = q00 + n;
-	bq00 = align_fpr(q10 + n);
-	bq10 = bq00 + n;
-	atmp = (uint8_t *)(bq10 + n);
+	atmp = (uint8_t *)(q10 + n);
 
-	Zf(make_public)(f, g, F, NULL, bq00, bq10, NULL, logn, atmp);
-
-	Zf(fft_to_int16)(q10, bq10, logn);
-	Zf(fft_to_int16)(q00, bq00, logn);
+	Zf(make_public)(f, g, F, NULL, q00, q10, NULL, logn, atmp);
 
 	/*
 	 * Encode public key.
 	 */
 	pk = pubkey;
 	pk[0] = 0x00 + logn;
-	v = Zf(encode_pubkey)(pk + 1, *pubkey_len - 1, q00, q10, logn);
+
+	Zf(fft_to_int16)(iq10, q10, logn);
+	Zf(fft_to_int16)(iq00, q00, logn);
+	v = Zf(encode_pubkey)(pk + 1, *pubkey_len - 1, iq00, iq10, logn);
 	if (v == 0) {
 		return HAWK_ERR_FORMAT;
 	}
@@ -322,7 +319,7 @@ hawk_make_public(void *pubkey, size_t *pubkey_len, const void *privkey,
 int
 hawk_get_logn(void *obj, size_t len)
 {
-	int logn;
+	unsigned logn;
 
 	if (len == 0) {
 		return HAWK_ERR_FORMAT;
@@ -349,12 +346,11 @@ int
 hawk_expand_privkey(void *expanded_key, size_t expanded_key_len,
 	const void *privkey, size_t privkey_len, void *tmp, size_t tmp_len)
 {
-	unsigned logn;
+	unsigned logn, oldcw;
 	const uint8_t *sk;
 	int8_t *f, *g, *F;
 	size_t n, v;
 	fpr *expkey;
-	unsigned oldcw;
 
 	/*
 	 * Get degree from private key header byte, and check
@@ -413,12 +409,11 @@ hawk_sign_finish(shake256_context *rng, void *sig, size_t *sig_len,
 	int sig_type, const void *expanded_key, shake256_context *hash_data,
 	const void *salt, void *tmp, size_t tmp_len)
 {
-	unsigned logn;
+	unsigned logn, oldcw;
 	uint8_t *es, *hm, *atmp;
 	const fpr *expkey;
 	int16_t *sv;
 	size_t u, v, n, es_len;
-	unsigned oldcw;
 
 	/*
 	 * Get degree from private key header byte, and check
@@ -464,9 +459,9 @@ hawk_sign_finish(shake256_context *rng, void *sig, size_t *sig_len,
 	 * Fix the first byte (containing logn) and 40 bytes for the salt first.
 	 */
 	es = sig;
+	es[0] = 0x30 + logn;
 	memcpy(es + 1, salt, 40);
 	u = 41;
-	es[0] = 0x30 + logn;
 
 	if (sig_type == HAWK_SIG_COMPRESSED) {
 		oldcw = set_fpu_cw(2);
@@ -606,9 +601,9 @@ hawk_sign_dyn_finish(shake256_context *rng, void *sig, size_t *sig_len,
 	 * Fix the first byte (containing logn) and 40 bytes for the salt first.
 	 */
 	es = sig;
+	es[0] = 0x30 + logn;
 	memcpy(es + 1, salt, 40);
 	u = 41;
-	es[0] = 0x30 + logn;
 
 	if (sig_type == HAWK_SIG_COMPRESSED) {
 		oldcw = set_fpu_cw(2);
@@ -697,7 +692,7 @@ hawk_verify_finish(const void *sig, size_t sig_len, int sig_type,
 {
 	unsigned logn;
 	uint8_t *hm, *atmp;
-	int16_t *q00_num, *q10_num;
+	int16_t *iq00, *iq10;
 	fpr *q00, *q10, *q11;
 	const uint8_t *pk, *es;
 	size_t u, v, n;
@@ -719,11 +714,7 @@ hawk_verify_finish(const void *sig, size_t sig_len, int sig_type,
 	if (logn < 1 || logn > 9) {
 		return HAWK_ERR_FORMAT;
 	}
-	if ((es[0] & 0x0F) != logn) {
-		return HAWK_ERR_BADSIG;
-	}
-
-	if ((es[0] & 0xF0) != 0x30) {
+	if ((es[0] & 0x0F) != logn || (es[0] & 0xF0) != 0x30) {
 		return HAWK_ERR_BADSIG;
 	}
 
@@ -752,8 +743,8 @@ hawk_verify_finish(const void *sig, size_t sig_len, int sig_type,
 	hm = (uint8_t *)tmp;
 	sv = align_i16(hm + HAWK_HASH_SIZE(logn));
 
-	q00_num = sv + n;
-	q10_num = q00_num + n;
+	iq00 = sv + n;
+	iq10 = iq00 + n;
 
 	q00 = (fpr *)align_fpr(sv + n);
 	q10 = q00 + n;
@@ -763,7 +754,7 @@ hawk_verify_finish(const void *sig, size_t sig_len, int sig_type,
 	/*
 	 * Decode public key.
 	 */
-	if (Zf(decode_pubkey)(q00_num, q10_num, pk + 1, pubkey_len - 1, logn) == 0)
+	if (Zf(decode_pubkey)(iq00, iq10, pk + 1, pubkey_len - 1, logn) == 0)
 	{
 		return HAWK_ERR_FORMAT;
 	}
@@ -806,7 +797,7 @@ hawk_verify_finish(const void *sig, size_t sig_len, int sig_type,
 	/*
 	 * Construct full public key.
 	 */
-	Zf(complete_pubkey)(q00_num, q10_num, q00, q10, q11, logn);
+	Zf(complete_pubkey)(iq00, iq10, q00, q10, q11, logn);
 
 	/*
 	 * Verify signature.

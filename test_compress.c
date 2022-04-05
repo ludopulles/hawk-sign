@@ -13,10 +13,10 @@
 uint8_t b[48 << LOGN], outbuf[10240];
 int8_t f[N], g[N], F[N], G[N];
 fpr q00[N], q10[N], q11[N];
-int16_t q00_num[N], q10_num[N];
+int16_t iq00[N], iq10[N];
 
 int8_t _f[N], _g[N], _F[N], _G[N];
-int16_t _q00_num[N], _q10_num[N];
+int16_t _iq00[N], _iq10[N];
 fpr _q00[N], _q10[N], _q11[N], exp_seckey[EXPANDED_SECKEY_SIZE(LOGN)];
 
 int poly_eq(int8_t *p, int8_t *q, unsigned logn) {
@@ -59,18 +59,14 @@ void test_encode_decode(unsigned logn) {
 		}
 		assert(poly_eq(G, _G, logn));
 
-		Zf(iFFT)(q00, logn);
-		Zf(iFFT)(q10, logn);
-		for (size_t u = 0; u < MKN(logn); u++) {
-			q00_num[u] = fpr_rint(q00[u]);
-			q10_num[u] = fpr_rint(q10[u]);
-		}
+		Zf(fft_to_int16)(iq00, q00, logn);
+		Zf(fft_to_int16)(iq10, q10, logn);
 		Zf(FFT)(q00, logn);
 		Zf(FFT)(q10, logn);
 
-		size_t pk_len = Zf(encode_pubkey)(outbuf, BUFLEN, q00_num, q10_num, logn);
-		assert(pk_len == Zf(decode_pubkey)(_q00_num, _q10_num, outbuf, pk_len, logn));
-		Zf(complete_pubkey)(_q00_num, _q10_num, _q00, _q10, _q11, logn);
+		size_t pk_len = Zf(encode_pubkey)(outbuf, BUFLEN, iq00, iq10, logn);
+		assert(pk_len == Zf(decode_pubkey)(_iq00, _iq10, outbuf, pk_len, logn));
+		Zf(complete_pubkey)(_iq00, _iq10, _q00, _q10, _q11, logn);
 
 		for (size_t u = 0; u < MKN(logn); u++) {
 			assert(fpr_rint(fpr_sub(q00[u], _q00[u])) == 0);
