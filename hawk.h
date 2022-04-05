@@ -522,8 +522,8 @@ int hawk_keygen_make(shake256_context *rng, unsigned logn, void *privkey,
  *
  * Returned value: 0 on success, or a negative error code.
  */
-// int hawk_make_public(void *pubkey, size_t pubkey_len, const void *privkey,
-//	size_t privkey_len, void *tmp, size_t tmp_len);
+int hawk_make_public(void *pubkey, size_t pubkey_len, const void *privkey,
+	size_t privkey_len, void *tmp, size_t tmp_len);
 
 /*
  * Get the Hawk degree from an encoded private key, public key or

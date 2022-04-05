@@ -29,6 +29,8 @@
  * @author   Thomas Pornin <thomas.pornin@nccgroup.com>
  */
 
+// TODO: remove this code as it is unused, precomputed tables are faster.
+
 #include "inner.h"
 
 /*

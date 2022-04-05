@@ -172,7 +172,7 @@ hawk_keygen_make(shake256_context *rng, unsigned logn, void *privkey,
 	 * allowed encoded sizes, and check the temporary buffer size.
 	 */
 	if (*privkey_len < HAWK_MAX_SECKEY_SIZE[logn]
-		|| *pubkey_len < HAWK_MAX_PUBKEY_SIZE[logn]
+		|| (pubkey != NULL && *pubkey_len < HAWK_MAX_PUBKEY_SIZE[logn])
 		|| tmp_len < HAWK_TMPSIZE_KEYGEN(logn)) {
 		return HAWK_ERR_SIZE;
 	}
@@ -207,8 +207,11 @@ hawk_keygen_make(shake256_context *rng, unsigned logn, void *privkey,
 	sk = privkey;
 	sk[0] = 0x50 + logn;
 
-	pk = pubkey;
-	pk[0] = 0x00 + logn;
+	pk_len = 0;
+	if (pubkey != NULL) {
+		pk = pubkey;
+		pk[0] = 0x00 + logn;
+	}
 
 	do {
 		oldcw = set_fpu_cw(2);
@@ -231,7 +234,9 @@ hawk_keygen_make(shake256_context *rng, unsigned logn, void *privkey,
 			q10_num[u] = fpr_rint(q10[u]);
 		}
 
-		pk_len = Zf(encode_pubkey)(pk + 1, *pubkey_len - 1, q00_num, q10_num, logn);
+		if (pubkey != NULL) {
+			pk_len = Zf(encode_pubkey)(pk + 1, *pubkey_len - 1, q00_num, q10_num, logn);
+		}
 		/*
 		 * Retry key-generation as the secret key or public key cannot be
 		 * encoded. This only happens with negligible probability.
@@ -242,15 +247,85 @@ hawk_keygen_make(shake256_context *rng, unsigned logn, void *privkey,
 	 * Do not forgot that there is one header byte in sk and pk.
 	 */
 	*privkey_len = 1 + sk_len;
-	*pubkey_len = 1 + pk_len;
+	if (pubkey != NULL) {
+		*pubkey_len = 1 + pk_len;
+	}
 
 	return 0;
 }
 
 /* see hawk.h */
-// int
-// hawk_make_public(void *pubkey, size_t pubkey_len, const void *privkey,
-//	size_t privkey_len, void *tmp, size_t tmp_len) { /* TODO */ }
+int
+hawk_make_public(void *pubkey, size_t pubkey_len, const void *privkey,
+	size_t privkey_len, void *tmp, size_t tmp_len)
+{
+	uint8_t *pk, *atmp;
+	const uint8_t *sk;
+	unsigned logn;
+	size_t u, v, n, pk_len;
+
+	int8_t *f, *g, *F;
+
+	/*
+	 * Get degree from private key header byte, and check
+	 * parameters.
+	 */
+	if (privkey_len == 0) {
+		return HAWK_ERR_FORMAT;
+	}
+	sk = privkey;
+	if ((sk[0] & 0xF0) != 0x50) {
+		return HAWK_ERR_FORMAT;
+	}
+	logn = sk[0] & 0x0F;
+	if (logn < 1 || logn > 9) {
+		return HAWK_ERR_FORMAT;
+	}
+	if (privkey_len != HAWK_PRIVKEY_SIZE(logn)) {
+		return HAWK_ERR_FORMAT;
+	}
+	if (pubkey_len < HAWK_PUBKEY_SIZE(logn)
+		|| tmp_len < HAWK_TMPSIZE_MAKEPUB(logn))
+	{
+		return HAWK_ERR_SIZE;
+	}
+
+	/*
+	 * Decode private key (f and g).
+	 */
+	n = MKN(logn);
+	f = (int8_t *)tmp;
+	g = f + n;
+	F = g + n;
+	v = Zf(decode_seckey)(f, g, F, privkey + 1, privkey_len - 1, logn);
+	if (v == 0) {
+		return HAWK_ERR_FORMAT;
+	}
+
+	u = 1 + v;
+
+	/*
+	 * Compute public key.
+	 */
+	h = (uint16_t *)align_u16(g + n);
+	atmp = (uint8_t *)(h + n);
+	if (!Zf(compute_public)(h, f, g, logn, atmp)) {
+		return HAWK_ERR_FORMAT;
+	}
+
+	/*
+	 * Encode public key.
+	 */
+	pk = pubkey;
+	pk_len = HAWK_PUBKEY_SIZE(logn);
+	pk[0] = 0x00 + logn;
+	v = Zf(modq_encode)(pk + 1, pk_len - 1, h, logn);
+	if (v != pk_len - 1) {
+		return HAWK_ERR_INTERNAL;
+	}
+	return 0;
+
+}
 
 /* see hawk.h */
 int
