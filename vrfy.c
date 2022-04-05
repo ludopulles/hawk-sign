@@ -31,16 +31,22 @@
 
 #include "inner.h"
 
-/* see sign.c */
-static const uint32_t l2bound[10] = {
-	0 /* unused */, 32, 64, 129, 258, 517, 1034, 2068, 4136, 8273
-};
-
+/*
+ * The hash of a message has two parts: (h0, h1), where each is a polynomial of
+ * length n with coefficients in {0,1}. However, these bits are collected into
+ * bytes for saving RAM usage. This function returns the index in the hash
+ * array at which the bits start for h1.
+ */
 #define SECOND_HASH(h, logn) \
 	((h) + ((logn) <= 3 ? 1u : 1u << ((logn) - 3)))
 
+/**
+ * If s != NULL, set the polynomial p equal to h - 2 * s.
+ * Otherwise, set p equal to h.
+ * Returns the polynomial in FFT format.
+ */
 static void
-hash_to_fpr(fpr *p, const uint8_t *h, const int16_t *s, unsigned logn)
+hash_to_fft(fpr *p, const uint8_t *h, const int16_t *s, unsigned logn)
 {
 	size_t n, u, v;
 	uint8_t hash;
@@ -61,43 +67,86 @@ hash_to_fpr(fpr *p, const uint8_t *h, const int16_t *s, unsigned logn)
 			}
 		}
 	}
+	Zf(FFT)(p, logn);
 }
 
 /*
- * Add to a polynomial its own adjoint. This function works only in FFT
+ * Returns whether squared geometric norm of (t0, t1) with respect to Q is at
+ * most the specified allowed l2-bound. The t0, t1 are assumed to be in FFT
  * representation.
  */
-void
-Zf(poly_addselfadj_fft)(fpr *a, unsigned logn)
+static int
+has_short_trace(fpr *t0, fpr *t1,
+	const fpr *restrict q00, const fpr *restrict q10, const fpr *restrict q11,
+	unsigned logn)
 {
-	size_t hn, u;
+	size_t u, hn;
+	fpr trace;
 
 	hn = MKN(logn) >> 1;
-	for (u = 0; u < hn; u ++)
-		a[u] = fpr_double(a[u]);
-	for (u = 0; u < hn; u ++)
-		a[u + hn] = fpr_zero;
-}
+	trace = fpr_zero;
 
-/*
- * Add polynomial b to polynomial a, where b is autoadjoint. Both a and b are
- * in FFT representation. Since b is autoadjoint, all its FFT coefficients are
- * real, and the array b contains only N/2 elements.
- */
-void
-Zf(poly_add_autoadj_fft)(fpr *a, fpr *b, unsigned logn)
-{
-	size_t hn, u;
+	/*
+	 * Calculate trace( (t0, t1)^* Q (t0, t1) ) / n, and determine if this is
+	 * short. The trace of a polynomial in FFT representation is the sum of its
+	 * `n` complex embeddings, and since half of the embeddings are stored, we
+	 * only need to sum the real value for each pair of complex embeddings.
+	 * 
+	 * Add the contribution of t0 q00 t0*.
+	 */
+	for (u = 0; u < hn; u ++) {
+		fpr norm_t0;
 
-	hn = MKN(logn) >> 1;
-	for (u = 0; u < hn; u ++)
-		a[u] = fpr_add(a[u], b[u]);
+		norm_t0 = fpr_add(fpr_sqr(t0[u]), fpr_sqr(t0[u + hn]));
+		trace = fpr_add(trace, fpr_mul(norm_t0, q00[u]));
+	}
+
+	/*
+	 * Add the contribution of t1 q11 t1*.
+	 */
+	for (u = 0; u < hn; u ++) {
+		fpr norm_t1;
+
+		norm_t1 = fpr_add(fpr_sqr(t1[u]), fpr_sqr(t1[u + hn]));
+		trace = fpr_add(trace, fpr_mul(norm_t1, q11[u]));
+	}
+
+	/*
+	 * Add the contribution of t1 q10 t0* + t0 q01 t1*.
+	 */
+	for (u = 0; u < hn; u ++) {
+		fpr re, im;
+
+		// t0* t1
+		re = fpr_add(fpr_mul(t0[u], t1[u]), fpr_mul(t0[u + hn], t1[u + hn]));
+		im = fpr_sub(fpr_mul(t0[u], t1[u + hn]), fpr_mul(t0[u + hn], t1[u]));
+
+		trace = fpr_add(trace, fpr_double(
+			fpr_sub(fpr_mul(re, q10[u]), fpr_mul(im, q10[u + hn]))
+		));
+	}
+
+	/*
+	 * Renormalize to obtain the squared geometric norm of (t0, t1) w.r.t Q.
+	 */
+	trace = fpr_div(trace, fpr_of(hn));
+
+	/*
+	 * Check whether the norm is in range [0, 2^31). Signature is valid iff
+	 * squared norm of (t0, t1) w.r.t. Q is at most bound.
+	 */
+	return !fpr_lt(trace, fpr_zero)
+		&& fpr_lt(trace, fpr_ptwo31m1)
+		&& (uint32_t)fpr_rint(trace) <= Zf(l2bound)[logn];
 }
 
 /* =================================================================== */
+
+/* see inner.h */
 void
-Zf(complete_pubkey)(const int16_t *q00_num, const int16_t *q10_num,
-	fpr *q00, fpr *q10, fpr *q11, unsigned logn)
+Zf(complete_pubkey)(const int16_t *restrict q00_num,
+	const int16_t *restrict q10_num, fpr *restrict q00, fpr *restrict q10,
+	fpr *restrict q11, unsigned logn)
 {
 	size_t u, n, hn;
 
@@ -116,12 +165,14 @@ Zf(complete_pubkey)(const int16_t *q00_num, const int16_t *q10_num,
 	Zf(FFT)(q00, logn);
 	Zf(FFT)(q10, logn);
 
+	/*
+	 * Reconstruct q11 using q11 = (1 + q10 adj(q10)) / q00.
+	 */
 	Zf(poly_prod_selfadj_fft)(q11, q10, logn);
 	for (u = 0; u < hn; u ++) {
 		q11[u] = fpr_add(q11[u], fpr_one);
 	}
 	Zf(poly_div_autoadj_fft)(q11, q00, logn);
-	// q11 = (1 + q10 q01) / q00, where q01 = adj(q10).
 }
 
 /* see inner.h */
@@ -131,70 +182,19 @@ Zf(complete_verify)(const uint8_t *restrict h,
 	const fpr *restrict q00, const fpr *restrict q10, const fpr *restrict q11,
 	unsigned logn, uint8_t *restrict tmp)
 {
-	size_t u, hn, n;
-	fpr *t0, *t1, trace;
+	size_t n;
+	fpr *t0, *t1;
 
 	n = MKN(logn);
-	hn = n >> 1;
 	t0 = (fpr *)tmp;
 	t1 = t0 + n;
 
 	/*
-	 * Put (t0, t1) = (2 s0 - h0, 2 s1 - h1) in FFT representation so we can
-	 * calculate the l2-norm wrt Q.
+	 * Put (t0, t1) = (h0 - 2 s0, h1 - 2 s1) in FFT representation.
 	 */
-	hash_to_fpr(t0, h, s0, logn);
-	hash_to_fpr(t1, SECOND_HASH(h, logn), s1, logn);
-
-	Zf(FFT)(t0, logn);
-	Zf(FFT)(t1, logn);
-
-	trace = fpr_zero;
-
-	// Calculate normalized trace( (t0, t1)^* Q (t0, t1) )
-	// Note that the trace is by definition the sum under its n embeddings
-	for (u = 0; u < hn; u ++) {
-		fpr a_re, a_im, b_re, b_im, ab_re, ab_im;
-
-		a_re = t0[u];
-		a_im = t0[u + hn];
-		b_re = t1[u];
-		b_im = t1[u + hn];
-
-		fpr norm0 = fpr_add(fpr_sqr(a_re), fpr_sqr(a_im));
-		fpr norm1 = fpr_add(fpr_sqr(b_re), fpr_sqr(b_im));
-
-		// contribution of t0 Q00 t0*
-		trace = fpr_add(trace, fpr_mul(norm0, q00[u]));
-		// contribution of t1 Q11 t1*
-		trace = fpr_add(trace, fpr_mul(norm1, q11[u]));
-
-		// ab = t1 t0*
-		ab_re = fpr_add(fpr_mul(a_re, b_re), fpr_mul(a_im, b_im));
-		ab_im = fpr_sub(fpr_mul(a_re, b_im), fpr_mul(a_im, b_re));
-
-		// contribution of t1 q10 t0* + t0 q01 t1*
-		trace = fpr_add(trace, fpr_double(
-			fpr_sub(fpr_mul(ab_re, q10[u]), fpr_mul(ab_im, q10[u + hn]))
-		));
-	}
-
-	/*
-	 * Note: only n/2 embeddings are stored, because they come in pairs.
-	 */
-	trace = fpr_double(trace);
-	/*
-	 * Renormalize, so we get the geometric norm of (t0, t1) w.r.t Q.
-	 */
-	trace = fpr_div(trace, fpr_of(n));
-
-	/*
-	 * First check whether the norm is in range [0, 2^31).
-	 * Signature is valid iff
-	 *     `Tr(s* Q s) / n (=Tr(x^* x)/n = sum_i x_i^2) <= bound`.
-	 */
-	return fpr_lt(fpr_zero, trace) && fpr_lt(trace, fpr_ptwo31m1)
-		&& (uint32_t)fpr_rint(trace) <= l2bound[logn];
+	hash_to_fft(t0, h, s0, logn);
+	hash_to_fft(t1, SECOND_HASH(h, logn), s1, logn);
+	return has_short_trace(t0, t1, q00, q10, q11, logn);
 }
 
 /* see inner.h */
@@ -211,26 +211,26 @@ Zf(verify_simple_rounding)(const uint8_t *restrict h,
 	n = MKN(logn);
 	t0 = (fpr *)tmp;
 
-	hash_to_fpr(t0, SECOND_HASH(h, logn), s1, logn);
-	Zf(poly_mulconst)(t0, fpr_onehalf, logn);
-
-	Zf(FFT)(t0, logn);
-	Zf(poly_mul_fft)(t0, q10, logn); // (h1/2 - s1) q10
-	Zf(poly_div_autoadj_fft)(t0, q00, logn); // (h1/2 - s1) q10/q00
+	hash_to_fft(t0, SECOND_HASH(h, logn), s1, logn);
+	Zf(poly_mul_fft)(t0, q10, logn);
+	Zf(poly_div_autoadj_fft)(t0, q00, logn);
 	Zf(iFFT)(t0, logn);
 
-	// Recover s0 with s0 = round(h0/2 + (h1/2 - s1) q10 / q00)
+	/*
+	 * Recover s0 with s0 = round(h0 / 2 + (h1 / 2 - s1) q10 / q00).
+	 * Put (t0, t1) = (h0 - 2 * s0, h1 - 2 * s1) in FFT representation.
+	 */
 	if (logn <= 3) {
 		h0 = h[0];
 		for (v = 0; v < n; v ++) {
-			s0[v] = fpr_rint(fpr_add(fpr_half(fpr_of(h0 & 1)), t0[v]));
+			s0[v] = fpr_rint(fpr_half(fpr_add(fpr_of(h0 & 1), t0[v])));
 			h0 >>= 1;
 		}
 	} else {
 		for (u = 0, w = 0; w < n; u ++) {
 			h0 = h[u];
 			for (v = 0; v < 8; v ++, w ++) {
-				s0[w] = fpr_rint(fpr_add(fpr_half(fpr_of(h0 & 1)), t0[w]));
+				s0[w] = fpr_rint(fpr_half(fpr_add(fpr_of(h0 & 1), t0[w])));
 				h0 >>= 1;
 			}
 		}
@@ -247,56 +247,32 @@ Zf(verify_nearest_plane)(const uint8_t *restrict h,
 	unsigned logn, uint8_t *restrict tmp)
 {
 	/*
-	 * This works better than simple rounding.
+	 * This works slightly better than simple rounding, but is also slower.
 	 * Reconstruct s0, by running Babai's NP algorithm with target
 	 *     h0 / 2 + (h1 / 2 - s1) * q10 / q00.
 	 */
 
-	size_t n, u, v, w;
-	uint8_t h0;
-	int16_t s0w;
+	size_t n;
 	fpr *t0, *t1;
 
 	n = MKN(logn);
 	t0 = (fpr *)tmp;
 	t1 = t0 + n;
 
-	if (logn <= 3) {
-		h0 = h[0];
-		for (v = 0; v < n; v ++) {
-			s0w = fpr_rint(fpr_add(fpr_half(fpr_of(h0 & 1)), t0[v]));
-			t0[v] = fpr_half(fpr_of((h0 & 1) - 2 * s0w));
-			h0 >>= 1;
-		}
-	} else {
-		for (u = 0, w = 0; w < n; u ++) {
-			h0 = h[u];
-			for (v = 0; v < 8; v ++, w ++) {
-				s0w = fpr_rint(fpr_add(fpr_half(fpr_of(h0 & 1)), t0[w]));
-				t0[w] = fpr_half(fpr_of((h0 & 1) - 2 * s0w));
-				h0 >>= 1;
-			}
-		}
-	}
+	hash_to_fft(t0, h, NULL, logn);
+	hash_to_fft(t1, SECOND_HASH(h, logn), s1, logn);
 
-	hash_to_fpr(t0, h, NULL, logn);
-	hash_to_fpr(t1, SECOND_HASH(h, logn), s1, logn);
-	Zf(poly_mulconst)(t0, fpr_onehalf, logn);
-	Zf(poly_mulconst)(t1, fpr_onehalf, logn);
-
-	Zf(FFT)(t0, logn);
-	Zf(FFT)(t1, logn);
 	Zf(poly_mul_fft)(t1, q10, logn);
-	Zf(poly_div_fft)(t1, q00, logn);
-	Zf(poly_add)(t0, t1, logn); // t0 = h0 / 2 + (h1 / 2 - s1) q10/q00
+	Zf(poly_div_autoadj_fft)(t1, q00, logn);
+	Zf(poly_add)(t0, t1, logn);
+	Zf(poly_mulconst)(t0, fpr_onehalf, logn);
 
 	memcpy(t1, q00, n * sizeof(fpr));
-	// Run Babai with target t0 and Gram-matrix q00.
+	/*
+	 * Run Babai with target t0 and Gram-matrix q00.
+	 */
 	Zf(ffNearestPlane_dyn)(t0, t1, logn, t1 + n);
-	Zf(iFFT)(t0, logn);
-	for (u = 0; u < n; u ++) {
-		s0[u] = fpr_rint(t0[u]);
-	}
+	Zf(fft_to_int16)(s0, t0, logn);
 
 	/*
 	 * Now run the casual verification.
@@ -311,104 +287,43 @@ Zf(verify_simple_rounding_fft)(const uint8_t *restrict h,
 	const fpr *restrict q10, const fpr *restrict q11,
 	unsigned logn, uint8_t *restrict tmp)
 {
-	size_t u, v, w, hn, n;
+	size_t u, v, w, n;
 	uint8_t h0;
 	int16_t s0w;
-	fpr *t0, *t1, trace;
+	fpr *t0, *t1;
 
 	n = MKN(logn);
-	hn = n >> 1;
 	t0 = (fpr *)tmp;
 	t1 = t0 + n;
 
-	/*
-	 * t1 = h1 / 2 - s1
-	 */
-	hash_to_fpr(t1, SECOND_HASH(h, logn), s1, logn);
-	Zf(poly_mulconst)(t1, fpr_onehalf, logn);
-
-	Zf(FFT)(t1, logn);
-	Zf(poly_prod_fft)(t0, t1, q10, logn); // t0 = (h1/2 - s1) q10
-	Zf(poly_div_autoadj_fft)(t0, q00, logn); // t0 = (h1/2 - s1) q10/q00
+	hash_to_fft(t1, SECOND_HASH(h, logn), s1, logn);
+	Zf(poly_prod_fft)(t0, t1, q10, logn);
+	Zf(poly_div_autoadj_fft)(t0, q00, logn);
 	Zf(iFFT)(t0, logn);
 
 	/*
-	 * Recover s0 with s0 = round(h0/2 + (h1/2 - s1) q10 / q00).
-	 * Put (t0, t1) = (h0 / 2 - s0, h1 / 2 - s1) in FFT representation so we can
-	 * calculate the l2-norm wrt Q.
+	 * Recover s0 with s0 = round(h0 / 2 + (h1 / 2 - s1) q10 / q00).
+	 * Put (t0, t1) = (h0 - 2 * s0, h1 - 2 * s1) in FFT representation.
 	 */
 	if (logn <= 3) {
 		h0 = h[0];
 		for (v = 0; v < n; v ++) {
-			s0w = fpr_rint(fpr_add(fpr_half(fpr_of(h0 & 1)), t0[v]));
-			t0[v] = fpr_half(fpr_of((h0 & 1) - 2 * s0w));
+			s0w = fpr_rint(fpr_half(fpr_add(fpr_of(h0 & 1), t0[v])));
+			t0[v] = fpr_of((h0 & 1) - 2 * s0w);
 			h0 >>= 1;
 		}
 	} else {
 		for (u = 0, w = 0; w < n; u ++) {
 			h0 = h[u];
 			for (v = 0; v < 8; v ++, w ++) {
-				s0w = fpr_rint(fpr_add(fpr_half(fpr_of(h0 & 1)), t0[w]));
-				t0[w] = fpr_half(fpr_of((h0 & 1) - 2 * s0w));
+				s0w = fpr_rint(fpr_half(fpr_add(fpr_of(h0 & 1), t0[w])));
+				t0[w] = fpr_of((h0 & 1) - 2 * s0w);
 				h0 >>= 1;
 			}
 		}
 	}
-
 	Zf(FFT)(t0, logn);
 
-	trace = fpr_zero;
-	/*
-	 * Calculate normalized trace( (t0, t1)^* Q (t0, t1) )
-	 * Note that the trace is by definition the sum under its n embeddings, and
-	 * the complex embeddings are exactly what the FFT give us.
-	 */
-	for (u = 0; u < hn; u ++) {
-		fpr a_re, a_im, b_re, b_im, ab_re, ab_im;
-
-		a_re = t0[u];
-		a_im = t0[u + hn];
-		b_re = t1[u];
-		b_im = t1[u + hn];
-
-		fpr norm0 = fpr_add(fpr_sqr(a_re), fpr_sqr(a_im));
-		fpr norm1 = fpr_add(fpr_sqr(b_re), fpr_sqr(b_im));
-
-		// contribution of t0 Q00 t0*
-		trace = fpr_add(trace, fpr_mul(norm0, q00[u]));
-		// contribution of t1 Q11 t1*
-		trace = fpr_add(trace, fpr_mul(norm1, q11[u]));
-
-		// ab = t1 t0*
-		ab_re = fpr_add(fpr_mul(a_re, b_re), fpr_mul(a_im, b_im));
-		ab_im = fpr_sub(fpr_mul(a_re, b_im), fpr_mul(a_im, b_re));
-
-		// contribution of t1 q10 t0* + t0 q01 t1*
-		trace = fpr_add(trace, fpr_double(
-			fpr_sub(fpr_mul(ab_re, q10[u]), fpr_mul(ab_im, q10[u + hn]))
-		));
-	}
-
-	/*
-	 * Note: only n/2 embeddings are stored, because they come in pairs.
-	 */
-	trace = fpr_double(trace);
-	/*
-	 * Renormalize, so we get the geometric norm of (t0, t1) w.r.t Q.
-	 */
-	trace = fpr_div(trace, fpr_of(n));
-
-	/*
-	 * We need to multiply trace by 2^2 since the 'lattice-errors' above were halved.
-	 */
-	trace = fpr_mul(trace, fpr_of(4));
-
-	/*
-	 * First check whether the norm is in range [0, 2^31).
-	 * Signature is valid iff
-	 *     `Tr(s* Q s) / n (=Tr(x^* x)/n = sum_i x_i^2) <= bound`.
-	 */
-	return fpr_lt(fpr_zero, trace) && fpr_lt(trace, fpr_ptwo31m1)
-		&& (uint32_t)fpr_rint(trace) <= l2bound[logn];
+	return has_short_trace(t0, t1, q00, q10, q11, logn);
 }
 

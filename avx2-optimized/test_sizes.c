@@ -17,12 +17,6 @@ long long time_diff(const struct timeval *begin, const struct timeval *end) {
 	return 1000000LL * (end->tv_sec - begin->tv_sec) + (end->tv_usec - begin->tv_usec);
 }
 
-void fpr_to_int16(int16_t *d, fpr *p, size_t logn) {
-	for (size_t u = 0; u < MKN(logn); u++) {
-		d[u] = fpr_rint(p[u]);
-	}
-}
-
 // =============================================================================
 // | TESTING CODE                                                              |
 // =============================================================================
@@ -55,11 +49,8 @@ void test_compress(size_t logn) {
 		// Generate key pair.
 		Zf(keygen)(&sc, f, g, F, G, q00, q10, q11, logn, b);
 
-		Zf(iFFT)(q00, logn);
-		Zf(iFFT)(q10, logn);
-
-		fpr_to_int16(q00n, q00, logn);
-		fpr_to_int16(q10n, q10, logn);
+		Zf(fft_to_int16)(q00n, q00, logn);
+		Zf(fft_to_int16)(q10n, q10, logn);
 
 		int pk_sz = Zf(encode_pubkey)((void *)&encode_buf, 10000, q00n, q10n, logn);
 		assert(pk_sz != 0);
@@ -103,11 +94,8 @@ void measure_keygen(size_t logn) {
 			sq_FG += F[u]*F[u];
 		}
 
-		Zf(iFFT)(q00, logn);
-		Zf(iFFT)(q10, logn);
-
-		fpr_to_int16(q00n, q00, logn);
-		fpr_to_int16(q10n, q10, logn);
+		Zf(fft_to_int16)(q00n, q00, logn);
+		Zf(fft_to_int16)(q10n, q10, logn);
 
 		int pk_sz = Zf(encode_pubkey)(NULL, 0, q00n, q10n, logn);
 		int sk_sz = Zf(encode_seckey)(NULL, 0, f, g, F, logn);

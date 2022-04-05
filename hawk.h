@@ -99,7 +99,7 @@ extern "C" {
  *
  * Here are the actual values for the temporary buffer sizes (in bytes):
  *
- * TODO: update table
+ * TODO: update table, with considering the first byte as part of sk/pk size.
  * degree  mkpub  verify  keygen      sign  expkey  signdyn
  *     2      13      17     285       107     111      163
  *     4      25      33     291       207     215      319
@@ -350,8 +350,8 @@ extern const size_t HAWK_MAX_PUBKEY_SIZE[10];
 /*
  * Temporary buffer size for computing the public key from the private key.
  */
-/* #define HAWK_TMPSIZE_MAKEPUB(logn) \
-	((6u << (logn)) + 1) */
+#define HAWK_TMPSIZE_MAKEPUB(logn) \
+	((6u << (logn)) + 1)
 
 /*
  * The number of bytes that are required for the hash when signing a message or
@@ -522,7 +522,7 @@ int hawk_keygen_make(shake256_context *rng, unsigned logn, void *privkey,
  *
  * Returned value: 0 on success, or a negative error code.
  */
-int hawk_make_public(void *pubkey, size_t pubkey_len, const void *privkey,
+int hawk_make_public(void *pubkey, size_t *pubkey_len, const void *privkey,
 	size_t privkey_len, void *tmp, size_t tmp_len);
 
 /*

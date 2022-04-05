@@ -655,18 +655,14 @@ calc_target_FFT(int8_t *x0, int8_t *x1, int8_t *h0, int8_t *h1,
 	for (u = 0; u < n; u++) {
 		t0[u] = fpr_of(h0[u] & 1);
 		t1[u] = fpr_of(h1[u] & 1);
-		t2[u] = fpr_of(f[u]);
-		t3[u] = fpr_of(g[u]);
-		t4[u] = fpr_of(F[u]);
-		t5[u] = fpr_of(G[u]);
 	}
-
 	Zf(FFT)(t0, logn);
 	Zf(FFT)(t1, logn);
-	Zf(FFT)(t2, logn);
-	Zf(FFT)(t3, logn);
-	Zf(FFT)(t4, logn);
-	Zf(FFT)(t5, logn);
+
+	Zf(int8_to_fft)(t2, f, logn);
+	Zf(int8_to_fft)(t3, g, logn);
+	Zf(int8_to_fft)(t4, F, logn);
+	Zf(int8_to_fft)(t5, G, logn);
 
 	Zf(poly_inner_prod)(t6, t2, t4, t0, t1, logn); // f h0 + F h1
 	Zf(poly_inner_prod)(t7, t3, t5, t0, t1, logn); // g h0 + G h1

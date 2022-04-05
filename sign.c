@@ -34,23 +34,6 @@
 
 // =============================================================================
 
-/*
- * This number indicates the maximum l2-norm that is allowed for the small
- * error (from a valid signature) that is chosen around the target point during
- * signature generation.
- * The coefficients of this error are distributed according to a discrete
- * gaussian over the integers that have the same parity as the target
- * coefficient and with standard deviation 2 sigma_sig. To compute these
- * values, use:
- *
- *     l2bound(logn) = floor( (verif_margin * 2 sigma_sig)^2 * 2n ).
- *
- * Here, we have taken verif_margin = 1.1 and sigma_sig = 1.292.
- */
-static const uint32_t l2bound[10] = {
-	0 /* unused */, 32, 64, 129, 258, 517, 1034, 2068, 4136, 8273
-};
-
 /* To generate the values in the table below, run the following code:
 
 #include<bits/stdc++.h>
@@ -167,22 +150,6 @@ mkgauss_1292(prng *rng, uint8_t double_mu)
 // =============================================================================
 
 /*
- * Convert an integer polynomial (with small values) into the
- * representation with complex numbers.
- * Also works when r and t overlap, since the loop goes in decreasing order.
- */
-static void
-smallints_to_fpr(fpr *r, const int8_t *t, unsigned logn)
-{
-	size_t u;
-
-	u = MKN(logn);
-	while (u --> 0) {
-		r[u] = fpr_of(t[u]);
-	}
-}
-
-/*
  * The hash of a message is a point in {0,1}^{2n}, so it consists of 2n bits,
  * which is n/4 bytes.
  * Therefore, the first component ranges from byte 0 to byte n / 8 - 1,
@@ -193,7 +160,7 @@ smallints_to_fpr(fpr *r, const int8_t *t, unsigned logn)
 	((h) + ((logn) <= 3 ? 1u : 1u << ((logn) - 3)))
 
 static void
-hash_to_fpr(fpr *p, const uint8_t *h, unsigned logn)
+hash_to_fft(fpr *p, const uint8_t *h, unsigned logn)
 {
 	size_t n, u, v;
 	uint8_t hash;
@@ -215,6 +182,7 @@ hash_to_fpr(fpr *p, const uint8_t *h, unsigned logn)
 			}
 		}
 	}
+	Zf(FFT)(p, logn);
 }
 
 /*
@@ -254,12 +222,9 @@ construct_basis(
 	fpr *restrict bf, fpr *restrict bg, fpr *restrict bF, fpr *restrict bG,
 	unsigned logn)
 {
-	smallints_to_fpr(bf, f, logn);
-	smallints_to_fpr(bg, g, logn);
-	smallints_to_fpr(bF, F, logn);
-	Zf(FFT)(bf, logn);
-	Zf(FFT)(bg, logn);
-	Zf(FFT)(bF, logn);
+	Zf(int8_to_fft)(bf, f, logn);
+	Zf(int8_to_fft)(bg, g, logn);
+	Zf(int8_to_fft)(bF, F, logn);
 
 	if (G == NULL) {
 		size_t u, hn;
@@ -274,8 +239,7 @@ construct_basis(
 		}
 		Zf(poly_div_fft)(bG, bf, logn);
 	} else {
-		smallints_to_fpr(bG, G, logn);
-		Zf(FFT)(bG, logn);
+		Zf(int8_to_fft)(bG, G, logn);
 	}
 }
 
@@ -300,10 +264,8 @@ sample_short(prng *rng, fpr *restrict x0, fpr *restrict x1,
 	n = MKN(logn);
 	norm = 0;
 
-	hash_to_fpr(x0, h, logn);
-	hash_to_fpr(x1, SECOND_HASH(h, logn), logn);
-	Zf(FFT)(x0, logn);
-	Zf(FFT)(x1, logn);
+	hash_to_fft(x0, h, logn);
+	hash_to_fft(x1, SECOND_HASH(h, logn), logn);
 
 	/*
 	 * Set the target vector to (t0, t1) = B * (h0, h1), i.e.:
@@ -339,7 +301,7 @@ sample_short(prng *rng, fpr *restrict x0, fpr *restrict x1,
 	 * For a large enough verification margin, it is unlikely that the
 	 * norm of the gaussian (x0, x1) is too large.
 	 */
-	if ((uint32_t)norm > l2bound[logn]) {
+	if ((uint32_t)norm > Zf(l2bound)[logn]) {
 		return 0;
 	}
 

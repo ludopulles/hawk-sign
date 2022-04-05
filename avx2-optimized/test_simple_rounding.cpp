@@ -211,16 +211,6 @@ mkgauss_1425(prng *rng)
 constexpr size_t logn = 9, n = MKN(logn);
 
 /*
- * Convert an integer polynomial (with small values) into the
- * representation with complex numbers.
- * Also works when r and t overlap, since the loop goes in decreasing order.
- */
-static void
-smallints_to_fpr(fpr *r, const int8_t *t) {
-	for (size_t u = n; u --> 0; ) r[u] = fpr_of(t[u]);
-}
-
-/*
  * Generate a random polynomial with a Gaussian distribution. This function
  * also makes sure that the resultant of the polynomial with phi is odd.
  */
@@ -274,11 +264,8 @@ int simple_rounding_test(unsigned char *seed) {
 		poly_small_mkgauss(&rng, f);
 		poly_small_mkgauss(&rng, g);
 
-		smallints_to_fpr(fp, f);
-		smallints_to_fpr(gp, g);
-
-		Zf(FFT)(fp, logn);
-		Zf(FFT)(gp, logn);
+		Zf(int8_to_fft)(fp, f);
+		Zf(int8_to_fft)(gp, g);
 
 		Zf(poly_invnorm2_fft)(q00, fp, gp, logn);
 
@@ -287,11 +274,8 @@ int simple_rounding_test(unsigned char *seed) {
 		poly_sign_mkgauss(&rng, x0, h);
 		poly_sign_mkgauss(&rng, x1, h + n / 8);
 
-		smallints_to_fpr(x0p, x0);
-		smallints_to_fpr(x1p, x1);
-
-		Zf(FFT)(x0p, logn);
-		Zf(FFT)(x1p, logn);
+		Zf(int8_to_fft)(x0p, x0);
+		Zf(int8_to_fft)(x1p, x1);
 
 		Zf(poly_add_muladj_fft)(res, x0p, x1p, fp, gp, logn); // f^* x0 + g^* x1
 		Zf(poly_mul_fft)(res, q00, logn);

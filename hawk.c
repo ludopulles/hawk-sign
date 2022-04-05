@@ -106,22 +106,8 @@ shake256_init_prng_from_system(shake256_context *sc)
 	return 0;
 }
 
-static inline uint8_t *
-align_u64(void *tmp)
-{
-	uint8_t *atmp;
-	unsigned off;
-
-	atmp = tmp;
-	off = (uintptr_t)atmp & 7u;
-	if (off != 0) {
-		atmp += 8u - off;
-	}
-	return atmp;
-}
-
-static inline uint8_t *
-align_u16(void *tmp)
+static inline int16_t *
+align_i16(void *tmp)
 {
 	uint8_t *atmp;
 
@@ -129,7 +115,7 @@ align_u16(void *tmp)
 	if (((uintptr_t)atmp & 1u) != 0) {
 		atmp ++;
 	}
-	return atmp;
+	return (int16_t *)atmp;
 }
 
 static inline fpr *
@@ -185,7 +171,7 @@ hawk_keygen_make(shake256_context *rng, unsigned logn, void *privkey,
 	g = f + n;
 	F = g + n;
 	G = F + n;
-	q00 = (fpr *)align_u64(G + n);
+	q00 = align_fpr(G + n);
 	q10 = q00 + n;
 	q11 = q10 + n;
 
@@ -196,7 +182,7 @@ hawk_keygen_make(shake256_context *rng, unsigned logn, void *privkey,
 	 * of q00[0] is first extracted and only afterwards is the last value of
 	 * q10_num set.
 	 */
-	q00_num = (int16_t *)align_u16(tmp);
+	q00_num = align_i16(tmp);
 	q10_num = q00_num + n;
 
 	atmp = (uint8_t *)(q11 + n);
@@ -207,9 +193,9 @@ hawk_keygen_make(shake256_context *rng, unsigned logn, void *privkey,
 	sk = privkey;
 	sk[0] = 0x50 + logn;
 
+	pk = pubkey;
 	pk_len = 0;
 	if (pubkey != NULL) {
-		pk = pubkey;
 		pk[0] = 0x00 + logn;
 	}
 
@@ -256,15 +242,16 @@ hawk_keygen_make(shake256_context *rng, unsigned logn, void *privkey,
 
 /* see hawk.h */
 int
-hawk_make_public(void *pubkey, size_t pubkey_len, const void *privkey,
+hawk_make_public(void *pubkey, size_t *pubkey_len, const void *privkey,
 	size_t privkey_len, void *tmp, size_t tmp_len)
 {
 	uint8_t *pk, *atmp;
 	const uint8_t *sk;
 	unsigned logn;
-	size_t u, v, n, pk_len;
-
+	size_t v, n;
 	int8_t *f, *g, *F;
+	int16_t *q00, *q10;
+	fpr *bq00, *bq10;
 
 	/*
 	 * Get degree from private key header byte, and check
@@ -281,10 +268,11 @@ hawk_make_public(void *pubkey, size_t pubkey_len, const void *privkey,
 	if (logn < 1 || logn > 9) {
 		return HAWK_ERR_FORMAT;
 	}
-	if (privkey_len != HAWK_PRIVKEY_SIZE(logn)) {
+	if (privkey_len < HAWK_MIN_SECKEY_SIZE[logn]
+		|| privkey_len > HAWK_MAX_SECKEY_SIZE[logn]) {
 		return HAWK_ERR_FORMAT;
 	}
-	if (pubkey_len < HAWK_PUBKEY_SIZE(logn)
+	if (*pubkey_len < HAWK_MAX_PUBKEY_SIZE[logn]
 		|| tmp_len < HAWK_TMPSIZE_MAKEPUB(logn))
 	{
 		return HAWK_ERR_SIZE;
@@ -297,32 +285,35 @@ hawk_make_public(void *pubkey, size_t pubkey_len, const void *privkey,
 	f = (int8_t *)tmp;
 	g = f + n;
 	F = g + n;
-	v = Zf(decode_seckey)(f, g, F, privkey + 1, privkey_len - 1, logn);
-	if (v == 0) {
+
+	if (Zf(decode_seckey)(f, g, F, privkey + 1, privkey_len - 1, logn) == 0) {
 		return HAWK_ERR_FORMAT;
 	}
-
-	u = 1 + v;
 
 	/*
 	 * Compute public key.
 	 */
-	h = (uint16_t *)align_u16(g + n);
-	atmp = (uint8_t *)(h + n);
-	if (!Zf(compute_public)(h, f, g, logn, atmp)) {
-		return HAWK_ERR_FORMAT;
-	}
+	q00 = align_i16(tmp);
+	q10 = q00 + n;
+	bq00 = align_fpr(q10 + n);
+	bq10 = bq00 + n;
+	atmp = (uint8_t *)(bq10 + n);
+
+	Zf(make_public)(f, g, F, NULL, bq00, bq10, NULL, logn, atmp);
+
+	Zf(fft_to_int16)(q10, bq10, logn);
+	Zf(fft_to_int16)(q00, bq00, logn);
 
 	/*
 	 * Encode public key.
 	 */
 	pk = pubkey;
-	pk_len = HAWK_PUBKEY_SIZE(logn);
 	pk[0] = 0x00 + logn;
-	v = Zf(modq_encode)(pk + 1, pk_len - 1, h, logn);
-	if (v != pk_len - 1) {
-		return HAWK_ERR_INTERNAL;
+	v = Zf(encode_pubkey)(pk + 1, *pubkey_len - 1, q00, q10, logn);
+	if (v == 0) {
+		return HAWK_ERR_FORMAT;
 	}
+	*pubkey_len = 1 + v;
 	return 0;
 
 }
@@ -459,8 +450,8 @@ hawk_sign_finish(shake256_context *rng, void *sig, size_t *sig_len,
 
 	n = MKN(logn);
 	hm = (uint8_t *)tmp;
-	sv = (int16_t *)align_u16(hm + HAWK_HASH_SIZE(logn));
-	atmp = align_u64(sv + n);
+	sv = align_i16(hm + HAWK_HASH_SIZE(logn));
+	atmp = (uint8_t *)align_fpr(sv + n);
 
 	/*
 	 * Hash message to a point.
@@ -596,8 +587,8 @@ hawk_sign_dyn_finish(shake256_context *rng, void *sig, size_t *sig_len,
 	g = f + n;
 	F = g + n;
 	hm = (uint8_t *)(F + n);
-	sv = (int16_t *)align_u16(hm + HAWK_HASH_SIZE(logn));
-	atmp = align_u64(sv + n);
+	sv = align_i16(hm + HAWK_HASH_SIZE(logn));
+	atmp = (uint8_t *)align_fpr(sv + n);
 
 	v = Zf(decode_seckey)(f, g, F, privkey + 1, privkey_len - 1, logn);
 	if (v == 0) {
@@ -759,7 +750,7 @@ hawk_verify_finish(const void *sig, size_t sig_len, int sig_type,
 
 	n = MKN(logn);
 	hm = (uint8_t *)tmp;
-	sv = (int16_t *)align_u16(hm + HAWK_HASH_SIZE(logn));
+	sv = align_i16(hm + HAWK_HASH_SIZE(logn));
 
 	q00_num = sv + n;
 	q10_num = q00_num + n;

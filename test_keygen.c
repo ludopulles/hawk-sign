@@ -15,17 +15,6 @@ long long time_diff(const struct timeval *begin, const struct timeval *end) {
 	return 1000000LL * (end->tv_sec - begin->tv_sec) + (end->tv_usec - begin->tv_usec);
 }
 
-void fpr_to_int16(int16_t *buf, fpr *p, size_t logn) {
-	unsigned n, u;
-
-	n = MKN(logn);
-	for (u = 0; u < n; u ++) {
-		int val = fpr_rint(p[u]);
-		assert(-(1 << 15) <= val && val < (1 << 15));
-		buf[u] = (int16_t) val;
-	}
-}
-
 void poly_output(fpr *p, size_t logn) {
 	for (size_t u = 0; u < MKN(logn); u++) {
 		if (u) printf(" ");
@@ -439,14 +428,10 @@ keygen_count_fails(inner_shake256_context *rng,
 
 		rt1 = (fpr *)tmp;
 		rt2 = rt1 + n;
-		poly_small_to_fp(q00, f, logn);
-		poly_small_to_fp(rt1, g, logn);
-		poly_small_to_fp(q11, F, logn);
-		poly_small_to_fp(rt2, G, logn);
-		Zf(FFT)(q00, logn); // f
-		Zf(FFT)(rt1, logn); // g
-		Zf(FFT)(q11, logn); // F
-		Zf(FFT)(rt2, logn); // G
+		Zf(int8_to_fft)(q00, f, logn);
+		Zf(int8_to_fft)(rt1, g, logn);
+		Zf(int8_to_fft)(q11, F, logn);
+		Zf(int8_to_fft)(rt2, G, logn);
 
 		// Optional: do Babai reduction here on (F,G) w.r.t (f,g).
 		Zf(ffBabai_reduce)(q00, rt1, q11, rt2, F, G, logn, rt2 + n);
@@ -496,12 +481,8 @@ void measure_keygen() {
 		// Generate key pair.
 		keygen_count_fails(&sc, f, g, F, G, q00, q10, q11, logn, b, &fails);
 
-		Zf(iFFT)(q00, logn);
-		Zf(iFFT)(q10, logn);
-		Zf(iFFT)(q11, logn);
-
-		fpr_to_int16(q00n, q00, logn);
-		fpr_to_int16(q10n, q10, logn);
+		Zf(fft_to_int16)(q00n, q00, logn);
+		Zf(fft_to_int16)(q10n, q10, logn);
 
 		size_t pubkey_sz_hq00 = Zf(huffman_encode_q00)(NULL, 0, q00n, logn);
 		size_t pubkey_sz_hq10 = Zf(huffman_encode_q10)(NULL, 0, q10n, logn);

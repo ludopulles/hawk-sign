@@ -27,19 +27,6 @@ long long time_diff(const struct timeval *begin, const struct timeval *end) {
 	return 1000000LL * (end->tv_sec - begin->tv_sec) + (end->tv_usec - begin->tv_usec);
 }
 
-static void poly_small_to_fp(fpr *x, const int8_t *f, unsigned logn) {
-	for (size_t u = 0, n = MKN(logn); u < n; u ++)
-		x[u] = fpr_of(f[u]);
-}
-
-void fpr_to_int16(int16_t *buf, fpr *p, size_t logn) {
-	for (size_t u = 0, n = MKN(logn); u < n; u ++) {
-		int val = fpr_rint(p[u]);
-		assert(-(1 << 15) <= val && val < (1 << 15));
-		buf[u] = (int16_t) val;
-	}
-}
-
 unsigned sqnorm(int8_t *p, size_t logn) {
 	unsigned res = 0;
 	for (size_t u = 0, n = MKN(logn); u < n; u ++)
@@ -482,10 +469,8 @@ WorkerResult measure_keygen()
 
 		result.num_iters++;
 
-		Zf(iFFT)(q00, logn);
-		Zf(iFFT)(q10, logn);
-		fpr_to_int16(q00i, q00, logn);
-		fpr_to_int16(q10i, q10, logn);
+		Zf(fft_to_int16)(q00i, q00, logn);
+		Zf(fft_to_int16)(q10i, q10, logn);
 
 		size_t eq10 = Zf(encode_q10)(NULL, 0, q10i, logn, 4095, 8);
 		size_t hq10 = Zf(huffman_encode)(NULL, 0, q10i, logn);
@@ -493,22 +478,17 @@ WorkerResult measure_keygen()
 		result.encodeB += eq10;
 		result.huffmanB += hq10;
 
-		poly_small_to_fp(rt1, f, logn);
-		poly_small_to_fp(rt2, g, logn);
-		poly_small_to_fp(rt3, F, logn);
-		poly_small_to_fp(rt4, G, logn);
-		Zf(FFT)(rt1, logn); // f
-		Zf(FFT)(rt2, logn); // g
-		Zf(FFT)(rt3, logn); // F
-		Zf(FFT)(rt4, logn); // G
+		Zf(int8_to_fft)(rt1, f, logn);
+		Zf(int8_to_fft)(rt2, g, logn);
+		Zf(int8_to_fft)(rt3, F, logn);
+		Zf(int8_to_fft)(rt4, G, logn);
 
 		// now try to optimize F, G with babai.
 		Zf(ffBabai_reduce)(rt1, rt2, rt3, rt4, F, G, logn, tmp_babai);
 
 		// q10 = F*adj(f) + G*adj(g)
 		Zf(poly_add_muladj_fft)(q10, rt3, rt4, rt1, rt2, logn);
-		Zf(iFFT)(q10, logn);
-		fpr_to_int16(q10i, q10, logn);
+		Zf(fft_to_int16)(q10i, q10, logn);
 
 		size_t epq10 = Zf(encode_q10)(NULL, 0, q10i, logn, 2047, 8);
 		size_t hpq10 = Zf(huffman_encode)(NULL, 0, q10i, logn);

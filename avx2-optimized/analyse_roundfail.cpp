@@ -70,13 +70,6 @@ mkgauss_1292(prng *rng, uint8_t double_mu)
 	return *(int32_t *)&v;
 }
 
-static void smallints_to_fpr(fpr *r, const int8_t *t, unsigned logn)
-{
-	for (size_t u = MKN(logn); u --> 0; ) {
-		r[u] = fpr_of(t[u]);
-	}
-}
-
 bool mock_sign(prng *rng, const fpr *restrict expanded_seckey, const uint8_t *restrict h,
 	uint32_t bound, unsigned logn, uint8_t *restrict tmp, vector<double> &lens)
 {
@@ -166,10 +159,8 @@ begin_sign:
 		goto begin_sign;
 	}
 
-	smallints_to_fpr(tx0, x0, logn);
-	smallints_to_fpr(tx1, x1, logn);
-	Zf(FFT)(tx0, logn);
-	Zf(FFT)(tx1, logn);
+	Zf(int8_to_fft)(tx0, x0, logn);
+	Zf(int8_to_fft)(tx1, x1, logn);
 
 	/*
 	 * Calculate the rounding errors that occur when we want to recover s0 from

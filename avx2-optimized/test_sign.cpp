@@ -28,14 +28,46 @@ ll time_diff(const struct timeval *begin, const struct timeval *end) {
 	return 1000000LL * (end->tv_sec - begin->tv_sec) + (end->tv_usec - begin->tv_usec);
 }
 
-#define SECOND_HASH(h, logn) ((h) + ((logn) <= 3 ? 1u : 1u << ((logn) - 3)))
+#define SECOND_HASH(h, logn) \
+	((h) + ((logn) <= 3 ? 1u : 1u << ((logn) - 3)))
 
-/* Should be moved to vrfy.c */
+/**
+ * If s != NULL, set the polynomial p equal to h - 2*s.
+ * Otherwise, set p equal to h.
+ * Returns the polynomial in FFT format.
+ */
+static void
+hash_to_fft(fpr *p, const uint8_t *h, const int16_t *s, unsigned logn)
+{
+	size_t n, u, v;
+	uint8_t hash;
+
+	n = MKN(logn);
+	if (logn <= 3) {
+		hash = h[0];
+		for (v = 0; v < n; v ++) {
+			p[v] = fpr_of((hash & 1) - (s == NULL ? 0 : 2 * s[v]));
+			hash >>= 1;
+		}
+	} else {
+		for (u = 0; u < n; ) {
+			hash = *h++;
+			for (v = 0; v < 8; v ++, u ++) {
+				p[u] = fpr_of((hash & 1) - (s == NULL ? 0 : 2 * s[u]));
+				hash >>= 1;
+			}
+		}
+	}
+	Zf(FFT)(p, logn);
+}
+
+
 /* Requires space for 6 polynomials of size 2^logn */
-int Zf(verify_nearest_plane_tree)(const fpr *restrict tree,
-	const uint8_t *restrict h, const int16_t *restrict s1,
+static int
+verify_nearest_plane_tree(const fpr *restrict tree,
+	const uint8_t *restrict h, int16_t *restrict s0, const int16_t *restrict s1,
 	const fpr *restrict q00, const fpr *restrict q10, const fpr *restrict q11,
-	uint32_t bound, unsigned logn, uint8_t *restrict tmp)
+	unsigned logn, uint8_t *restrict tmp)
 {
 	/*
 	 * This works better than simple rounding.
@@ -43,80 +75,26 @@ int Zf(verify_nearest_plane_tree)(const fpr *restrict tree,
 	 *     h0/2 + (h1/2 - s1) q10 / q00.
 	 */
 
-	size_t n, u;
-	fpr *t0, *t1, *t2, *t3, trace;
+	size_t n;
+	fpr *t0, *t1;
 
 	n = MKN(logn);
 	t0 = (fpr *)tmp;
 	t1 = t0 + n;
-	t2 = t1 + n;
-	t3 = t2 + n;
 
-	size_t w;
-	for (u = 0, w = 0; u < n; w ++) {
-		uint8_t h0 = h[w], h1 = h[n/4 + w];
-		for (size_t v = 0; v < 8; v ++, u ++) {
-			t0[u] = fpr_half(fpr_of(h0 & 1));
-			t1[u] = fpr_half(fpr_of((h1 & 1) - 2 * s1[u]));
-			h0 >>= 1;
-			h1 >>= 1;
-		}
-	}
+	hash_to_fft(t0, h, NULL, logn);
+	hash_to_fft(t1, SECOND_HASH(h, logn), s1, logn);
 
-	Zf(FFT)(t0, logn);
-	Zf(FFT)(t1, logn);
-	memcpy(t2, t1, n * sizeof *t1);
-	Zf(poly_mul_fft)(t2, q10, logn);
-	Zf(poly_div_fft)(t2, q00, logn);
-	Zf(poly_add)(t2, t0, logn); // t2 = h0/2 + (h1/2 - s1) q10/q00
+	Zf(poly_mul_fft)(t1, q10, logn);
+	Zf(poly_div_autoadj_fft)(t1, q00, logn);
+	Zf(poly_add)(t0, t1, logn);
+	Zf(poly_mulconst)(t0, fpr_onehalf, logn);
 
-	// Run Babai with target t2 and Gram-matrix q00.
-	Zf(ffNearestPlane_tree)(t3, tree, t2, logn, t3 + n);
+	// Run Babai with target t0 and Gram-matrix q00.
+	Zf(ffNearestPlane_tree)(t1, tree, t0, logn, t1 + n);
+	Zf(fft_to_int16)(s0, t1, logn);
 
-	Zf(poly_sub)(t0, t3, logn);
-	Zf(poly_mulconst)(t0, fpr_two, logn);
-	// t0 = 2 * (t0 - t3) = h0 - 2 s0
-	Zf(poly_mulconst)(t1, fpr_two, logn);
-	// t1 = h1 - 2 s1
-
-	// Currently in memory: s0, s1, s1, s0 (in FFT representation)
-	memcpy(t2, t1, n * sizeof *t0);
-	memcpy(t3, t0, n * sizeof *t0);
-
-	// Compute s0 q00 s0* + s0 q01 s1* + s1 q10 s0* + s1 q11 s1*
-	Zf(poly_mulselfadj_fft)(t2, logn);
-	Zf(poly_mulselfadj_fft)(t3, logn);
-	Zf(poly_mul_autoadj_fft)(t2, q11, logn); // t2 = s1 q11 s1*
-	Zf(poly_mul_autoadj_fft)(t3, q00, logn); // t3 = s0 q00 s0*
-	Zf(poly_muladj_fft)(t1, t0, logn); // t1 = s1 s0*
-	Zf(poly_mul_fft)(t1, q10, logn); // t1 = s1 q10 s0*
-
-	Zf(poly_addselfadj_fft)(t1, logn); // t1 = s1 q10 s0* + s0 q01 s1*
-	Zf(poly_add_autoadj_fft)(t1, t2, logn);
-	Zf(poly_add_autoadj_fft)(t1, t3, logn);
-
-	trace = fpr_zero;
-	for (u = 0; u < n/2; u ++) {
-		trace = fpr_add(trace, t1[u]);
-	}
-
-	/*
-	 * Note: only n/2 embeddings are stored, because they come in pairs.
-	 */
-	trace = fpr_double(trace);
-	/*
-	 * Renormalize, so we get the norm of (s0, s1) w.r.t Q.
-	 */
-	trace = fpr_div(trace, fpr_of(n));
-
-	/*
-	 * Signature is valid if and only if
-	 *     `Tr(s* Q s) / n (=Tr(x^* x)/n = sum_i x_i^2) <= bound`.
-	 * Note: check whether the norm is actually storable in a uint32_t.
-	 */
-	return fpr_lt(fpr_zero, trace) && fpr_lt(trace, fpr_ptwo31m1)
-		&& (uint32_t)fpr_rint(trace) <= bound;
-
+	return Zf(complete_verify)(h, s0, s1, q00, q10, q11, logn, tmp);
 }
 
 // =============================================================================
@@ -124,20 +102,12 @@ int Zf(verify_nearest_plane_tree)(const fpr *restrict tree,
 // =============================================================================
 constexpr size_t logn = 9, n = MKN(logn);
 
-void output_poly(int16_t *x)
-{
-	for (size_t u = 0; u < n; u++) {
-		printf("%d ", x[u]);
-	}
-	printf("\n");
-}
-
-const int num_samples = 10'000;
+const int num_samples = 10;
 
 uint8_t pregen_h[num_samples][n / 4] = {};
 int16_t pregen_s0[num_samples][n], pregen_s1[num_samples][n], pregen_s[num_samples][n];
 
-void measure_sign_speed(uint32_t bound)
+void measure_sign_speed()
 {
 	// uint8_t b[42 << logn];
 	uint8_t b[50 << logn];
@@ -220,7 +190,7 @@ void measure_sign_speed(uint32_t bound)
 	nr_cor = 0;
 	gettimeofday(&t0, NULL);
 	for (int rep = 0; rep < num_samples; rep++) {
-		nr_cor += Zf(verify_nearest_plane)(pregen_h[rep], pregen_s0[rep], pregen_s[rep], q00, q10, q11, logn, b);
+		nr_cor += Zf(verify_nearest_plane)(pregen_h[rep], s0, pregen_s[rep], q00, q10, q11, logn, b);
 	}
 	gettimeofday(&t1, NULL);
 	ll vnp_us = time_diff(&t0, &t1);
@@ -233,7 +203,7 @@ void measure_sign_speed(uint32_t bound)
 	nr_cor = 0;
 	gettimeofday(&t0, NULL);
 	for (int rep = 0; rep < num_samples; rep++) {
-		nr_cor += Zf(verify_nearest_plane_tree)(tree, pregen_h[rep], pregen_s[rep], q00, q10, q11, bound, logn, b);
+		nr_cor += verify_nearest_plane_tree(tree, pregen_h[rep], s0, pregen_s[rep], q00, q10, q11, logn, b);
 	}
 	gettimeofday(&t1, NULL);
 	ll vnpt_us = time_diff(&t0, &t1);
@@ -326,8 +296,6 @@ constexpr fpr sigma_kg  = { v: 1.425 };
 constexpr fpr sigma_sig = { v: 1.292 };
 constexpr fpr verif_margin = { v: 1.1 };
 
-uint32_t bound;
-
 void work()
 {
 	WorkerResult result = measure_signatures();
@@ -346,9 +314,7 @@ int main() {
 	printf("Seed: %u\n", seed);
 	srand(seed);
 
-	bound = fpr_floor(fpr_mul(fpr_sqr(fpr_mul(verif_margin, fpr_double(sigma_sig))), fpr_double(fpr_of(n))));
-
-	measure_sign_speed(bound);
+	measure_sign_speed();
 	return 0;
 
 	const int nthreads = 4;

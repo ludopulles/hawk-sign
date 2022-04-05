@@ -28,23 +28,6 @@ long long time_diff(const struct timeval *begin, const struct timeval *end) {
 	return 1000000LL * (end->tv_sec - begin->tv_sec) + (end->tv_usec - begin->tv_usec);
 }
 
-static void
-smallints_to_fpr(fpr *r, const int8_t *t, unsigned logn)
-{
-	size_t n = MKN(logn), u;
-	for (u = 0; u < n; u ++) {
-		r[u] = fpr_of(t[u]);
-	}
-}
-
-void fpr_to_int16(int16_t *buf, fpr *p, size_t logn) {
-	for (size_t u = 0, n = MKN(logn); u < n; u ++) {
-		int val = fpr_rint(p[u]);
-		assert(-(1 << 15) <= val && val < (1 << 15));
-		buf[u] = (int16_t) val;
-	}
-}
-
 unsigned sqnorm(int8_t *p, size_t logn) {
 	unsigned res = 0;
 	for (size_t u = 0, n = MKN(logn); u < n; u ++)
@@ -467,10 +450,8 @@ WorkerResult measure_keygen()
 		// Generate key pair.
 		Zf(keygen)(&sc, f, g, F, G, q00, q10, q11, logn, tmp.b);
 
-		Zf(iFFT)(q00, logn);
-		Zf(iFFT)(q10, logn);
-		fpr_to_int16(q00i, q00, logn);
-		fpr_to_int16(q10i, q10, logn);
+		Zf(fft_to_int16)(q00i, q00, logn);
+		Zf(fft_to_int16)(q10i, q10, logn);
 
 		size_t enc00 = Zf(encode_q00)(NULL, 0, q00i, logn, 512, 5);
 		size_t huf00 = Zf(huffman_encode_q00)(NULL, 0, q00i, logn);
@@ -479,21 +460,16 @@ WorkerResult measure_keygen()
 
 		if (!enc00 || !huf00 || !enc || !huf) { printf("."); fflush(stdout); result.num_fails++; _--; continue; }
 
-		smallints_to_fpr(_f, f, logn);
-		smallints_to_fpr(_g, g, logn);
-		smallints_to_fpr(_F, F, logn);
-		smallints_to_fpr(_G, G, logn);
-		Zf(FFT)(_f, logn); // f
-		Zf(FFT)(_g, logn); // g
-		Zf(FFT)(_F, logn); // F
-		Zf(FFT)(_G, logn); // G
+		Zf(int8_to_fft)(_f, f, logn);
+		Zf(int8_to_fft)(_g, g, logn);
+		Zf(int8_to_fft)(_F, F, logn);
+		Zf(int8_to_fft)(_G, G, logn);
 
 		Zf(ffBabai_reduce)(_f, _g, _F, _G, F, G, logn, _G + n);
 
 		// q10 = F*adj(f) + G*adj(g)
 		Zf(poly_add_muladj_fft)(q10, _F, _G, _f, _g, logn);
-		Zf(iFFT)(q10, logn);
-		fpr_to_int16(q10i, q10, logn);
+		Zf(fft_to_int16)(q10i, q10, logn);
 
 		size_t encB = Zf(encode_q10)(NULL, 0, q10i, logn, 2048, 8);
 		size_t hufB = Zf(huffman_encode)(NULL, 0, q10i, logn);

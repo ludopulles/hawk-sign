@@ -2306,20 +2306,6 @@ align_u32(void *base, void *data)
 	return (uint32_t *)(cb + k);
 }
 
-/*
- * Convert a small vector to floating point.
- */
-static void
-poly_small_to_fp(fpr *x, const int8_t *f, unsigned logn)
-{
-	size_t n, u;
-
-	n = MKN(logn);
-	for (u = 0; u < n; u ++) {
-		x[u] = fpr_of(f[u]);
-	}
-}
-
 // =============================================================================
 
 /*
@@ -3990,7 +3976,63 @@ solve_NTRU(unsigned logn, int8_t *F, int8_t *G,
 	return 1;
 }
 
-/* =================================================================== */
+/* ========================================================================= */
+
+/* see inner.h */
+void
+Zf(make_public)(const int8_t *restrict f, const int8_t *restrict g,
+	const int8_t *restrict F, const int8_t *restrict G,
+	fpr *restrict q00, fpr *restrict q10, fpr *restrict q11,
+	unsigned logn, uint8_t *restrict tmp)
+{
+	size_t n;
+	fpr *bg, *bG, *bq11;
+
+	n = MKN(logn);
+	bg = (fpr *)tmp;
+	bG = bg + n;
+
+	if (q11 == NULL) {
+		bq11 = bG + n;
+	} else {
+		bq11 = q11;
+	}
+
+	Zf(int8_to_fft)(q00, f, logn);
+	Zf(int8_to_fft)(bg, g, logn);
+	Zf(int8_to_fft)(bq11, F, logn);
+
+	if (G == NULL) {
+		size_t u, hn;
+
+		/*
+		 * Compute G = (1 + gF) / f, where all polynomials are in FFT representation.
+		 */
+		hn = MKN(logn) >> 1;
+		Zf(poly_prod_fft)(bG, bg, bq11, logn);
+		for (u = 0; u < hn; u++) {
+			bG[u] = fpr_add(bG[u], fpr_one);
+		}
+		Zf(poly_div_fft)(bG, q00, logn);
+	} else {
+		Zf(int8_to_fft)(bG, G, logn);
+	}
+
+	// q10 = F*adj(f) + G*adj(g)
+	Zf(poly_add_muladj_fft)(q10, bq11, bG, q00, bg, logn);
+
+	// q00 = f*adj(f) + g*adj(g)
+	Zf(poly_mulselfadj_fft)(q00, logn); // f*adj(f)
+	Zf(poly_mulselfadj_fft)(bg, logn); // g*adj(g)
+	Zf(poly_add)(q00, bg, logn);
+
+	if (q11 != NULL) {
+		// q11 = F*bar(F) + G*bar(G)
+		Zf(poly_mulselfadj_fft)(bq11, logn); // F*adj(F)
+		Zf(poly_mulselfadj_fft)(bG, logn); // G*adj(G)
+		Zf(poly_add)(bq11, bG, logn);
+	}
+}
 
 /* see inner.h */
 int
@@ -4016,16 +4058,12 @@ Zf(complete_private)(const int8_t *restrict f, const int8_t *restrict g,
 	/*
 	 * Calculate q00, q10, q11 (in FFT representation) using
 	 * Q = B * adj(B^{T}).
+	 *
 	 */
-	poly_small_to_fp(q00, f, logn);
-	poly_small_to_fp(rt1, g, logn);
-	poly_small_to_fp(q11, F, logn);
-	poly_small_to_fp(rt2, G, logn);
-
-	Zf(FFT)(q00, logn); // f
-	Zf(FFT)(rt1, logn); // g
-	Zf(FFT)(q11, logn); // F
-	Zf(FFT)(rt2, logn); // G
+	Zf(int8_to_fft)(q00, f, logn);
+	Zf(int8_to_fft)(rt1, g, logn);
+	Zf(int8_to_fft)(q11, F, logn);
+	Zf(int8_to_fft)(rt2, G, logn);
 
 	/*
 	 * Perform Babai's Nearest Plane Algorithm to reduce (F, G) with
@@ -4107,10 +4145,8 @@ Zf(keygen)(inner_shake256_context *rng,
 		 * as the check is easier to do when Q_00 is given in FFT format.
 		 * Moreover, in most cases, this check will succeed,
 		 */
-		poly_small_to_fp(q10, f, logn);
-		poly_small_to_fp(q11, g, logn);
-		Zf(FFT)(q10, logn); // f
-		Zf(FFT)(q11, logn); // g
+		Zf(int8_to_fft)(q10, f, logn);
+		Zf(int8_to_fft)(q11, g, logn);
 		Zf(poly_invnorm2_fft)(q00, q10, q11, logn);
 		Zf(iFFT)(q00, logn); // 1 / Q_00
 
