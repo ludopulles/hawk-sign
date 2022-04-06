@@ -2860,7 +2860,7 @@ solve_NTRU_intermediate(unsigned logn_top,
 		 *   we divide degree by d = 2 or 3
 		 *   f'(x^d) = N(f)(x^d) = f * adj(f)
 		 *   g'(x^d) = N(g)(x^d) = g * adj(g)
-		 *   f'*G' - g'*F' = q
+		 *   f'*G' - g'*F' = 1
 		 *   F = F'(x^d) * adj(g)
 		 *   G = G'(x^d) * adj(f)
 		 *
@@ -3262,7 +3262,7 @@ solve_NTRU_binary_depth1(unsigned logn_top,
 	 *
 	 *   f' = f0^2 - X^2*f1^2
 	 *   g' = g0^2 - X^2*g1^2
-	 *   F' and G' are a solution to f'G' - g'F' = q (from deeper levels)
+	 *   F' and G' are a solution to f'G' - g'F' = 1 (from deeper levels)
 	 *   F = F'*(g0 - X*g1)
 	 *   G = G'*(f0 - X*f1)
 	 *
@@ -3414,7 +3414,7 @@ solve_NTRU_binary_depth1(unsigned logn_top,
 		 *   f'(x^2) = N(f)(x^2) = f * adj(f)
 		 *   g'(x^2) = N(g)(x^2) = g * adj(g)
 		 *
-		 *   f'*G' - g'*F' = q
+		 *   f'*G' - g'*F' = 1
 		 *
 		 *   F = F'(x^2) * adj(g)
 		 *   G = G'(x^2) * adj(f)
@@ -3631,7 +3631,7 @@ solve_NTRU_binary_depth0(unsigned logn,
 	 *
 	 *   f' = f0^2 - X^2*f1^2
 	 *   g' = g0^2 - X^2*g1^2
-	 *   F' and G' are a solution to f'G' - g'F' = q (from deeper levels)
+	 *   F' and G' are a solution to f'G' - g'F' = 1 (from deeper levels)
 	 *   F = F'*(g0 - X*g1)
 	 *   G = G'*(f0 - X*f1)
 	 *
