@@ -7,7 +7,7 @@ CFLAGS = -W -Wall -Wshadow -O2 -fdiagnostics-color=always
 #CFLAGS = -W -Wall -Wshadow -g -fsanitize=address,undefined
 LIBS = -lm
 
-OBJ = build/common.o build/compress.o build/fft.o build/ffo.o build/fpr.o build/keygen.o build/rng.o build/sampler.o build/shake.o build/sign.o build/vrfy.o
+OBJ = build/common.o build/compress.o build/fft.o build/ffo.o build/fpr.o build/keygen.o build/rng.o build/shake.o build/sign.o build/vrfy.o
 PROGS = bin/main bin/generate bin/speed
 
 HEAD = fpr.h inner.h
@@ -48,8 +48,6 @@ build/keygen.o: keygen.c $(HEAD)
 	$(CC) $(CFLAGS) -c -o build/keygen.o keygen.c
 build/rng.o: rng.c $(HEAD)
 	$(CC) $(CFLAGS) -c -o build/rng.o rng.c
-build/sampler.o: sampler.c $(HEAD)
-	$(CC) $(CFLAGS) -c -o build/sampler.o sampler.c
 build/shake.o: shake.c $(HEAD)
 	$(CC) $(CFLAGS) -c -o build/shake.o shake.c
 build/sign.o: sign.c $(HEAD)

@@ -415,39 +415,6 @@ prng_get_u8(prng *p)
 
 /* ==================================================================== */
 /*
- * Discrete gaussian sampling (sampler.c).
- */
-
-/*
- * Internal sampler engine. Exported for tests.
- *
- * sampler_context wraps around a source of random numbers (PRNG) and
- * the sigma_min value (nominally dependent on the degree).
- *
- * sampler() takes as parameters:
- *   ctx      pointer to the sampler_context structure
- *   mu       center for the distribution
- *   isigma   inverse of the distribution standard deviation
- * It returns an integer sampled along the Gaussian distribution centered
- * on mu and of standard deviation sigma = 1/isigma.
- *
- * gaussian0_sampler() takes as parameter a pointer to a PRNG, and
- * returns an integer sampled along a half-Gaussian with standard
- * deviation sigma0 = 1.8205 (center is 0, returned value is
- * nonnegative).
- */
-
-typedef struct {
-	prng p;
-	fpr sigma_min;
-} sampler_context;
-
-int Zf(sampler)(void *ctx, fpr mu, fpr isigma);
-
-int Zf(gaussian0_sampler)(prng *p);
-
-/* ==================================================================== */
-/*
  * Common functions (common.c)
  */
 

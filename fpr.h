@@ -224,44 +224,10 @@ fpr_of(int64_t i)
 	return fpr_scaled(i, 0);
 }
 
-static const fpr fpr_q = 4667981563525332992;
-static const fpr fpr_inverse_of_q = 4545632735260551042;
-static const fpr fpr_inv_2sqrsigma0 = 4594603506513722306;
-static const fpr fpr_inv_sigma[] = {
-	0,  /* unused */
-	4574611497772390042,
-	4574501679055810265,
-	4574396282908341804,
-	4574245855758572086,
-	4574103865040221165,
-	4573969550563515544,
-	4573842244705920822,
-	4573721358406441454,
-	4573606369665796042,
-	4573496814039276259
-};
-static const fpr fpr_sigma_min[] = {
-	0,  /* unused */
-	4607707126469777035,
-	4607777455861499430,
-	4607846828256951418,
-	4607949175006100261,
-	4608049571757433526,
-	4608148125896792003,
-	4608244935301382692,
-	4608340089478362016,
-	4608433670533905013,
-	4608525754002622308
-};
-static const fpr fpr_log2 = 4604418534313441775;
-static const fpr fpr_inv_log2 = 4609176140021203710;
-static const fpr fpr_bnorm_max = 4670353323383631276;
 static const fpr fpr_zero = 0;
 static const fpr fpr_one = 4607182418800017408;
 static const fpr fpr_two = 4611686018427387904;
 static const fpr fpr_onehalf = 4602678819172646912;
-static const fpr fpr_invsqrt2 = 4604544271217802189;
-static const fpr fpr_invsqrt8 = 4600040671590431693;
 static const fpr fpr_ptwo31 = 4746794007248502784;
 static const fpr fpr_ptwo31m1 = 4746794007244308480;
 static const fpr fpr_mtwo31m1 = 13970166044099084288U;
@@ -455,9 +421,6 @@ fpr_inv(fpr x)
 	return fpr_div(4607182418800017408u, x);
 }
 
-#define fpr_sqrt   Zf(fpr_sqrt)
-fpr fpr_sqrt(fpr x);
-
 static inline int
 fpr_lt(fpr x, fpr y)
 {
@@ -478,13 +441,6 @@ fpr_lt(fpr x, fpr y)
 	cc1 = *(int64_t *)&x > *(int64_t *)&y;
 	return cc0 ^ ((cc0 ^ cc1) & (int)((x & y) >> 63));
 }
-
-/*
- * Compute exp(x) for x such that |x| <= ln 2. We want a precision of 50
- * bits or so.
- */
-#define fpr_expm_p63   Zf(fpr_expm_p63)
-uint64_t fpr_expm_p63(fpr x, fpr ccs);
 
 #define fpr_gm_tab   Zf(fpr_gm_tab)
 extern const fpr fpr_gm_tab[];

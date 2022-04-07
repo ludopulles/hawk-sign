@@ -112,11 +112,6 @@ void test_valid_signature() {
 	printf("No simple forgeries were possible.\n");
 }
 
-int8_t valid_sigma(fpr sigma_sig) {
-	return !fpr_lt(sigma_sig, fpr_sigma_min[logn])
-		&& fpr_lt(sigma_sig, fpr_div(fpr_of(18205), fpr_of(10000)));
-}
-
 int main() {
 	// const fpr sigma_kg  = fpr_div(fpr_of(1425), fpr_of(1000));
 	// const fpr sigma_sig = fpr_div(fpr_of(1292), fpr_of(1000));
@@ -136,7 +131,6 @@ int main() {
 
 	// sigmas used in FALCON:
 	// for (int i = 1; i <= 10; i++) printf("%d: %.2f\n", i, 1.17 * sqrt(Q / (2 << i)));
-	// assert(valid_sigma(sigma_kg) && valid_sigma(sigma_sig));
 
 	benchmark();
 	test_valid_signature();
