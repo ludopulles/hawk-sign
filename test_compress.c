@@ -10,7 +10,7 @@
 #define N MKN(LOGN)
 
 #define BUFLEN (10240)
-uint8_t b[48 << LOGN], outbuf[10240];
+uint8_t b[48 << LOGN], outbuf[BUFLEN];
 int8_t f[N], g[N], F[N], G[N];
 fpr q00[N], q10[N], q11[N];
 int16_t iq00[N], iq10[N];
@@ -46,6 +46,7 @@ void test_encode_decode(unsigned logn) {
 		Zf(keygen)(&sc, f, g, F, G, q00, q10, q11, logn, b);
 
 		size_t sk_len = Zf(encode_seckey)(outbuf, BUFLEN, f, g, F, logn);
+		assert(sk_len != 0);
 		assert(sk_len == Zf(decode_seckey)(_f, _g, _F, outbuf, sk_len, logn));
 
 		assert(poly_eq(f, _f, logn));
@@ -65,6 +66,7 @@ void test_encode_decode(unsigned logn) {
 		Zf(FFT)(q10, logn);
 
 		size_t pk_len = Zf(encode_pubkey)(outbuf, BUFLEN, iq00, iq10, logn);
+		assert(pk_len != 0);
 		assert(pk_len == Zf(decode_pubkey)(_iq00, _iq10, outbuf, pk_len, logn));
 		Zf(complete_pubkey)(_iq00, _iq10, _q00, _q10, _q11, logn);
 
@@ -84,7 +86,8 @@ int main() {
 	printf("Seed: %u\n", seed);
 	srand(seed);
 
-	for (unsigned logn = 3; logn <= LOGN; logn++) {
+	for (unsigned logn = 1; logn <= LOGN; logn++) {
+		printf("Testing logn = %u\n", logn);
 		test_encode_decode(logn);
 	}
 	return 0;

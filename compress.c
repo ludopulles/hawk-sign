@@ -908,17 +908,13 @@ Zf(decode_sig)(int16_t *x, const void *in, size_t max_in_len, unsigned logn,
 #undef GETBIT
 }
 
-static size_t
+static inline size_t
 poly_enc(uint8_t *buf, size_t max_out_len, size_t v, const int8_t *x,
-	unsigned logn, size_t lo_bits)
+	uint64_t *acc, size_t *acc_len, size_t lo_bits, unsigned logn)
 {
-	size_t n, u, acc_len;
-	uint64_t acc;
+	size_t u, n;
 
 	n = MKN(logn);
-	acc = 0;
-	acc_len = 0;
-
 	for (u = 0; u < n; u ++) {
 		uint8_t w;
 
@@ -926,16 +922,16 @@ poly_enc(uint8_t *buf, size_t max_out_len, size_t v, const int8_t *x,
 		 * Push sign bit
 		 */
 		w = (uint8_t) x[u];
-		acc = (acc << 1) | (w >> 7);
+		*acc = (*acc << 1) | (w >> 7);
 		w ^= -(w >> 7);
 
 		/*
 		 * Push the lowest `lo_bits` bits of |x[u]|.
 		 */
-		acc <<= lo_bits;
-		acc |= w & ((1U << lo_bits) - 1);
+		*acc <<= lo_bits;
+		*acc |= w & ((1U << lo_bits) - 1);
 		w >>= lo_bits;
-		acc_len += lo_bits + 1;
+		*acc_len += lo_bits + 1;
 
 		/*
 		 * Push as many zeros as necessary, then a one. If this means the data
@@ -943,25 +939,61 @@ poly_enc(uint8_t *buf, size_t max_out_len, size_t v, const int8_t *x,
 		 * secret key must be rejected. The lo_bits are tuned such that this
 		 * almost never happens.
 		 */
-		acc <<= (w + 1);
-		acc |= 1;
-		acc_len += w + 1;
+		*acc_len += w + 1;
+		if (*acc_len > 64) {
+			return 0;
+		}
 
-		if (acc_len > 64) return 0;
+		*acc <<= (w + 1);
+		*acc |= 1;
 
 		/*
 		 * Produce all full bytes.
 		 */
-		while (acc_len >= 8) {
-			acc_len -= 8;
+		while (*acc_len >= 8) {
+			*acc_len -= 8;
 			if (buf != NULL) {
 				if (v >= max_out_len) {
 					return 0;
 				}
-				buf[v] = (uint8_t)(acc >> acc_len);
+				buf[v] = (uint8_t)(*acc >> *acc_len);
 			}
 			v ++;
 		}
+	}
+	return v;
+}
+
+/*
+ * Optimal choice for sigma_pk = 1.425 is lo_bits_fg = 0, lo_bits_FG = 2
+ * Results in |sk| = 1037.2 ± 10.7 bytes, for n=512.
+ * Note: G can be recalculated from fG - gF = 1 so do not encode it.
+ */
+size_t
+Zf(encode_seckey)(void *out, size_t max_out_len,
+	const int8_t *f, const int8_t *g, const int8_t *F, unsigned logn)
+{
+	uint8_t *buf;
+	uint64_t acc;
+	size_t v, acc_len;
+
+	buf = (uint8_t *)out;
+	acc = 0;
+	acc_len = 0;
+
+	v = poly_enc(buf, max_out_len, 0, f, &acc, &acc_len, low_bits_fg[logn],
+		logn);
+	if (v == 0) {
+		return 0;
+	}
+	v = poly_enc(buf, max_out_len, v, g, &acc, &acc_len, low_bits_fg[logn],
+		logn);
+	if (v == 0) {
+		return 0;
+	}
+	v = poly_enc(buf, max_out_len, v, F, &acc, &acc_len, LOW_BITS_FG, logn);
+	if (v == 0) {
+		return 0;
 	}
 
 	/*
@@ -979,46 +1011,22 @@ poly_enc(uint8_t *buf, size_t max_out_len, size_t v, const int8_t *x,
 	return v;
 }
 
-/*
- * Optimal choice for sigma_pk = 1.425 is lo_bits_fg = 0, lo_bits_FG = 2
- * Results in |sk| = 1037.2 ± 10.7 bytes, for n=512.
- * Note: G can be recalculated from fG - gF = 1 so do not encode it.
- */
-size_t
-Zf(encode_seckey)(void *out, size_t max_out_len,
-	const int8_t *f, const int8_t *g, const int8_t *F, unsigned logn)
-{
-	uint8_t *buf;
-	size_t v;
-
-	buf = (uint8_t *)out;
-
-	v = poly_enc(buf, max_out_len, 0, f, logn, low_bits_fg[logn]);
-	if (v == 0) return 0;
-	v = poly_enc(buf, max_out_len, v, g, logn, low_bits_fg[logn]);
-	if (v == 0) return 0;
-	return poly_enc(buf, max_out_len, v, F, logn, LOW_BITS_FG);
-}
-
-static size_t
+static inline size_t
 poly_dec(const uint8_t *buf, size_t max_in_len, size_t v, int8_t *x,
-	unsigned logn, size_t lo_bits)
+	uint16_t *acc, size_t *acc_len, size_t lo_bits, unsigned logn)
 {
-	size_t n, u, acc_len;
-	uint16_t acc;
+	size_t n, u;
 
-#define ENSUREBIT()                                                      \
-	if (acc_len == 0) {                                                  \
-		if (v >= max_in_len) return 0; /* not enough bits */             \
-		acc = buf[v++];                                                  \
-		acc_len = 8;                                                     \
+#define ENSUREBIT()                                                           \
+	if (*acc_len == 0) {                                                      \
+		if (v >= max_in_len) return 0; /* not enough bits */                  \
+		*acc = buf[v++];                                                      \
+		*acc_len = 8;                                                         \
 	}
 
-#define GETBIT() ((acc >> (--acc_len)) & 1)
+#define GETBIT() ((*acc >> (--(*acc_len))) & 1)
 
 	n = MKN(logn);
-	acc = 0;
-	acc_len = 0;
 
 	for (u = 0; u < n; u ++) {
 		uint16_t s, w;
@@ -1032,17 +1040,17 @@ poly_dec(const uint8_t *buf, size_t max_in_len, size_t v, int8_t *x,
 		/*
 		 * Get next lo_bits bits that make up the lowest significant bits of w.
 		 */
-		if (acc_len < lo_bits) {
+		if (*acc_len < lo_bits) {
 			// should be true all the time
 			if (v >= max_in_len) return 0;
-			acc = (acc << 8) | buf[v ++];
-			acc_len += 8;
+			*acc = (*acc << 8) | buf[v ++];
+			*acc_len += 8;
 		}
 
 		/*
 		 * Get lo_bits least significant bits of w.
 		 */
-		w = (acc >> (acc_len -= lo_bits)) & ((1U << lo_bits) - 1);
+		w = (*acc >> (*acc_len -= lo_bits)) & ((1U << lo_bits) - 1);
 
 		/*
 		 * Recover the most significant bits of w: count number of consecutive
@@ -1063,13 +1071,6 @@ poly_dec(const uint8_t *buf, size_t max_in_len, size_t v, int8_t *x,
 		x[u] = w ^ -s;
 	}
 
-	/*
-	 * Unused bits in the last byte must be zero.
-	 */
-	if ((acc & ((1u << acc_len) - 1u)) != 0) {
-		return 0;
-	}
-
 	return v;
 #undef ENSUREBIT
 #undef GETBIT
@@ -1085,13 +1086,33 @@ Zf(decode_seckey)(int8_t *f, int8_t *g, int8_t *F,
 	const void *in, size_t max_in_len, unsigned logn)
 {
 	const uint8_t *buf;
-	size_t v;
+	uint16_t acc;
+	size_t v, acc_len;
 
 	buf = (const uint8_t *)in;
+	acc = 0;
+	acc_len = 0;
 
-	v = poly_dec(buf, max_in_len, 0, f, logn, low_bits_fg[logn]);
-	if (v == 0) return 0;
-	v = poly_dec(buf, max_in_len, v, g, logn, low_bits_fg[logn]);
-	if (v == 0) return 0;
-	return poly_dec(buf, max_in_len, v, F, logn, LOW_BITS_FG);
+	v = poly_dec(buf, max_in_len, 0, f, &acc, &acc_len, low_bits_fg[logn],
+		logn);
+	if (v == 0) {
+		return 0;
+	}
+	v = poly_dec(buf, max_in_len, v, g, &acc, &acc_len, low_bits_fg[logn],
+		logn);
+	if (v == 0) {
+		return 0;
+	}
+	v = poly_dec(buf, max_in_len, v, F, &acc, &acc_len, LOW_BITS_FG, logn);
+	if (v == 0) {
+		return 0;
+	}
+
+	/*
+	 * Unused bits in the last byte must be zero.
+	 */
+	if ((acc & ((1u << acc_len) - 1u)) != 0) {
+		return 0;
+	}
+	return v;
 }

@@ -3,12 +3,12 @@
 .POSIX:
 
 CC = c99
-CFLAGS = -W -Wall -Wshadow -O2 -fdiagnostics-color=always
-#CFLAGS = -W -Wall -Wshadow -g -fsanitize=address,undefined
+#CFLAGS = -W -Wall -Wshadow -O2 -fdiagnostics-color=always
+CFLAGS = -W -Wall -Wshadow -g -fsanitize=address,undefined
 LIBS = -lm
 
 OBJ = build/common.o build/compress.o build/fft.o build/ffo.o build/fpr.o build/keygen.o build/rng.o build/shake.o build/sign.o build/vrfy.o
-PROGS = bin/main bin/generate bin/speed
+PROGS = bin/main bin/generate bin/speed bin/test_seckey bin/test_compress
 
 HEAD = fpr.h inner.h
 
@@ -31,6 +31,12 @@ bin/generate: generate.c $(OBJ)
 
 bin/speed: speed.c build/hawk.o $(OBJ)
 	$(CC) $(CFLAGS) -o bin/speed speed.c build/hawk.o $(OBJ) $(LIBS)
+
+bin/test_seckey: test_seckey.c $(OBJ)
+	$(CC) $(CFLAGS) -o bin/test_seckey test_seckey.c $(OBJ) $(LIBS)
+
+bin/test_compress: test_compress.c $(OBJ)
+	$(CC) $(CFLAGS) -o bin/test_compress test_compress.c $(OBJ) $(LIBS)
 
 
 # Object files:

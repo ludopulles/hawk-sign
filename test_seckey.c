@@ -21,8 +21,6 @@ long long time_diff(const struct timeval *begin, const struct timeval *end) {
 #define MAX_LOGN (9)
 #define MAX_N MKN(MAX_LOGN)
 
-const size_t logn = 9, n = MKN(logn);
-
 void measure_keygen(size_t logn) {
 	uint8_t b[48 << MAX_LOGN];
 	int8_t f[MAX_N], g[MAX_N], F[MAX_N], G[MAX_N];
