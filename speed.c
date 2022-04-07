@@ -132,7 +132,7 @@ typedef struct {
 	unsigned logn;
 	shake256_context rng;
 	uint8_t *tmp, *pk, *sk, *esk, *sig;
-	size_t tmp_len, pk_len, sk_len, sig_len;
+	size_t tmp_len, sig_len;
 } bench_context;
 
 static inline size_t
@@ -155,11 +155,9 @@ bench_keygen(void *ctx, unsigned long num)
 
 	bc = ctx;
 	while (num -- > 0) {
-		bc->pk_len = HAWK_MAX_PUBKEY_SIZE[bc->logn];
-		bc->sk_len = HAWK_MAX_SECKEY_SIZE[bc->logn];
 		CC(hawk_keygen_make(&bc->rng, bc->logn,
-			bc->sk, &bc->sk_len,
-			bc->pk, &bc->pk_len,
+			bc->sk, HAWK_SECKEY_SIZE[bc->logn],
+			bc->pk, HAWK_PUBKEY_SIZE[bc->logn],
 			bc->tmp, bc->tmp_len));
 	}
 	return 0;
@@ -175,7 +173,7 @@ bench_sign_dyn(void *ctx, unsigned long num)
 		bc->sig_len = HAWK_SIG_COMPRESSED_MAXSIZE(bc->logn);
 		CC(hawk_sign_dyn(&bc->rng,
 			bc->sig, &bc->sig_len, HAWK_SIG_COMPRESSED,
-			bc->sk, bc->sk_len,
+			bc->sk, HAWK_SECKEY_SIZE[bc->logn],
 			"data", 4, bc->tmp, bc->tmp_len));
 	}
 	return 0;
@@ -190,7 +188,7 @@ bench_expand_privkey(void *ctx, unsigned long num)
 	while (num -- > 0) {
 		CC(hawk_expand_privkey(
 			bc->esk, HAWK_EXPANDEDKEY_SIZE(bc->logn),
-			bc->sk, bc->sk_len,
+			bc->sk, HAWK_SECKEY_SIZE[bc->logn],
 			bc->tmp, bc->tmp_len));
 	}
 	return 0;
@@ -221,7 +219,7 @@ bench_verify(void *ctx, unsigned long num)
 	while (num -- > 0) {
 		CC(hawk_verify(
 			bc->sig, bc->sig_len, HAWK_SIG_COMPRESSED,
-			bc->pk, bc->pk_len,
+			bc->pk, HAWK_PUBKEY_SIZE[bc->logn],
 			"data", 4, bc->tmp, bc->tmp_len));
 	}
 	return 0;
@@ -248,10 +246,8 @@ test_speed_hawk(unsigned logn, double threshold)
 	len = maxsz(len, HAWK_TMPSIZE_VERIFY(logn));
 	bc.tmp = xmalloc(len);
 	bc.tmp_len = len;
-	bc.pk_len = HAWK_MAX_PUBKEY_SIZE[logn];
-	bc.sk_len = HAWK_MAX_SECKEY_SIZE[logn];
-	bc.pk = xmalloc(bc.pk_len);
-	bc.sk = xmalloc(bc.sk_len);
+	bc.pk = xmalloc(HAWK_PUBKEY_SIZE[logn]);
+	bc.sk = xmalloc(HAWK_SECKEY_SIZE[logn]);
 	bc.esk = xmalloc(HAWK_EXPANDEDKEY_SIZE(logn));
 	bc.sig = xmalloc(HAWK_SIG_COMPRESSED_MAXSIZE(logn));
 	bc.sig_len = 0;

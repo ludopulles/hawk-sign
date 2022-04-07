@@ -122,11 +122,9 @@ extern "C" {
  * part of compress.c. Their respective sizes (for a given degree) follow a
  * distribution that is close to a normal distribution.
  *
- * The HAWK_MIN_SECKEY_SIZE and HAWK_MAX_SECKEY_SIZE arrays give the lower and
- * upper bound on the encoded secret key size in bytes.
- *
- * The HAWK_MIN_PUBKEY_SIZE and HAWK_MAX_PUBKEY_SIZE arrays give the lower and
- * upper bound on the encoded public key size in bytes.
+ * The HAWK_SECKEY_SIZE and HAWK_PUBKEY_SIZE arrays contain the number of bytes
+ * required for an encoded secret and public key respectively, including
+ * possible padding.
  *
  * Below are the average sizes in number of bytes of secret keys and public
  * keys, taken over 10000 samples. To arrive at the minimal and maximal sizes,
@@ -317,11 +315,8 @@ extern "C" {
  *
  * Note: each macro may evaluate its argument 'logn' several times.
  */
-
-extern const size_t HAWK_MIN_SECKEY_SIZE[10];
-extern const size_t HAWK_MAX_SECKEY_SIZE[10];
-extern const size_t HAWK_MIN_PUBKEY_SIZE[10];
-extern const size_t HAWK_MAX_PUBKEY_SIZE[10];
+extern const size_t HAWK_SECKEY_SIZE[10];
+extern const size_t HAWK_PUBKEY_SIZE[10];
 
 
 /*
@@ -493,14 +488,9 @@ int shake256_init_prng_from_system(shake256_context *sc);
  * MUST be at least HAWK_TMPSIZE_KEYGEN(logn) bytes.
  *
  * Returned value: 0 on success, or a negative error code.
- *
- *
- * Note/TODO: currently one MUST provide a public key of sufficient large size.
- * TODO: update documentation: *privkey and *pubkey get changed to the actual
- * length of secret/private key respectively.
  */
 int hawk_keygen_make(shake256_context *rng, unsigned logn, void *privkey,
-	size_t *privkey_len, void *pubkey, size_t *pubkey_len, void *tmp,
+	size_t privkey_len, void *pubkey, size_t pubkey_len, void *tmp,
 	size_t tmp_len);
 
 /*
@@ -522,7 +512,7 @@ int hawk_keygen_make(shake256_context *rng, unsigned logn, void *privkey,
  *
  * Returned value: 0 on success, or a negative error code.
  */
-int hawk_make_public(void *pubkey, size_t *pubkey_len, const void *privkey,
+int hawk_make_public(void *pubkey, size_t pubkey_len, const void *privkey,
 	size_t privkey_len, void *tmp, size_t tmp_len);
 
 /*
