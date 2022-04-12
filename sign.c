@@ -29,7 +29,6 @@
  * @author   Thomas Pornin <thomas.pornin@nccgroup.com>
  */
 
-#include <assert.h>
 #include "inner.h"
 
 // =============================================================================
@@ -230,7 +229,8 @@ construct_basis(
 		size_t u, hn;
 
 		/*
-		 * Compute G = (1 + gF) / f, where all polynomials are in FFT representation.
+		 * Compute G = (1 + gF) / f, where all polynomials are in FFT
+		 * representation.
 		 */
 		hn = MKN(logn) >> 1;
 		Zf(poly_prod_fft)(bG, bg, bF, logn);
@@ -315,13 +315,13 @@ sample_short(prng *rng, fpr *restrict x0, fpr *restrict x1,
 }
 
 /*
- * Compute signature of (h0, h1): a vector (s0, s1) that is close to
- * (h0, h1) / 2 wrt Q. Here, s0 is not returned.
- * 1 is returned iff (s0, s1) is a valid signature and s0 can be recovered from
- * s1 with simple rounding.
- *
- * Note: tmp[] must have space for at least 48 * 2^logn bytes.
+ * The following are helper functions for the sign-functions. If a lattice
+ * point is generated that is too far away from (h0, h1) / 2, s0 and s1 are
+ * untouched and 0 is returned; the caller should then try again. Otherwise, 1
+ * is returned and (s0, s1) contain a valid signature for (h0, h1).
  */
+
+/* helper for Zf(sign_dyn) */
 static int
 do_sign_dyn(prng *rng, int16_t *restrict s1,
 	const int8_t *restrict f, const int8_t *restrict g,
@@ -332,7 +332,7 @@ do_sign_dyn(prng *rng, int16_t *restrict s1,
 	fpr *x0, *x1, *bf, *bg, *bF, *bG;
 
 	n = MKN(logn);
-	bf = (fpr *) tmp;
+	bf = (fpr *)tmp;
 	bg = bf + n;
 	bF = bg + n;
 	bG = bF + n;
@@ -376,14 +376,7 @@ do_sign_dyn(prng *rng, int16_t *restrict s1,
 	return 1;
 }
 
-/*
- * Compute signature of h: a vector (s0, s1) that is close to (h0, h1) / 2 wrt Q.
- * Here, s0 is not returned.
- * 1 is returned iff (s0, s1) is a valid signature and s0 can be recovered from
- * s1 with simple rounding.
- *
- * Note: tmp[] must have space for at least 24 * 2^logn bytes.
- */
+/* helper for Zf(sign) */
 static int
 do_sign(prng *rng, int16_t *restrict s1,
 	const fpr *restrict expanded_seckey, const uint8_t *restrict h,
@@ -439,12 +432,7 @@ do_sign(prng *rng, int16_t *restrict s1,
 	return 1;
 }
 
-/*
- * Compute signature of (h0, h1): a vector (s0, s1) that is close to
- * (h0, h1) / 2 wrt Q. If 1 is returned, (s0, s1) is a valid signature.
- *
- * Note: tmp[] must have space for at least 50 * 2^logn bytes
- */
+/* helper for Zf(complete_sign) */
 static int
 do_complete_sign(prng *rng,
 	int16_t *restrict s0, int16_t *restrict s1,
@@ -487,6 +475,182 @@ do_complete_sign(prng *rng,
 	return 1;
 }
 
+
+static inline void
+int8_to_ntt(uint16_t *restrict p, const int8_t *restrict f, unsigned logn)
+{
+	size_t n, u;
+
+	n = MKN(logn);
+	for (u = 0; u < n; u++) {
+		p[u] = Zf(mq_conv_small)(f[u]);
+	}
+	Zf(mq_NTT)(p, logn);
+}
+
+/* helper for Zf(sign_NTT) */
+static int
+do_sign_NTT(prng *rng, int16_t *restrict s1,
+	const int8_t *restrict f, const int8_t *restrict g,
+	const int8_t *restrict F, const int8_t *restrict G,
+	const uint8_t *restrict h, unsigned logn, uint8_t *restrict tmp)
+{
+	size_t n, u, v, w;
+	uint8_t h0, h1;
+	uint16_t *bf, *bg, *bF, *bG, *x0, *x1;
+	int32_t norm, z;
+
+	n = MKN(logn);
+	norm = 0;
+
+	bf = (uint16_t *)tmp;
+	bg = bf + n;
+	bF = bg + n;
+	bG = bF + n;
+	x0 = bG + n;
+	x1 = (uint16_t *)s1;
+
+	int8_to_ntt(bf, f, logn);
+	int8_to_ntt(bg, g, logn);
+	int8_to_ntt(bF, F, logn);
+
+	if (G == NULL) {
+		/*
+		 * Compute G = (1 + gF) / f, where all polynomials are in NTT
+		 * representation.
+		 */
+		for (u = 0; u < n; u++) {
+			bG[u] = Zf(mq_mul)(bg[u], bF[u]);
+			bG[u] = Zf(mq_add)(1, bG[u]);
+		}
+		Zf(mq_poly_div)(bG, bf, logn);
+	} else {
+		int8_to_ntt(bG, G, logn);
+	}
+
+	/*
+	 * Put the hash (h0, h1) inside x0, x1.
+	 */
+	if (logn <= 3) {
+		for (v = 0; v < n; v ++) {
+			x0[v] = (h[0] >> v) & 1;
+			x1[v] = (h[1] >> v) & 1;
+		}
+	} else {
+		for (u = w = 0; u < n; w ++) {
+			h0 = h[w];
+			h1 = h[n/8 + w];
+			for (v = 0; v < 8; v ++, u ++) {
+				x0[u] = h0 & 1;
+				x1[u] = h1 & 1;
+				h0 >>= 1;
+				h1 >>= 1;
+			}
+		}
+	}
+
+	Zf(mq_NTT)(x0, logn);
+	Zf(mq_NTT)(x1, logn);
+
+	Zf(mq_poly_tomonty)(x0, logn);
+	Zf(mq_poly_tomonty)(x1, logn);
+
+	/*
+	 * Set the target vector to (t0, t1) = B * (h0, h1), i.e.:
+	 *     t0 = f h0 + F h1,
+	 *     t1 = g h0 + G h1.
+	 */
+	for (u = 0; u < n; u ++) {
+		uint32_t res0, res1;
+
+		res0 = Zf(mq_add)(Zf(mq_montymul)(bf[u], x0[u]),
+			Zf(mq_montymul)(bF[u], x1[u]));
+		res1 = Zf(mq_add)(Zf(mq_montymul)(bg[u], x0[u]),
+			Zf(mq_montymul)(bG[u], x1[u]));
+		x0[u] = res0;
+		x1[u] = res1;
+	}
+
+	/*
+	 * Sample and write the result in (x0, x1). Gaussian smoothing is used to
+	 * not reveal information on the secret basis.
+	 */
+	Zf(mq_iNTT)(x0, logn);
+	Zf(mq_iNTT)(x1, logn);
+
+	for (u = 0; u < n; u ++) {
+		z = Zf(mq_conv_signed)(x0[u]);
+		z = mkgauss_1292(rng, z & 1);
+		x0[u] = Zf(mq_conv_small)(z);
+		norm += z*z;
+	}
+	for (u = 0; u < n; u ++) {
+		z = Zf(mq_conv_signed)(x1[u]);
+		z = mkgauss_1292(rng, z & 1);
+		x1[u] = Zf(mq_conv_small)(z);
+		norm += z*z;
+	}
+
+	/*
+	 * Test whether the l2-norm of (x0, x1) is below the given bound. The
+	 * code below uses only 32-bit operations to compute the squared norm,
+	 * since the max. value is 2n * 128^2 <= 2^24 (when logn <= 9).
+	 * For a large enough verification margin, it is unlikely that the
+	 * norm of the gaussian (x0, x1) is too large.
+	 */
+	if ((uint32_t)norm > Zf(l2bound)[logn]) {
+		return 0;
+	}
+
+	/*
+	 * Norm of (x0, x1) is acceptable.
+	 */
+	Zf(mq_NTT)(x0, logn);
+	Zf(mq_NTT)(x1, logn);
+
+	Zf(mq_poly_tomonty)(x0, logn);
+	Zf(mq_poly_tomonty)(x1, logn);
+
+	/*
+	 * Compute s1 in (s0, s1) = ((h0, h1) - B^{-1} (x0, x1)) / 2, so
+	 *
+	 *     s1 = (h1 - (x0 * (-g) + x1 f)) / 2.
+	 */
+
+	for (u = 0; u < n; u++) {
+		x1[u] = Zf(mq_sub)(Zf(mq_montymul)(bf[u], x1[u]),
+			Zf(mq_montymul)(bg[u], x0[u]));
+	}
+	Zf(mq_iNTT)(x1, logn);
+
+	/*
+	 * The polynomial x1 is stored at s1, so conversion to int16_t is done
+	 * automatically. Normalize s1 elements into the [-q/2..q/2] range.
+	 */
+	for (u = 0; u < n; u ++) {
+		s1[u] = Zf(mq_conv_signed)(x1[u]);
+	}
+
+	n = MKN(logn);
+	if (logn <= 3) {
+		h1 = h[1];
+		for (v = 0; v < n; v ++) {
+			s1[v] = ((h1 & 1) - s1[v]) / 2;
+			h1 >>= 1;
+		}
+	} else {
+		for (u = w = 0; u < n; w ++) {
+			h1 = h[n / 8 + w];
+			for (v = 0; v < 8; v ++, u ++) {
+				s1[u] = ((h1 & 1) - s1[u]) / 2;
+				h1 >>= 1;
+			}
+		}
+	}
+
+	return 1;
+}
+
 /* =================================================================== */
 
 /* see inner.h */
@@ -526,6 +690,19 @@ Zf(sign_dyn)(inner_shake256_context *rng, int16_t *restrict sig,
 	do {
 		Zf(prng_init)(&p, rng);
 	} while (!do_sign_dyn(&p, sig, f, g, F, G, h, logn, tmp));
+}
+
+/* see inner.h */
+void
+Zf(sign_NTT)(inner_shake256_context *rng, int16_t *restrict sig,
+	const int8_t *restrict f, const int8_t *restrict g,
+	const int8_t *restrict F, const int8_t *restrict G,
+	const uint8_t *restrict h, unsigned logn, uint8_t *restrict tmp)
+{
+	prng p;
+	do {
+		Zf(prng_init)(&p, rng);
+	} while (!do_sign_NTT(&p, sig, f, g, F, G, h, logn, tmp));
 }
 
 /* see inner.h */

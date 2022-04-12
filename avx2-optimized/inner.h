@@ -468,14 +468,6 @@ prng_get_u8(prng *p)
  *
  * Constants of type 'fpr':
  *
- *   fpr fpr_q                 12289
- *   fpr fpr_inverse_of_q      1/12289
- *   fpr fpr_inv_2sqrsigma0    1/(2*(1.8205^2))
- *   fpr fpr_inv_sigma[]       1/sigma (indexed by logn, 1 to 10)
- *   fpr fpr_sigma_min[]       1/sigma_min (indexed by logn, 1 to 10)
- *   fpr fpr_log2              log(2)
- *   fpr fpr_inv_log2          1/log(2)
- *   fpr fpr_bnorm_max         16822.4121
  *   fpr fpr_zero              0
  *   fpr fpr_one               1
  *   fpr fpr_two               2
@@ -581,7 +573,78 @@ size_t Zf(encode_sig_huffman)(void *out, size_t max_out_len, const int16_t *x,
 
 /* ==================================================================== */
 /*
- * FFT (fft.c).
+ * Number Theoretic Transform (ntt.c)
+ *
+ */
+
+/*
+ * Reduce a small signed integer modulo q. The source integer MUST
+ * be between -q/2 and +q/2.
+ */
+uint32_t Zf(mq_conv_small)(int x);
+
+/*
+ * Returns a signed integer between -q/2 and q/2, given a reduced integer
+ * modulo q.
+ */
+int32_t Zf(mq_conv_signed)(uint32_t x);
+
+/*
+ * Addition modulo q. Operands must be in the 0..q-1 range.
+ */
+uint32_t Zf(mq_add)(uint32_t x, uint32_t y);
+
+/*
+ * Subtraction modulo q. Operands must be in the 0..q-1 range.
+ */
+uint32_t Zf(mq_sub)(uint32_t x, uint32_t y);
+
+/*
+ * Montgomery multiplication modulo q. If we set R = 2^16 mod q, then
+ * this function computes: x * y / R mod q.
+ * Operands must be in the 0..q-1 range.
+ */
+uint32_t Zf(mq_montymul)(uint32_t x, uint32_t y);
+
+/*
+ * Ordinary multiplication modulo q. This function computes: x * y mod q.
+ * Operands must be in the 0..q-1 range.
+ */
+uint32_t Zf(mq_mul)(uint32_t x, uint32_t y);
+/*
+ * Montgomery squaring (computes (x^2)/R).
+ */
+uint32_t Zf(mq_montysqr)(uint32_t x);
+
+/*
+ * Divide x by y modulo q = 12289.
+ */
+uint32_t Zf(mq_div_12289)(uint32_t x, uint32_t y);
+
+/*
+ * Compute NTT on a ring element.
+ */
+void Zf(mq_NTT)(uint16_t *a, unsigned logn);
+
+/*
+ * Compute the inverse NTT on a ring element, binary case.
+ */
+void Zf(mq_iNTT)(uint16_t *a, unsigned logn);
+
+/*
+ * Convert a polynomial (mod q) to Montgomery representation.
+ */
+void Zf(mq_poly_tomonty)(uint16_t *f, unsigned logn);
+
+/*
+ * Divide polynomial f by g (NTT representation), assuming both f, g are not in
+ * Montgomery representation. Result f / g is written over f.
+ */
+void Zf(mq_poly_div)(uint16_t *f, uint16_t *g, unsigned logn);
+
+/* ==================================================================== */
+/*
+ * Fast Fourier Transform (fft.c)
  *
  * A real polynomial is represented as an array of N 'fpr' elements. The
  * FFT representation of a real polynomial contains N/2 complex elements;
@@ -776,7 +839,7 @@ void Zf(poly_merge_fft)(fpr *restrict f,
 
 /* ==================================================================== */
 /*
- * Fast Fourier Orthogonalization.
+ * Fast Fourier Orthogonalization (ffo.c)
  */
 
 /*
@@ -828,7 +891,7 @@ void Zf(ffBabai_reduce)(const fpr *restrict f, const fpr *restrict g,
 
 /* ==================================================================== */
 /*
- * Key pair generation.
+ * Key pair generation (keygen.c)
  */
 
 /*
@@ -884,15 +947,12 @@ void Zf(keygen)(inner_shake256_context *rng,
 
 /* ==================================================================== */
 /*
- * Signature generation.
+ * Signature generation (sign.c)
  */
 
 /*
- * Compute a signature of h: the signature is a vector (s0, s1) that is close
- * to (h0, h1) / 2 with respect to the quadratic form Q.
- * If during generation the distance is too large, s0 and s1 are untouched and
- * 0 is returned; the caller should then try again. Otherwise, 1 is returned
- * and (s0, s1) contain a valid signature for (h0, h1).
+ * Compute a signature of h, i.e. the signature is a vector (s0, s1) that is
+ * close to (h0, h1) / 2 with respect to the quadratic form Q.
  *
  * Note: tmp[] must have space for at least 48 * 2^logn bytes.
  */
@@ -903,9 +963,10 @@ void Zf(complete_sign)(inner_shake256_context *rng,
 	const uint8_t *restrict h, unsigned logn, uint8_t *restrict tmp);
 
 /*
- * Similar to Zf(complete_sign), except that only s1 is returned, but not s0.
- * However, it is guaranteed that simple rounding will recover s0 succesfully
- * when 1 is returned.
+ * Compute s1 of a signature of h, i.e. a signature is a vector (s0, s1) that
+ * is close to (h0, h1) / 2 with respect to the quadratic form Q. It is 
+ * guaranteed that one can succesfully recover a s0 during verification such
+ * that (s0, s1) is a valid signature.
  *
  * Note: tmp[] must have space for at least 48 * 2^logn bytes.
  */
@@ -933,8 +994,10 @@ void Zf(expand_seckey)(fpr *restrict expanded_seckey,
 	const int8_t *f, const int8_t *g, const int8_t *F, unsigned logn);
 
 /*
- * Generates a signature of a message with hash h[] (of n / 4 bytes long),
- * which is guaranteed to be a valid signature.
+ * Compute s1 of a signature of h, i.e. a signature is a vector (s0, s1) that
+ * is close to (h0, h1) / 2 with respect to the quadratic form Q. It is 
+ * guaranteed that one can succesfully recover a s0 during verification such
+ * that (s0, s1) is a valid signature.
  *
  * Note: tmp[] must have space for at least 24 * 2^logn bytes.
  */
@@ -942,9 +1005,24 @@ void Zf(sign)(inner_shake256_context *rng, int16_t *restrict sig,
 	const fpr *restrict expanded_seckey, const uint8_t *restrict h,
 	unsigned logn, uint8_t *restrict tmp);
 
+/*
+ * Compute s1 of a signature of h, i.e. a signature is a vector (s0, s1) that
+ * is close to (h0, h1) / 2 with respect to the quadratic form Q. It is 
+ * guaranteed that one can succesfully recover a s0 during verification such
+ * that (s0, s1) is a valid signature.
+ *
+ * This function does not use any floating point numbers.
+ *
+ * Note: tmp[] must have space for at least 10 * 2^logn bytes.
+ */
+void Zf(sign_NTT)(inner_shake256_context *rng, int16_t *restrict sig,
+	const int8_t *restrict f, const int8_t *restrict g,
+	const int8_t *restrict F, const int8_t *restrict G,
+	const uint8_t *restrict h, unsigned logn, uint8_t *restrict tmp);
+
 /* ==================================================================== */
 /*
- * Signature verification functions (vrfy.c).
+ * Signature verification functions (vrfy.c)
  */
 
 /*

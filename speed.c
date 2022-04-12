@@ -180,6 +180,22 @@ bench_sign_dyn(void *ctx, unsigned long num)
 }
 
 static int
+bench_sign_NTT(void *ctx, unsigned long num)
+{
+	bench_context *bc;
+
+	bc = ctx;
+	while (num -- > 0) {
+		bc->sig_len = HAWK_SIG_COMPRESSED_MAXSIZE(bc->logn);
+		CC(hawk_sign_NTT(&bc->rng,
+			bc->sig, &bc->sig_len, HAWK_SIG_COMPRESSED,
+			bc->sk, HAWK_SECKEY_SIZE[bc->logn],
+			"data", 4, bc->tmp, bc->tmp_len));
+	}
+	return 0;
+}
+
+static int
 bench_expand_privkey(void *ctx, unsigned long num)
 {
 	bench_context *bc;
@@ -240,7 +256,8 @@ test_speed_hawk(unsigned logn, double threshold)
 		exit(EXIT_FAILURE);
 	}
 	len = HAWK_TMPSIZE_KEYGEN(logn);
-	len = maxsz(len, HAWK_TMPSIZE_SIGN(logn));
+	len = maxsz(len, HAWK_TMPSIZE_SIGNDYN(logn));
+	len = maxsz(len, HAWK_TMPSIZE_SIGNNTT(logn));
 	len = maxsz(len, HAWK_TMPSIZE_SIGN(logn));
 	len = maxsz(len, HAWK_TMPSIZE_EXPANDPRIV(logn));
 	len = maxsz(len, HAWK_TMPSIZE_VERIFY(logn));
@@ -259,6 +276,8 @@ test_speed_hawk(unsigned logn, double threshold)
 	printf(" %8.2f", do_bench(&bench_sign_dyn, &bc, threshold) / 1000.0);
 	fflush(stdout);
 	printf(" %8.2f", do_bench(&bench_sign, &bc, threshold) / 1000.0);
+	fflush(stdout);
+	printf(" %8.2f", do_bench(&bench_sign_NTT, &bc, threshold) / 1000.0);
 	fflush(stdout);
 	printf(" %8.2f", do_bench(&bench_verify, &bc, threshold) / 1000.0);
 	fflush(stdout);
@@ -297,7 +316,7 @@ main(int argc, char *argv[])
 	printf("ss = sign (with expanded key), vv = verify\n");
 	printf("keygen in milliseconds, other values in microseconds\n");
 	printf("\n");
-	printf("degree  kg(ms)   ek(us)   sd(us)   ss(us)   vv(us)\n");
+	printf("degree  kg(ms)   ek(us)   sd(us)   ss(us)   sn(us)   vv(us)\n");
 	fflush(stdout);
 
 	for (unsigned logn = 1; logn <= 9; logn++) {

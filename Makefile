@@ -3,11 +3,11 @@
 .POSIX:
 
 CC = c99
-#CFLAGS = -W -Wall -Wshadow -O2 -fdiagnostics-color=always
-CFLAGS = -W -Wall -Wshadow -g -fsanitize=address,undefined
+CFLAGS = -W -Wall -Wshadow -O2 -fdiagnostics-color=always
+#CFLAGS = -W -Wall -Wshadow -g -fsanitize=address,undefined
 LIBS = -lm
 
-OBJ = build/common.o build/compress.o build/fft.o build/ffo.o build/fpr.o build/keygen.o build/rng.o build/shake.o build/sign.o build/vrfy.o
+OBJ = build/common.o build/compress.o build/fft.o build/ffo.o build/fpr.o build/keygen.o build/ntt.o build/rng.o build/shake.o build/sign.o build/vrfy.o
 PROGS = bin/main bin/generate bin/speed bin/test_seckey bin/test_compress
 
 HEAD = fpr.h inner.h
@@ -52,6 +52,8 @@ build/fpr.o: fpr.c $(HEAD)
 	$(CC) $(CFLAGS) -c -o build/fpr.o fpr.c
 build/keygen.o: keygen.c $(HEAD)
 	$(CC) $(CFLAGS) -c -o build/keygen.o keygen.c
+build/ntt.o: ntt.c $(HEAD)
+	$(CC) $(CFLAGS) -c -o build/ntt.o ntt.c
 build/rng.o: rng.c $(HEAD)
 	$(CC) $(CFLAGS) -c -o build/rng.o rng.c
 build/shake.o: shake.c $(HEAD)
