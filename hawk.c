@@ -702,7 +702,7 @@ hawk_sign_NTT_finish(shake256_context *rng, void *sig, size_t *sig_len,
 	F = g + n;
 	hm = (uint8_t *)(F + n);
 	sv = align_i16(hm + HAWK_HASH_SIZE(logn));
-	atmp = (uint8_t *)align_fpr(sv + n);
+	atmp = (uint8_t *)(sv + n);
 
 	if (Zf(decode_seckey)(f, g, F, privkey + 1, privkey_len - 1, logn) == 0) {
 		return HAWK_ERR_FORMAT;

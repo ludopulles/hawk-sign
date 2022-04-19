@@ -167,10 +167,8 @@ hash_to_fft(fpr *p, const uint8_t *h, unsigned logn)
 	n = MKN(logn);
 
 	if (logn <= 3) {
-		hash = *h;
 		for (v = 0; v < n; v ++) {
-			p[v] = fpr_of(hash & 1);
-			hash >>= 1;
+			p[v] = fpr_of((h[0] >> v) & 1);
 		}
 	} else {
 		for (u = 0; u < n; ) {
@@ -195,19 +193,20 @@ noise_to_lattice(int16_t *s, const uint8_t *h, const fpr *noise, unsigned logn)
 {
 	size_t n, u, v;
 	uint8_t hash;
+	int64_t x;
 
 	n = MKN(logn);
 	if (logn <= 3) {
-		hash = *h;
 		for (v = 0; v < n; v ++) {
-			s[v] = (int16_t) ((int64_t)(hash & 1) - fpr_rint(noise[v])) / 2;
-			hash >>= 1;
+			x = fpr_rint(noise[v]);
+			s[v] = (int16_t)((int64_t)((h[0] >> v) & 1) - x) / 2;
 		}
 	} else {
 		for (u = 0; u < n; ) {
 			hash = *h++;
 			for (v = 0; v < 8; v ++, u ++) {
-				s[u] = (int16_t) ((int64_t)(hash & 1) - fpr_rint(noise[u])) / 2;
+				x = fpr_rint(noise[u]);
+				s[u] = (int16_t)((int64_t)(hash & 1) - x) / 2;
 				hash >>= 1;
 			}
 		}
@@ -633,10 +632,8 @@ do_sign_NTT(prng *rng, int16_t *restrict s1,
 
 	n = MKN(logn);
 	if (logn <= 3) {
-		h1 = h[1];
 		for (v = 0; v < n; v ++) {
-			s1[v] = ((h1 & 1) - s1[v]) / 2;
-			h1 >>= 1;
+			s1[v] = (((h[1] >> v) & 1) - s1[v]) / 2;
 		}
 	} else {
 		for (u = w = 0; u < n; w ++) {
