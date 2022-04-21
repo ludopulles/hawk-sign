@@ -10,7 +10,7 @@ CXX = g++
 CXXFLAGS = --std=c++17 $(CFLAGS)
 
 OBJ = build/common.o build/compress.o build/fft.o build/ffo.o build/fpr.o build/keygen.o build/ntt.o build/rng.o build/shake.o build/sign.o build/vrfy.o
-PROGS = bin/main bin/test_keygen bin/test_sign bin/config_fg bin/config_FG bin/test_babai bin/test_enum bin/test_compress_sig bin/speed
+PROGS = bin/main bin/test_keygen bin/test_sign bin/config_fg bin/config_FG bin/test_babai bin/test_enum bin/test_compress_sig bin/speed bin/test_decompress_sig
 
 HEAD = fpr.h inner.h
 
@@ -47,6 +47,8 @@ bin/test_enum: test_enum.cpp $(OBJ)
 	$(CXX) $(CXXFLAGS) -o bin/test_enum $(OBJ) test_enum.cpp $(LIBS)
 bin/test_compress_sig: test_compress_sig.cpp $(OBJ)
 	$(CXX) $(CXXFLAGS) -o bin/test_compress_sig $(OBJ) test_compress_sig.cpp $(LIBS)
+bin/test_decompress_sig: test_decompress_sig.cpp $(OBJ)
+	$(CXX) $(CFLAGS) -o bin/test_decompress_sig test_decompress_sig.cpp $(OBJ) $(LIBS)
 
 # Object files:
 build/common.o: common.c $(HEAD)

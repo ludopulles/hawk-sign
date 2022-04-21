@@ -2217,7 +2217,7 @@ poly_sub_scaled_ntt(uint32_t *restrict F, size_t Flen, size_t Fstride,
  * the largest values.
  *
  * IMPORTANT: if these values are modified, then the temporary buffer
- * sizes (FALCON_KEYGEN_TEMP_*, in inner.h) must be recomputed
+ * sizes (HAWK_KEYGEN_TEMP_*, in inner.h) must be recomputed
  * accordingly.
  *
  * Note, to get the values in MAX_BL_SMALL and MAX_BL_LARGE,
@@ -2229,13 +2229,11 @@ poly_sub_scaled_ntt(uint32_t *restrict F, size_t Flen, size_t Fstride,
 static const size_t MAX_BL_SMALL[10] = { 1, 1, 2, 4, 4, 8, 16, 32, 64, 128 };
 #else
 static const size_t MAX_BL_SMALL[10] = {
-//  1, 1, 2, 2, 4, 7, 14, 27, 53, 106, 209 // (FALCON)
 	1, 1, 2, 2, 4, 6, 11, 21, 41,  82
 };
 #endif // __CONFIG_fg
 
 static const size_t MAX_BL_LARGE[9] = {
-//	2, 2, 5, 7, 12, 21, 40, 78, 157, 308 // (FALCON)
 	2, 2, 3, 5, 8, 16, 31, 61, 121
 };
 
@@ -4149,6 +4147,9 @@ Zf(keygen)(inner_shake256_context *rng,
 		Zf(int8_to_fft)(q11, g, logn);
 		Zf(poly_invnorm2_fft)(q00, q10, q11, logn);
 		Zf(iFFT)(q00, logn); // 1 / Q_00
+
+		// Use this for having much decompression failures:
+		// if (fpr_lt(q00[0], fpr_inv(fpr_of(200)))) continue;
 
 		// TODO: derive a good bound here, depending on logn and sigma_pk.
 		/* if (fpr_lt(q00[0], fpr_inv(fpr_of(200))) || fpr_lt(fpr_inv(fpr_of(100)), q00[0])) {

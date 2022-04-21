@@ -23,53 +23,17 @@ long long time_diff(const struct timeval *begin, const struct timeval *end) {
 #define MAX_LOGN (9)
 #define MAX_N MKN(MAX_LOGN)
 
-const int n_repetitions = 100;
-
 long long pk_sum[MAX_LOGN+1] = {}, pk_sumsq[MAX_LOGN+1] = {}, pk_min[MAX_LOGN+1] = {}, pk_max[MAX_LOGN+1] = {};
 long long sk_sum[MAX_LOGN+1] = {}, sk_sumsq[MAX_LOGN+1] = {}, sk_min[MAX_LOGN+1] = {}, sk_max[MAX_LOGN+1] = {};
-long long q00_sum[MAX_LOGN+1] = {}, q00_sumsq[MAX_LOGN+1] = {}, q00_min[MAX_LOGN+1] = {}, q00_max[MAX_LOGN+1] = {};
-long long q10_sum[MAX_LOGN+1] = {}, q10_sumsq[MAX_LOGN+1] = {}, q10_min[MAX_LOGN+1] = {}, q10_max[MAX_LOGN+1] = {};
+long long q00_sum[MAX_LOGN+1] = {}, q00_sumsq[MAX_LOGN+1] = {};
+long long q10_sum[MAX_LOGN+1] = {}, q10_sumsq[MAX_LOGN+1] = {};
+long long q11_sum[MAX_LOGN+1] = {}, q11_sumsq[MAX_LOGN+1] = {};
 
-void test_compress(size_t logn) {
-	uint8_t b[48 << MAX_LOGN], encode_buf[10000];
-	int8_t f[MAX_N], g[MAX_N], F[MAX_N], G[MAX_N];
-	int8_t _f[MAX_N], _g[MAX_N], _F[MAX_N];
-	fpr q00[MAX_N], q10[MAX_N], q11[MAX_N];
-	int16_t q00n[MAX_N], q10n[MAX_N], _q00n[MAX_N], _q10n[MAX_N];
-	unsigned char seed[48];
-	inner_shake256_context sc;
-
-	// Initialize a RNG.
-	randombytes(seed, sizeof seed);
-	inner_shake256_init(&sc);
-	inner_shake256_inject(&sc, seed, sizeof seed);
-	inner_shake256_flip(&sc);
-
-	for (int i = 0; i < n_repetitions; i++) {
-		// Generate key pair.
-		Zf(keygen)(&sc, f, g, F, G, q00, q10, q11, logn, b);
-
-		Zf(fft_to_int16)(q00n, q00, logn);
-		Zf(fft_to_int16)(q10n, q10, logn);
-
-		int pk_sz = Zf(encode_pubkey)((void *)&encode_buf, 10000, q00n, q10n, logn);
-		assert(pk_sz != 0);
-		int _pksz = Zf(decode_pubkey)(q00n, q10n, (void *)&encode_buf, 10000, logn);
-		assert(_pksz == pk_sz);
-
-		int sk_sz = Zf(encode_seckey)((void *)&encode_buf, 10000, f, g, F, logn);
-		assert(sk_sz != 0);
-		int _sksz = Zf(decode_seckey)(f, g, F, (void *)&encode_buf, 10000, logn);
-		assert(_sksz == sk_sz);
-
-	}
-}
-
-void measure_keygen(size_t logn) {
+void measure_keygen(size_t n_repetitions, size_t logn) {
 	uint8_t b[48 << MAX_LOGN];
 	int8_t f[MAX_N], g[MAX_N], F[MAX_N], G[MAX_N];
 	fpr q00[MAX_N], q10[MAX_N], q11[MAX_N];
-	int16_t q00n[MAX_N], q10n[MAX_N];
+	int16_t q00n[MAX_N], q10n[MAX_N], q11n[MAX_N];
 	unsigned char seed[48];
 	inner_shake256_context sc;
 
@@ -85,6 +49,8 @@ void measure_keygen(size_t logn) {
 
 	long long sq_fg = 0, sq_FG = 0;
 
+	double avg = 0.0, std = 0.0;
+
 	for (int i = 0; i < n_repetitions; i++) {
 		// Generate key pair.
 		Zf(keygen)(&sc, f, g, F, G, q00, q10, q11, logn, b);
@@ -96,6 +62,7 @@ void measure_keygen(size_t logn) {
 
 		Zf(fft_to_int16)(q00n, q00, logn);
 		Zf(fft_to_int16)(q10n, q10, logn);
+		Zf(fft_to_int16)(q11n, q11, logn);
 
 		int pk_sz = Zf(encode_pubkey)(NULL, 0, q00n, q10n, logn);
 		int sk_sz = Zf(encode_seckey)(NULL, 0, f, g, F, logn);
@@ -110,12 +77,19 @@ void measure_keygen(size_t logn) {
 		if (sk_sz < sk_min[logn]) sk_min[logn] = sk_sz;
 		if (sk_sz > sk_max[logn]) sk_max[logn] = sk_sz;
 
+		double t = ( *(double*)&q00[0] ) / (0.25*Zf(l2bound)[logn]);
+		avg += t;
+		std += t*t;
+
 		for  (size_t u = 0; u < MKN(logn); u++) {
 			long long x = fpr_rint(q00[u]);
 			long long y = fpr_rint(q10[u]);
+			long long z = fpr_rint(q11[u]);
 			if (u != 0) {
 				q00_sum[logn] += x;
 				q00_sumsq[logn] += x*x;
+				q11_sum[logn] += z;
+				q11_sumsq[logn] += z*z;
 			}
 			q10_sum[logn] += y;
 			q10_sumsq[logn] += y*y;
@@ -126,15 +100,25 @@ void measure_keygen(size_t logn) {
 	// double kg_duration = (double)time_diff(&t0, &t1) / n_repetitions; // (in us)
 	// printf("Average time per keygen: %.3f ms\n", kg_duration / 1000.0);
 
-	printf("Sigma_{seckey} ~ %.8f, %.8f\n",
-		sqrt(sq_fg / (2.0 * n_repetitions * MKN(logn))),
-		sqrt(sq_FG / n_repetitions / MKN(logn)));
-
-	printf("sigma_{q00}(%d) = %.8f, sigma_{q10} = %.8f\n",
+	printf("logn = %d: sig_{f,g} ~ %.8f, sig_{F} ~ %.8f, sig_{q00} ~ %.8f, sig_{q10} ~ %.8f, sig_{q11} ~ %.8f\n",
 		(int) logn,
+		sqrt(sq_fg / (2.0 * n_repetitions * MKN(logn))),
+		sqrt(sq_FG / n_repetitions / MKN(logn)),
 		sqrt(q00_sumsq[logn] / (double) n_repetitions / (MKN(logn) - 1)),
-		sqrt(q10_sumsq[logn] / (double) n_repetitions / MKN(logn))
+		sqrt(q10_sumsq[logn] / (double) n_repetitions / MKN(logn)),
+		sqrt(q11_sumsq[logn] / (double) n_repetitions / (MKN(logn) - 1))
 	);
+	printf("averages Q: %.8f %.8f %.8f\n",
+		q00_sum[logn] / (double) n_repetitions / (MKN(logn) - 1),
+		q10_sum[logn] / (double) n_repetitions / MKN(logn),
+		q11_sum[logn] / (double) n_repetitions / (MKN(logn) - 1)
+	);
+	fflush(stdout);
+
+	avg /= n_repetitions;
+	std /= n_repetitions;
+	printf("Q00 ~ %.8f +/- %.8f\n", avg,
+		sqrt( std - avg*avg ));
 }
 
 int main() {
@@ -145,13 +129,10 @@ int main() {
 	printf("Seed: %u\n", seed);
 	srand(seed);
 
-	for (size_t logn = 1; logn <= 9; logn++) {
-		test_compress(logn);
-	}
-
+	size_t n_repetitions = 1000;
 	for (size_t logn = 1; logn <= 9; logn++) {
 		pk_min[logn] = sk_min[logn] = 1000 * 1000;
-		measure_keygen(logn);
+		measure_keygen(n_repetitions, logn);
 	}
 
 	printf("logn | Average +/- stddev | min  | max \n");
