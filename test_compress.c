@@ -1,3 +1,8 @@
+/*
+ * Tests whether first encoding and then decoding a public key gives the same
+ * result back, and similar for the secret key.
+ */
+
 #include <assert.h>
 #include <math.h>
 #include <stdio.h>

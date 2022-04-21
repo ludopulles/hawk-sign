@@ -1,3 +1,7 @@
+/*
+ * Determines the average (with std.dev.) size of a compressed secret key.
+ */
+
 #include <math.h>
 #include <stdio.h>
 // x86_64 specific:

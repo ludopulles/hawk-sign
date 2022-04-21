@@ -1,3 +1,11 @@
+/*
+ * Estimates the probability that keygen fails and has to start over due to
+ * various reasons.
+ *
+ * Moreover, it prints the size of the compressed public key, including the
+ * size when using Huffman encoding compared to the compressed-gaussian
+ * technique.
+ */
 #include <assert.h>
 #include <stdio.h>
 // x86_64 specific:

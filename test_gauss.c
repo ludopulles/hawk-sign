@@ -1,3 +1,10 @@
+/*
+ * Prints average and std.dev. of the used discrete gaussian in HAWK for secret
+ * key generation, i.e. with sigma_pk = 1.425 and prints estimations for the probabilities of certain outputs.
+ *
+ * Moreover, this prints a table to be used in keygen.c
+ */
+
 #include <assert.h>
 #include <math.h>
 #include <stdint.h>
@@ -19,19 +26,6 @@ get_rng_u64(inner_shake256_context *rng)
 	/*
 	 * We enforce little-endian representation.
 	 */
-
-#if FALCON_LE  // yyyLE+1
-	/*
-	 * On little-endian systems we just interpret the bytes "as is"
-	 * (this is correct because the exact-width types such as
-	 * 'uint64_t' are guaranteed to have no padding and no trap
-	 * representation).
-	 */
-	uint64_t r;
-
-	inner_shake256_extract(rng, (uint8_t *)&r, sizeof r);
-	return r;
-#else  // yyyLE+0
 	uint8_t tmp[8];
 
 	inner_shake256_extract(rng, tmp, sizeof tmp);
@@ -43,7 +37,6 @@ get_rng_u64(inner_shake256_context *rng)
 		| ((uint64_t)tmp[5] << 40)
 		| ((uint64_t)tmp[6] << 48)
 		| ((uint64_t)tmp[7] << 56);
-#endif  // yyyLE-
 }
 
 
@@ -201,7 +194,7 @@ int main() {
 	double avg = (double)sumval / num_sims;
 	double std = sqrt((double)sumsqval / num_sims - avg*avg);
 	assert(fabs(avg) < 0.01);
-	// printf("Average: %.8f\n", avg);
+	printf("Average: %.8f\n", avg);
 	printf("Std.dev: %.8f\n", std);
 
 	for (int x = -20; x < 20; x++) {
