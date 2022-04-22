@@ -20,7 +20,7 @@ FT F(FT iq00, long long n) {
 signed main() {
 	long long n;
 	cin >> n;
-	FT target = powl(0.5, 64);
+	FT target = powl(0.5, 96);
 
 	FT iq00_lo = 0.00001, iq00_hi = 1.0;
 	while (iq00_hi - iq00_lo > 1e-10) {

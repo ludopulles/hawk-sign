@@ -2337,70 +2337,58 @@ static const uint64_t gauss_1425[14] = {
  * Distribution has standard deviation 1.425 sqrt(512/N).
  */
 static int
-mkgauss_1425(prng *rng, unsigned logn)
+mkgauss_1425(prng *rng)
 {
-	unsigned u, g;
-	int val;
+	/*
+	 * Each iteration generates one value with the
+	 * Gaussian distribution for N = 512.
+	 *
+	 * We use two random 64-bit values. First value
+	 * decides on whether the generated value is 0, and,
+	 * if not, the sign of the value. Second random 64-bit
+	 * word is used to generate the non-zero value.
+	 *
+	 * For constant-time code we have to read the complete
+	 * table. This has negligible cost, compared with the
+	 * remainder of the keygen process (solving the NTRU
+	 * equation).
+	 */
+	uint64_t r;
+	uint32_t f, v, k, neg;
 
-	g = 1U << (9 - logn);
-	val = 0;
-	for (u = 0; u < g; u ++) {
-		/*
-		 * Each iteration generates one value with the
-		 * Gaussian distribution for N = 512.
-		 *
-		 * We use two random 64-bit values. First value
-		 * decides on whether the generated value is 0, and,
-		 * if not, the sign of the value. Second random 64-bit
-		 * word is used to generate the non-zero value.
-		 *
-		 * For constant-time code we have to read the complete
-		 * table. This has negligible cost, compared with the
-		 * remainder of the keygen process (solving the NTRU
-		 * equation).
-		 */
-		uint64_t r;
-		uint32_t f, v, k, neg;
+	/*
+	 * First value:
+	 *  - flag 'neg' is randomly selected to be 0 or 1.
+	 *  - flag 'f' is set to 1 if the generated value is zero,
+	 *    or set to 0 otherwise.
+	 */
+	r = prng_get_u64(rng);
+	neg = (uint32_t)(r >> 63);
+	r &= ~((uint64_t)1 << 63);
+	f = (uint32_t)((r - gauss_1425[0]) >> 63);
 
-		/*
-		 * First value:
-		 *  - flag 'neg' is randomly selected to be 0 or 1.
-		 *  - flag 'f' is set to 1 if the generated value is zero,
-		 *    or set to 0 otherwise.
-		 */
-		r = prng_get_u64(rng);
-		neg = (uint32_t)(r >> 63);
-		r &= ~((uint64_t)1 << 63);
-		f = (uint32_t)((r - gauss_1425[0]) >> 63);
-
-		/*
-		 * We produce a new random 63-bit integer r, and go over
-		 * the array, starting at index 1. We store in v the
-		 * index of the first array element which is not greater
-		 * than r, unless the flag f was already 1.
-		 */
-		v = 0;
-		r = prng_get_u64(rng);
-		r &= ~((uint64_t)1 << 63);
-		for (k = 1; k < 14; k ++) {
-			uint32_t t;
-			t = (uint32_t)((r - gauss_1425[k]) >> 63) ^ 1;
-			v |= k & -(t & (f ^ 1));
-			f |= t;
-		}
-
-		/*
-		 * We apply the sign ('neg' flag). If the value is zero,
-		 * the sign has no effect.
-		 */
-		v = (v ^ -neg) + neg;
-
-		/*
-		 * Generated value is added to val.
-		 */
-		val += *(int32_t *)&v;
+	/*
+	 * We produce a new random 63-bit integer r, and go over
+	 * the array, starting at index 1. We store in v the
+	 * index of the first array element which is not greater
+	 * than r, unless the flag f was already 1.
+	 */
+	v = 0;
+	r = prng_get_u64(rng);
+	r &= ~((uint64_t)1 << 63);
+	for (k = 1; k < 14; k ++) {
+		uint32_t t;
+		t = (uint32_t)((r - gauss_1425[k]) >> 63) ^ 1;
+		v |= k & -(t & (f ^ 1));
+		f |= t;
 	}
-	return val;
+
+	/*
+	 * We apply the sign ('neg' flag). If the value is zero,
+	 * the sign has no effect.
+	 */
+	v = (v ^ -neg) + neg;
+	return *(int32_t *)&v;
 }
 
 /*
@@ -2419,7 +2407,7 @@ poly_small_mkgauss(prng *rng, int8_t *f, unsigned logn)
 
 	for (u = n; u -- > 1; ) {
 		do {
-			s = mkgauss_1425(rng, logn);
+			s = mkgauss_1425(rng);
 			/*
 			 * We need the coefficient to fit within -127..+127;
 			 * realistically, this is always the case except for
@@ -2432,7 +2420,7 @@ poly_small_mkgauss(prng *rng, int8_t *f, unsigned logn)
 	}
 
 	do {
-		s = mkgauss_1425(rng, logn);
+		s = mkgauss_1425(rng);
 		/*
 		 * We need the sum of all coefficients to be 1; otherwise,
 		 * the resultant of the polynomial with X^N+1 will be even,
@@ -4129,33 +4117,24 @@ Zf(keygen)(inner_shake256_context *rng,
 		poly_small_mkgauss(&p, f, logn);
 		poly_small_mkgauss(&p, g, logn);
 
-		/*
-		 * Determine cst(1 / (ff* + gg*)) = || (f*, g*) / (ff* + gg*) ||^2. If
-		 * this quantity is much larger than the average value, which
-		 * experimentally has a value of
-		 *     0.00097 +/- 0.00016,
-		 * and theoretically has a value of
-		 *     (e/2)^2 / (2n sigma_pk^2) ~ 0.00088,
-		 * reject the key pair as decompressing a signature might fail with
-		 * non-neglegible probability.
-		 *
-		 * In the actual implementation, do this check AFTER complete_private,
-		 * as the check is easier to do when Q_00 is given in FFT format.
-		 * Moreover, in most cases, this check will succeed,
-		 */
 		Zf(int8_to_fft)(q10, f, logn);
 		Zf(int8_to_fft)(q11, g, logn);
 		Zf(poly_invnorm2_fft)(q00, q10, q11, logn);
 		Zf(iFFT)(q00, logn); // 1 / Q_00
 
-		// Use this for having much decompression failures:
-		// if (fpr_lt(q00[0], fpr_inv(fpr_of(200)))) continue;
-
-		// TODO: derive a good bound here, depending on logn and sigma_pk.
-		/* if (fpr_lt(q00[0], fpr_inv(fpr_of(200))) || fpr_lt(fpr_inv(fpr_of(100)), q00[0])) {
-			// Reject keypair as decompression may fail often.
+		/*
+		 * For n = 512, we reject a key pair if cst(1 / Q_{00}) > 0.001,
+		 * as the failure probability of decompressing a signature is bounded
+		 * from above by 9.98263 10^{-32} < 2^{-64}.
+		 *
+		 * Note that experimentally, cst(1 / Q_{00}) ~ 0.00097 +/- 0.00016, so
+		 * rejection happens regularly because of this criterion.
+		 *
+		 * TODO: perhaps do this as well for other n's.
+		 */
+		if (logn == 9 && fpr_lt(fpr_inv(fpr_of(1000)), q00[0])) {
 			continue;
-		} */
+		}
 
 		/*
 		 * Try to solve the NTRU equation for polynomials f and g, i.e. find

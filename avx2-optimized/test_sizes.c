@@ -57,7 +57,7 @@ void measure_keygen(size_t n_repetitions, size_t logn) {
 
 		for (size_t u = 0; u < MKN(logn); u++) {
 			sq_fg += f[u]*f[u] + g[u]*g[u];
-			sq_FG += F[u]*F[u];
+			sq_FG += F[u]*F[u] + G[u]*G[u];
 		}
 
 		Zf(fft_to_int16)(q00n, q00, logn);
@@ -103,7 +103,7 @@ void measure_keygen(size_t n_repetitions, size_t logn) {
 	printf("logn = %d: sig_{f,g} ~ %.8f, sig_{F} ~ %.8f, sig_{q00} ~ %.8f, sig_{q10} ~ %.8f, sig_{q11} ~ %.8f\n",
 		(int) logn,
 		sqrt(sq_fg / (2.0 * n_repetitions * MKN(logn))),
-		sqrt(sq_FG / n_repetitions / MKN(logn)),
+		sqrt(sq_FG / (2.0 * n_repetitions * MKN(logn))),
 		sqrt(q00_sumsq[logn] / (double) n_repetitions / (MKN(logn) - 1)),
 		sqrt(q10_sumsq[logn] / (double) n_repetitions / MKN(logn)),
 		sqrt(q11_sumsq[logn] / (double) n_repetitions / (MKN(logn) - 1))

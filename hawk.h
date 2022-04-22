@@ -314,6 +314,7 @@ extern "C" {
  * increasing logn cannot result in a shorter length).
  *
  * Note: each macro may evaluate its argument 'logn' several times.
+ * TODO: turn this into a macro
  */
 extern const size_t HAWK_SECKEY_SIZE[10];
 extern const size_t HAWK_PUBKEY_SIZE[10];
