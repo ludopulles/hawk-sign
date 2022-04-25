@@ -459,9 +459,9 @@ do_complete_sign(prng *rng,
 	/*
 	 * Calculate B^{-1} (x0, x1) = ((-G) x0 + F x1, g x0 + (-f) x1).
 	 */
-	Zf(poly_neg)(bF, logn);
-	Zf(poly_neg)(bg, logn);
+	Zf(poly_neg)(x0, logn);
 	Zf(poly_matmul_fft)(bG, bF, bg, bf, x0, x1, logn);
+	Zf(poly_neg)(x1, logn);
 
 	/*
 	 * Extract the signature from x0, t1
