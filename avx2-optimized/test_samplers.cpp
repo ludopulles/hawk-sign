@@ -65,73 +65,93 @@ static const uint64_t gauss_1292[26] = {
  *
  * Distribution has standard deviation 1.292 sqrt(512/N).
  */
-static int
-mkgauss(void *samp_ctx, unsigned logn, uint8_t double_mu)
-{
-	unsigned u, g;
-	int val;
+int mkgauss(prng *p, uint8_t double_mu) {
+	uint64_t r;
+	uint32_t f, v, k, neg;
+	/*
+	 * We use two random 64-bit values. First value
+	 * decides on whether the generated value is 0, and,
+	 * if not, the sign of the value. Second random 64-bit
+	 * word is used to generate the non-zero value.
+	 *
+	 * For constant-time code we have to read the complete
+	 * table. This has negligible cost, compared with the
+	 * remainder of the keygen process (solving the NTRU
+	 * equation).
+	 */
 
-	sampler_context *sc = (sampler_context *)samp_ctx;
+	/*
+	 * First value:
+	 *  - flag 'neg' is randomly selected to be 0 or 1.
+	 *  - flag 'f' is set to 1 if the generated value is zero,
+	 *    or set to 0 otherwise.
+	 */
+	r = prng_get_u64(p);
+	neg = (uint32_t)(r >> 63);
+	r &= ~((uint64_t)1 << 63);
+	f = (uint32_t)((r - gauss_1292[double_mu]) >> 63);
 
-	g = 1U << (9 - logn);
-	val = 0;
-	for (u = 0; u < g; u ++) {
-		/*
-		 * Each iteration generates one value with the
-		 * Gaussian distribution for N = 512.
-		 *
-		 * We use two random 64-bit values. First value
-		 * decides on whether the generated value is 0, and,
-		 * if not, the sign of the value. Second random 64-bit
-		 * word is used to generate the non-zero value.
-		 *
-		 * For constant-time code we have to read the complete
-		 * table. This has negligible cost, compared with the
-		 * remainder of the keygen process (solving the NTRU
-		 * equation).
-		 */
-		uint64_t r;
-		uint32_t f, v, k, neg;
-
-		/*
-		 * First value:
-		 *  - flag 'neg' is randomly selected to be 0 or 1.
-		 *  - flag 'f' is set to 1 if the generated value is zero,
-		 *    or set to 0 otherwise.
-		 */
-		r = prng_get_u64(&sc->p);
-		neg = (uint32_t)(r >> 63);
-		r &= ~((uint64_t)1 << 63);
-		f = (uint32_t)((r - gauss_1292[double_mu]) >> 63);
-
-		/*
-		 * We produce a new random 63-bit integer r, and go over
-		 * the array, starting at index 1. We store in v the
-		 * index of the first array element which is not greater
-		 * than r, unless the flag f was already 1.
-		 */
-		v = 0;
-		r = prng_get_u64(&sc->p);
-		r &= ~((uint64_t)1 << 63);
-		for (k = 1; k < 13; k ++) {
-			uint32_t t;
-			t = (uint32_t)((r - gauss_1292[2 * k + double_mu]) >> 63) ^ 1;
-			v |= k & -(t & (f ^ 1));
-			f |= t;
-		}
-
-		/*
-		 * We apply the sign ('neg' flag). If the value is zero and mu = 0,
-		 * the sign has no effect. Moreover, if mu = 1/2 and neg=0, add one.
-		 */
-		v = (v ^ -neg) + neg + (~neg & double_mu);
-
-		/*
-		 * Generated value is added to val.
-		 */
-		val += *(int32_t *)&v;
+	/*
+	 * We produce a new random 63-bit integer r, and go over
+	 * the array, starting at index 1. We store in v the
+	 * index of the first array element which is not greater
+	 * than r, unless the flag f was already 1.
+	 */
+	v = 0;
+	r = prng_get_u64(p);
+	r &= ~((uint64_t)1 << 63);
+	for (k = 1; k < 13; k ++) {
+		uint32_t t;
+		t = (uint32_t)((r - gauss_1292[2 * k + double_mu]) >> 63) ^ 1;
+		v |= k & -(t & (f ^ 1));
+		f |= t;
 	}
-	return val;
+
+	/*
+	 * We apply the sign ('neg' flag). If the value is zero and mu = 0,
+	 * the sign has no effect. Moreover, if mu = 1/2 and neg=0, add one.
+	 */
+	v = (v ^ -neg) + neg + (~neg & double_mu);
+	return *(int32_t *)&v;
+}
+
+int mkgauss2(prng *p, uint8_t double_mu) {
+	uint64_t r;
+	uint32_t v, k, neg;
+	/*
+	 * We use two random 64-bit values. First value
+	 * decides on whether the generated value is 0, and,
+	 * if not, the sign of the value. Second random 64-bit
+	 * word is used to generate the non-zero value.
+	 *
+	 * For constant-time code we have to read the complete
+	 * table. This has negligible cost, compared with the
+	 * remainder of the keygen process (solving the NTRU
+	 * equation).
+	 */
+
+	r = prng_get_u64(p) & ~((uint64_t)1 << 63);
+	v = 1;
+	for (k = 1; k < 12; k ++) {
+		v += (r - gauss_1292[2*k + double_mu]) >> 63;
+	}
+
+	/*
+	 * First value:
+	 *  - flag 'neg' is randomly selected to be 0 or 1.
+	 *  - if r/2^63 <= P(X == 0), then set v to zero.
+	 */
+	r = prng_get_u64(p);
+	neg = (uint32_t)(r >> 63);
+	r &= ~((uint64_t)1 << 63);
+	v = v & -((gauss_1292[double_mu] - r) >> 63);
+
+	/*
+	 * We apply the sign ('neg' flag). If the value is zero and mu = 0,
+	 * the sign has no effect. Moreover, if mu = 1/2 and neg=0, add one.
+	 */
+	v = (v ^ -neg) + neg + (~neg & double_mu);
+	return *(int32_t *)&v;
 }
 
 int main() {
@@ -143,15 +163,14 @@ int main() {
 	inner_shake256_inject(&sc, seed, sizeof seed);
 	inner_shake256_flip(&sc);
 
-	sampler_context spc;
-	Zf(prng_init)(&spc.p, &sc);
-	void *samp_ctx = &spc;
+	prng p;
+	Zf(prng_init)(&p, &sc);
 
 	int sumv = 0, sqv = 0;
-	int nums = 1 << 25;
+	int nums = 1 << 28;
 	int freq[100] = {};
 	for (int i = nums; i-->0; ) {
-		int x = mkgauss(samp_ctx, 9, 1);
+		int x = mkgauss(&p, 1);
 		sumv += x;
 		sqv += x*x;
 		freq[x + 50]++;
@@ -161,6 +180,21 @@ int main() {
 	double std = sqrt(((double)sqv) / nums - avg*avg);
 	printf("%.10f +/- %.10f\n", avg, std);
 
-	for (int x = -20; x < 20; x++)
-		printf("%d: %d\n", x, freq[x + 50]);
+	for (int x = 0; x < 10; x++) printf("%d: %d\n", x, freq[x + 50]);
+
+	for (int i=0; i<100; i++) freq[i] = 0;
+	sumv = sqv = 0;
+
+	for (int i = nums; i-->0; ) {
+		int x = mkgauss2(&p, 1);
+		sumv += x;
+		sqv += x*x;
+		freq[x + 50]++;
+	}
+	printf("Sum, square: %d %d\n", sumv, sqv);
+	avg = ((double)sumv) / nums;
+	std = sqrt(((double)sqv) / nums - avg*avg);
+	printf("%.10f +/- %.10f\n", avg, std);
+
+	for (int x = 0; x < 10; x++) printf("%d: %d\n", x, freq[x + 50]);
 }

@@ -66,7 +66,7 @@ int main() {
  * mu = 1 / 2 is in the odd indices.
  * Probabilities are scaled up by 2^63.
  */
-static const uint64_t gauss_1292[26] = {
+static const uint64_t gauss_1292[24] = {
 	2847982254933138603u, 5285010687306232178u,
 	3115855658194614154u, 2424313226695581870u,
 	 629245045388085487u,  372648834165936922u,
@@ -78,14 +78,15 @@ static const uint64_t gauss_1292[26] = {
 	          240149359u,            24322099u,
 	             809457u,               60785u,
 	               1500u,                  83u,
-	                  2u,                   0u,
-	                  0u,                   0u,
+	                  2u,                   0u
+	// ,              0u,                   0u
 };
 
 /*
- * Sample a integer with parity equal to double_mu from a Gaussian distribution
- * with standard deviation 2 * 1.292, i.e. a value x == parity (mod 2) is
- * chosen with probability proportional to
+ * Sample an integer with parity equal to double_mu from a discrete Gaussian
+ * distribution with support 2\ZZ + double_mu, mean 0 and sigma 2 * 1.292.
+ * That is, an integer x (== double_mu mod 2) is chosen with probability
+ * proportional to:
  *
  *     exp(- x^2 / (8 1.292^2)).
  *
@@ -94,56 +95,52 @@ static const uint64_t gauss_1292[26] = {
 static inline int
 mkgauss_1292(prng *rng, uint8_t double_mu)
 {
-	/* We use two random 64-bit values. First value decides on whether the
-	 * generated value is 0, and, if not, the sign of the value. Second
-	 * random 64-bit word is used to generate the non-zero value.
-	 *
-	 * For constant-time code we have to read the complete table. Currently
-	 * sampling takes up most time of the signing process, so this is
-	 * something that should be optimized.
-	 */
 	uint64_t r;
-	uint32_t f, v, k, neg;
+	uint32_t v, k, neg;
+	int32_t w;
+
+	/*
+	 * We use two random 64-bit values. First value
+	 * decides on whether the generated value is 0, and,
+	 * if not, the sign of the value. Second random 64-bit
+	 * word is used to generate the non-zero value.
+	 *
+	 * For constant-time code we have to read the complete
+	 * table. This has negligible cost, compared with the
+	 * remainder of the keygen process (solving the NTRU
+	 * equation).
+	 */
+
+	r = prng_get_u64(rng) & ~((uint64_t)1 << 63);
+	v = 1;
+	for (k = 1; k < 12; k ++) {
+		v += (r - gauss_1292[2*k + double_mu]) >> 63;
+	}
 
 	/*
 	 * First value:
 	 *  - flag 'neg' is randomly selected to be 0 or 1.
-	 *  - flag 'f' is set to 1 if the generated value is zero,
-	 *    or set to 0 otherwise.
+	 *  - if r/2^63 <= P(X == 0), then set v to zero.
 	 */
 	r = prng_get_u64(rng);
-
 	neg = (uint32_t)(r >> 63);
 	r &= ~((uint64_t)1 << 63);
-	f = (uint32_t)((r - gauss_1292[double_mu]) >> 63);
+	v &= -((gauss_1292[double_mu] - r) >> 63);
 
 	/*
-	 * We produce a new random 63-bit integer r, and go over
-	 * the array, starting at index 1. The first time an array element with
-	 * value less than or equal to r, v is set to the 'right' value, and f
-	 * is set to 1 so v only gets a value once.
+	 * We apply the sign ('neg' flag). If the value is zero, the sign has no
+	 * effect. In the case mu = 1/2, add 1 if neg=0. Doing so results in 0, 1
+	 * to be equally likely as an outcome and -1, 2 to be equally likely etc.
 	 */
-	v = double_mu;
-
-	r = prng_get_u64(rng);
-
-	r &= ~((uint64_t)1 << 63);
-	for (k = 1; k < 13; k ++) {
-		uint32_t t;
-		t = (uint32_t)((r - gauss_1292[2 * k + double_mu]) >> 63) ^ 1;
-		v |= (k << 1) & -(t & (f ^ 1));
-		f |= t;
-	}
+	v = (v ^ -neg) + neg + (~neg & double_mu);
 
 	/*
-	 * We apply the sign ('neg' flag).
+	 * Now, transform the support of the sampler from Z to 2Z - double_mu, i.e.
+	 * for mu = 1/2, we have -1, 1 with equal likelihood and -2, 2 with equal
+	 * likelihood, etc.
 	 */
-	v = (v ^ -neg) + neg;
-
-	/*
-	 * Return v interpreted as a signed integer
-	 */
-	return *(int32_t *)&v;
+	w = *(int32_t *)&v;
+	return 2 * w - (int) double_mu;
 }
 
 // =============================================================================

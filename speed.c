@@ -273,11 +273,11 @@ test_speed_hawk(unsigned logn, double threshold)
 	fflush(stdout);
 	printf(" %8.2f", do_bench(&bench_expand_privkey, &bc, threshold) / 1000.0);
 	fflush(stdout);
+	printf(" %8.2f", do_bench(&bench_sign_NTT, &bc, threshold) / 1000.0);
+	fflush(stdout);
 	printf(" %8.2f", do_bench(&bench_sign_dyn, &bc, threshold) / 1000.0);
 	fflush(stdout);
 	printf(" %8.2f", do_bench(&bench_sign, &bc, threshold) / 1000.0);
-	fflush(stdout);
-	printf(" %8.2f", do_bench(&bench_sign_NTT, &bc, threshold) / 1000.0);
 	fflush(stdout);
 	printf(" %8.2f", do_bench(&bench_verify, &bc, threshold) / 1000.0);
 	fflush(stdout);
@@ -316,7 +316,7 @@ main(int argc, char *argv[])
 	printf("ss = sign (with expanded key), vv = verify\n");
 	printf("keygen in milliseconds, other values in microseconds\n");
 	printf("\n");
-	printf("degree  kg(ms)   ek(us)   sd(us)   ss(us)   sn(us)   vv(us)\n");
+	printf("degree  kg(ms)   ek(us)   sn(us)   sd(us)   ss(us)   vv(us)\n");
 	fflush(stdout);
 
 	for (unsigned logn = 1; logn <= 9; logn++) {

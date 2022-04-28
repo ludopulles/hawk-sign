@@ -4132,9 +4132,9 @@ Zf(keygen)(inner_shake256_context *rng,
 		 *
 		 * TODO: perhaps do this as well for other n's.
 		 */
-		// if (logn == 9 && fpr_lt(fpr_inv(fpr_of(1000)), q00[0])) {
-		double v = *(double *)&q00[0];
-		if (!(0.005 < v && v < 0.0055)) {
+		if (logn == 9 && fpr_lt(fpr_inv(fpr_of(1000)), q00[0])) {
+		/* double v = *(double *)&q00[0];
+		if (!(0.005 < v && v < 0.0055)) { */
 			continue;
 		}
 
