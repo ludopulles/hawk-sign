@@ -2228,14 +2228,10 @@ poly_sub_scaled_ntt(uint32_t *restrict F, size_t Flen, size_t Fstride,
 #ifdef __CONFIG_fg
 static const size_t MAX_BL_SMALL[10] = { 1, 1, 2, 4, 4, 8, 16, 32, 64, 128 };
 #else
-static const size_t MAX_BL_SMALL[10] = {
-	1, 1, 2, 2, 4, 6, 11, 21, 41,  82
-};
+static const size_t MAX_BL_SMALL[10] = { 1, 1, 1, 2, 3, 6, 11, 21, 42, 83 };
 #endif // __CONFIG_fg
 
-static const size_t MAX_BL_LARGE[9] = {
-	2, 2, 3, 5, 8, 16, 31, 61, 121
-};
+static const size_t MAX_BL_LARGE[9] = { 2, 2, 3, 5, 9, 16, 31, 62, 123 };
 
 /*
  * Average and standard deviation for the maximum size (in bits) of
@@ -2243,20 +2239,20 @@ static const size_t MAX_BL_LARGE[9] = {
  * to compute bounds for Babai's reduction.
  */
 static const struct {
-	int avg;
-	int std;
+        int avg, std;
 } BITLENGTH[10] = {
-	{ 4, 0 },
-	{ 9, 1 },
+	{ 3, 0 },
+	{ 8, 1 },
 	{ 19, 1 },
 	{ 39, 1 },
 	{ 78, 2 },
-	{ 154, 3 },
-	{ 303, 4 },
-	{ 599, 7 },
-	{ 1185, 12 },
-	{ 2370, 24 }
+	{ 155, 3 },
+	{ 307, 4 },
+	{ 606, 8 },
+	{ 1201, 13 },
+	{ 2402, 25 }
 };
+
 
 /*
  * Minimal recursion depth at which we rebuild intermediate values
@@ -2313,31 +2309,34 @@ align_u32(void *base, void *data)
  * Element 0 of the table is P(x = 0).
  * For k > 0, element k is P(x >= k+1 | x > 0).
  * Probabilities are scaled up by 2^63.
+ *
+ * see gen_table.cpp for generating this table.
  */
-static const uint64_t gauss_1425[14] = {
-	2582170577806070936u,
-	3616484622030002669u,
-	 937850763665829726u,
-	 155804309064628172u,
-	  16270507104385775u,
-	   1056136771359479u,
-	     42327595817352u,
-	      1043181220683u,
-	        15771375580u,
-	          146052920u,
-	             827733u,
-	               2869u,
-	                  6u,
-	                  0u
+static const uint64_t gauss_1500[15] = {
+    2453062048915767484u,
+    3871449519226705105u,
+    1123680878940444328u,
+     219134710439743982u,
+      28210262150869885u,
+       2371447864901096u,
+        129302080834770u,
+          4553577562215u,
+           103300286390u,
+             1507025277u,
+               14123567u,
+                  84972u,
+                    328u,
+                      1u,
+                      0u,
 };
 
 /*
  * Generate a random value with a Gaussian distribution centered on 0.
  * The RNG must be ready for extraction (already flipped).
- * Distribution has standard deviation 1.425 sqrt(512/N).
+ * Distribution has standard deviation 1.5.
  */
 static int
-mkgauss_1425(prng *rng)
+mkgauss_keygen(prng *rng)
 {
 	/*
 	 * Each iteration generates one value with the
@@ -2365,7 +2364,7 @@ mkgauss_1425(prng *rng)
 	r = prng_get_u64(rng);
 	neg = (uint32_t)(r >> 63);
 	r &= ~((uint64_t)1 << 63);
-	f = (uint32_t)((r - gauss_1425[0]) >> 63);
+	f = (uint32_t)((r - gauss_1500[0]) >> 63);
 
 	/*
 	 * We produce a new random 63-bit integer r, and go over
@@ -2378,7 +2377,7 @@ mkgauss_1425(prng *rng)
 	r &= ~((uint64_t)1 << 63);
 	for (k = 1; k < 14; k ++) {
 		uint32_t t;
-		t = (uint32_t)((r - gauss_1425[k]) >> 63) ^ 1;
+		t = (uint32_t)((r - gauss_1500[k]) >> 63) ^ 1;
 		v |= k & -(t & (f ^ 1));
 		f |= t;
 	}
@@ -2407,7 +2406,7 @@ poly_small_mkgauss(prng *rng, int8_t *f, unsigned logn)
 
 	for (u = n; u -- > 1; ) {
 		do {
-			s = mkgauss_1425(rng);
+			s = mkgauss_keygen(rng);
 			/*
 			 * We need the coefficient to fit within -127..+127;
 			 * realistically, this is always the case except for
@@ -2420,7 +2419,7 @@ poly_small_mkgauss(prng *rng, int8_t *f, unsigned logn)
 	}
 
 	do {
-		s = mkgauss_1425(rng);
+		s = mkgauss_keygen(rng);
 		/*
 		 * We need the sum of all coefficients to be 1; otherwise,
 		 * the resultant of the polynomial with X^N+1 will be even,

@@ -698,6 +698,18 @@ void sample_FG_sizes(inner_shake256_context *rng, uint8_t *tmp)
 		size_t nr_ints = (int)(avg + 6.0 * stddev + 30) / 31;
 		printf("Depth %zu: %.2f (%.2f) --> (%zu ints)\n", depth, avg, stddev, nr_ints);
 	}
+
+	printf("static const size_t MAX_BL_LARGE[9] = {\n\t");
+	for (size_t depth = 0; depth < logn; depth++) {
+		double avg = ((double)sum_b[depth]) / nsamples;
+		double stddev = sqrt(((double)sum_bsq[depth]) / nsamples - avg*avg);
+		size_t nr_ints = (int)(avg + 6.0 * stddev + 30) / 31;
+		printf("%u", nr_ints);
+		if (depth == logn-1) printf("\n");
+		else printf(", ");
+	};
+	printf("};\n");
+
 }
 
 

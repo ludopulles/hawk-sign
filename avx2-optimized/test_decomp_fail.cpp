@@ -5,8 +5,6 @@
 #include <assert.h>
 #include <math.h>
 #include <stdio.h>
-// x86_64 specific:
-#include <sys/time.h>
 
 #include <thread>
 #include <mutex>
@@ -128,6 +126,7 @@ do_sign(prng *rng, const fpr *restrict expanded_seckey,
 	int32_t z, norm;
 
 	n = MKN(logn);
+	norm = 0;
 
 	bf = expanded_seckey;
 	bg = bf + n;
@@ -146,20 +145,18 @@ do_sign(prng *rng, const fpr *restrict expanded_seckey,
 	Zf(iFFT)(x0, logn);
 	Zf(iFFT)(x1, logn);
 
-	for (u = 0; u < n; u ++) {
-		z = mkgauss_1292(rng, fpr_rint(x0[u]) & 1);
-		norm += z*z;
-		x0[u] = fpr_of(z);
-	}
-	for (u = 0; u < n; u ++) {
-		z = mkgauss_1292(rng, fpr_rint(x1[u]) & 1);
-		norm += z*z;
-		x1[u] = fpr_of(z);
-	}
-
-	if ((uint32_t)norm > Zf(l2bound)[logn]) {
-		return 0;
-	}
+	do {
+		for (u = 0; u < n; u ++) {
+			z = mkgauss_1292(rng, fpr_rint(x0[u]) & 1);
+			norm += z*z;
+			x0[u] = fpr_of(z);
+		}
+		for (u = 0; u < n; u ++) {
+			z = mkgauss_1292(rng, fpr_rint(x1[u]) & 1);
+			norm += z*z;
+			x1[u] = fpr_of(z);
+		}
+	} while ((uint32_t)norm > Zf(l2bound)[logn]);
 
 	Zf(FFT)(x0, logn);
 	Zf(FFT)(x1, logn);
@@ -173,6 +170,14 @@ do_sign(prng *rng, const fpr *restrict expanded_seckey,
 		if (!fpr_lt(fpr_neg(fpr_one), res[u]) || !fpr_lt(res[u], fpr_one))
 			num_errors++;
 	}
+
+	/* if (num_errors > 10) {
+		printf("ERRORS!\n");
+		for (u = 0; u < n; u++) {
+			printf("%.2f ", *(double *)&res[u]);
+		}
+		printf("\n");
+	} */
 
 	/*
 	 * Calculate B^{-1} (x0, x1) = ((-G) x0 + F x1, g x0 + (-f) x1).
@@ -198,24 +203,24 @@ do_sign(prng *rng, const fpr *restrict expanded_seckey,
 uint8_t b[48 << LOGN];
 int8_t f[N], g[N], F[N], G[N];
 fpr q00[N], q10[N], q11[N], iq00[N], exp_key[9 << (LOGN-1)];
-constexpr size_t num_reps = 10 * 1000;
+constexpr size_t num_reps = 100 * 1000;
 
 void measure_decompression_failure(inner_shake256_context *sc) {
 	prng rng;
-	uint8_t h[N/4];
+	uint8_t h[N/4], owntmp[24*N];
 	int16_t s0[N], s0p[N], s1[N];
 
+	inner_shake256_extract(sc, rng.state.d, 56);
 	// initialize only once for performance
 	Zf(prng_init)(&rng, sc);
 
-	size_t num_fails = 0;
 	int res;
 	for (size_t i = 0; i < num_reps; i++) {
 		// Generate a random hash to sign.
 		Zf(prng_get_bytes)(&rng, h, sizeof h);
-		res = do_sign(&rng, exp_key, s0, s1, h, LOGN, b);
-		if (res > 1 && Zf(verify_simple_rounding)(h, s0p, s1, q00, q10, q11, LOGN, b)) {
-			printf("res = %d\n", res);
+		res = do_sign(&rng, exp_key, s0, s1, h, LOGN, owntmp);
+		if (res > 1) printf("res = %d\n", res);
+		if (res	> 1 && Zf(verify_simple_rounding)(h, s0p, s1, q00, q10, q11, LOGN, owntmp)) {
 			printf("Expecting different signature!!!\n");
 			for (size_t u = 0; u < N; u++)
 				printf("%d ", s0p[u] - s0[u]);
@@ -229,9 +234,9 @@ void measure_decompression_failure(inner_shake256_context *sc) {
 typedef long double FT;
 constexpr FT sigma_sig = 1.292;
 FT erfcl_s(FT x, FT sigma) { return erfcl(x / (sigma * sqrtl(2))); }
-FT fail_prob(FT iq00, long long n) {
-	FT val = 1.0 - powl(erfl(0.5 / sqrtl(2*iq00) / sigma_sig), n); /* direct approach */
-	if (val < 1e-50) return n * erfcl_s(0.5, sqrt(iq00) * sigma_sig); /* union bound */
+FT fail_prob(FT ciq00, long long n) {
+	FT val = 1.0 - powl(erfl(0.5 / sqrtl(2*ciq00) / sigma_sig), n); /* direct approach */
+	if (val < 1e-50) return n * erfcl_s(0.5, sqrt(ciq00) * sigma_sig); /* union bound */
 	return val;
 }
 
@@ -257,12 +262,13 @@ void spawn_threads(inner_shake256_context *sc, int num_threads)
 		pool[i]->join();
 		delete pool[i];
 	}
+	for (int i = 0; i < num_threads; i++)
+		delete shakes[i];
 }
 
 void test_decomp_prob(inner_shake256_context *sc)
 {
 	size_t u, hn = N/2;
-	fpr iq00[N];
 
 	Zf(keygen)(sc, f, g, F, G, q00, q10, q11, LOGN, b);
 

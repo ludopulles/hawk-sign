@@ -525,7 +525,7 @@ Zf(i_shake256_inject)(inner_shake256_context *sc, const uint8_t *in, size_t len)
 	sc->dptr = dptr;
 }
 
-/* see falcon.h */
+/* see hawk.h */
 void
 Zf(i_shake256_flip)(inner_shake256_context *sc)
 {
@@ -539,7 +539,7 @@ Zf(i_shake256_flip)(inner_shake256_context *sc)
 	sc->dptr = 136;
 }
 
-/* see falcon.h */
+/* see hawk.h */
 void
 Zf(i_shake256_extract)(inner_shake256_context *sc, uint8_t *out, size_t len)
 {
