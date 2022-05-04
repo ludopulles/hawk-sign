@@ -77,20 +77,32 @@ size_t encoding_length(const vector<int> &table, int16_t *sig, unsigned logn)
 // | TESTING CODE                                                              |
 // =============================================================================
 constexpr int n_repetitions = 1000;
+constexpr long long salt_and_header = 1 + 40;
 
 struct WorkerResult {
-	long long sig_failed[10], sz[10], sz_sq[10];
-	size_t maxsz[10], maxhuf;
-	long long huf_failed, sz_h, sz_hsq;
+	// s1 <- encode_sig()
+	long long sig_failed[10], sz[10], sz_sq[10], maxsz[10];
+	// (s0, s1) <- encode_complete_sig()
+	long long csig_failed[11], csz[11], csz_sq[11], maxcsz[11];
+	// encode_huffman
+	long long huf_failed, sz_h, sz_hsq, maxhuf;
+	long long chuf_failed, csz_h, csz_hsq, maxchuf;
 	long long sum_s0, sumsq_s0, sum_s1, sumsq_s1;
 
-	WorkerResult() : maxhuf(0), huf_failed(0), sz_h(0), sz_hsq(0),
+	WorkerResult() :
+		huf_failed(0), sz_h(0), sz_hsq(0), maxhuf(0),
+		chuf_failed(0), csz_h(0), csz_hsq(0), maxchuf(0),
 		sum_s0(0), sumsq_s0(0), sum_s1(0), sumsq_s1(0)
 	{
 		memset(sig_failed, 0, sizeof sig_failed);
 		memset(sz, 0, sizeof sz);
 		memset(sz_sq, 0, sizeof sz_sq);
 		memset(maxsz, 0, sizeof sz_sq);
+
+		memset(csig_failed, 0, sizeof csig_failed);
+		memset(csz, 0, sizeof csz);
+		memset(csz_sq, 0, sizeof csz_sq);
+		memset(maxcsz, 0, sizeof csz_sq);
 	}
 
 	void add(size_t s, int lb) {
@@ -99,7 +111,17 @@ struct WorkerResult {
 		} else {
 			sz[lb] += s;
 			sz_sq[lb] += s*s;
-			maxsz[lb] = max(maxsz[lb], s);
+			maxsz[lb] = max(maxsz[lb], (long long) s);
+		}
+	}
+
+	void cadd(size_t s, int lb) {
+		if (s == 0) {
+			csig_failed[lb]++;
+		} else {
+			csz[lb] += s;
+			csz_sq[lb] += s*s;
+			maxcsz[lb] = max(maxcsz[lb], (long long) s);
 		}
 	}
 
@@ -109,11 +131,23 @@ struct WorkerResult {
 		sz_hsq += res.sz_hsq;
 		maxhuf = max(maxhuf, res.maxhuf);
 
+		chuf_failed += res.chuf_failed;
+		csz_h += res.csz_h;
+		csz_hsq += res.csz_hsq;
+		maxchuf = max(maxchuf, res.maxchuf);
+
 		for (size_t i = 0; i < 10; i++) {
 			sig_failed[i] += res.sig_failed[i];
 			sz[i] += res.sz[i];
 			sz_sq[i] += res.sz_sq[i];
 			maxsz[i] = max(maxsz[i], res.maxsz[i]);
+		}
+
+		for (size_t i = 0; i < 11; i++) {
+			csig_failed[i] += res.csig_failed[i];
+			csz[i] += res.csz[i];
+			csz_sq[i] += res.csz_sq[i];
+			maxcsz[i] = max(maxcsz[i], res.maxcsz[i]);
 		}
 
 		sum_s0 += res.sum_s0;
@@ -170,9 +204,23 @@ WorkerResult measure_signatures(unsigned logn) {
 		if (szh != 0) {
 			result.sz_h += szh;
 			result.sz_hsq += szh*szh;
-			result.maxhuf = max(result.maxhuf, szh);
+			result.maxhuf = max(result.maxhuf, (long long) szh);
 		} else {
 			result.huf_failed++;
+		}
+
+		for (int lobits = 7; lobits < 11; lobits++) {
+			size_t sz = Zf(encode_complete_sig)(NULL, 0, s0, s1, logn, lobits, 5U);
+			result.cadd(sz, lobits);
+		}
+		size_t cszh = encoding_length(huffman_s0, s0, logn)
+			+ encoding_length(huffman_s1, s1, logn);
+		if (cszh != 0) {
+			result.csz_h += cszh;
+			result.csz_hsq += cszh*cszh;
+			result.maxchuf = max(result.maxchuf, (long long) cszh);
+		} else {
+			result.chuf_failed++;
 		}
 	}
 	return result;
@@ -194,16 +242,15 @@ void work(unsigned logn) {
 }
 
 int main() {
-	huffman_s0 = generate_huffman_table(512, 357.435);
+	huffman_s0 = generate_huffman_table(2048, 357.435);
 	huffman_s1 = generate_huffman_table(512,  62.051);
 
 	const int nthreads = 4;
 	std::thread* pool[nthreads-1];
 
-	for (unsigned logn = 8; logn <= 9; logn++) {
+	for (unsigned logn = 9; logn <= 9; logn++) {
 		size_t n = MKN(logn);
 		tot = WorkerResult();
-		size_t salt_and_header = 1 + 40;
 
 		for (int i = 0; i < nthreads-1; i++) pool[i] = new std::thread(work, logn);
 		work(logn);
@@ -223,13 +270,28 @@ int main() {
 		for (int lb = 3; lb < 10; lb++) {
 			double avg_sz = (double)tot.sz[lb] / (runs - tot.sig_failed[lb]);
 			double var_sz = (double)tot.sz_sq[lb] / (runs - tot.sig_failed[lb]) - avg_sz * avg_sz;
-			printf("%7u | %7zu | %.1f (std %5.1f) | %5lld\n",
+			printf("%7u | %7lld | %.1f (std %5.1f) | %5lld\n",
 				lb, salt_and_header + tot.maxsz[lb], salt_and_header + avg_sz, sqrt(var_sz), tot.sig_failed[lb]);
 		}
 
 		double avg_h = (double) tot.sz_h / (runs - tot.huf_failed);
 		double var_h = (double) tot.sz_hsq / (runs - tot.huf_failed) - avg_h * avg_h;
-		printf("Huffman | %7zu | %.1f (std %5.1f) | %5lld\n", salt_and_header + tot.maxhuf, salt_and_header + avg_h, sqrt(var_h), tot.huf_failed);
+		printf("Huffman | %7lld | %.1f (std %5.1f) | %5lld\n",
+			salt_and_header + tot.maxhuf, salt_and_header + avg_h, sqrt(var_h), tot.huf_failed);
+
+		printf("Complete signature (s0, s1) encodings:\n");
+		for (int lb = 7; lb < 11; lb++) {
+			double avg_sz = (double)tot.csz[lb] / (runs - tot.csig_failed[lb]);
+			double var_sz = (double)tot.csz_sq[lb] / (runs - tot.csig_failed[lb]) - avg_sz * avg_sz;
+			printf("(%2u, 5) | %7lld | %.1f (std %5.1f) | %5lld\n",
+				lb, salt_and_header + tot.maxcsz[lb], salt_and_header + avg_sz, sqrt(var_sz), tot.csig_failed[lb]);
+		}
+
+		avg_h = (double) tot.csz_h / (runs - tot.chuf_failed);
+		var_h = (double) tot.csz_hsq / (runs - tot.chuf_failed) - avg_h * avg_h;
+		printf("Huffman | %7lld | %.1f (std %5.1f) | %5lld\n",
+			salt_and_header + tot.maxchuf, salt_and_header + avg_h, sqrt(var_h), tot.chuf_failed);
+
 	}
 
 	return 0;

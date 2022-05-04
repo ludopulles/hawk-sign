@@ -29,7 +29,7 @@
  * @author   Thomas Pornin <thomas.pornin@nccgroup.com>
  */
 
-#include "math.h"
+#include <math.h>
 
 #include "inner.h"
 
@@ -70,23 +70,23 @@ init_huffman_trees() {
 	float freq[2*MAX_Q10];
 	uint16_t u, l, r, v;
 
-#define BUILD_TREE(T, N, sigma)                                          \
-	/* calculate PDF of normal distribution */                           \
-	for (u = 0; u < N; u++)                                              \
-		freq[N + u] = exp((float)-u * u / (2.0 * sigma * sigma));        \
-	/* construct the tree */                                             \
-	for (u = N; --u >= 1; ) {                                            \
-		l = r = 0; /* find 2 nodes with smallest frequencies */          \
-		for (v = 2*N; --v > u; ) {                                       \
-			if (freq[v] < 0) continue; /* v is already used */           \
-			if (!l || freq[v] < freq[l]) r = l, l = v;                   \
-			else if (!r || freq[v] < freq[r]) r = v;                     \
-		}                                                                \
-		freq[u] = freq[l] + freq[r];                                     \
-		freq[l] = freq[r] = -1; /* mark l and r as used */               \
-		T.p[l] = T.p[r] = u;                                             \
-		T.a[u][0] = r;                                                   \
-		T.a[u][1] = l;                                                   \
+#define BUILD_TREE(T, N, sigma)                                               \
+	/* calculate PDF of normal distribution */                                \
+	for (u = 0; u < N; u++)                                                   \
+		freq[N + u] = exp((float)-u * u / (2.0 * sigma * sigma));             \
+	/* construct the tree */                                                  \
+	for (u = N; --u >= 1; ) {                                                 \
+		l = r = 0; /* find 2 nodes with smallest frequencies */               \
+		for (v = 2*N; --v > u; ) {                                            \
+			if (freq[v] < 0) continue; /* v is already used */                \
+			if (!l || freq[v] < freq[l]) r = l, l = v;                        \
+			else if (!r || freq[v] < freq[r]) r = v;                          \
+		}                                                                     \
+		freq[u] = freq[l] + freq[r];                                          \
+		freq[l] = freq[r] = -1; /* mark l and r as used */                    \
+		T.p[l] = T.p[r] = u;                                                  \
+		T.a[u][0] = r;                                                        \
+		T.a[u][1] = l;                                                        \
 	}
 
 	BUILD_TREE(tree_q00, MAX_Q00, 64.00);
@@ -134,25 +134,23 @@ Zf(encode_pubkey_huffman)(void *out, size_t max_out_len,
 	size_t n, u, v;
 	uint8_t acc, acc_len, steps[ENCODING_LEN_Q10];
 
-
 	/*
 	 * Within one byte, the oldest bits are the most significant bits of
 	 * the byte, while in the buffer, the oldest bytes are the first ones.
 	 * Thus, byte-ordering is little-endian, while bit-ordering is
 	 * big-endian.
 	 */
-#define ADDBIT(x) {                                                      \
-	acc = (acc << 1) | (x);                                              \
-	if (++acc_len == 8) {                                                \
-		if (buf != NULL) {                                               \
-			if (max_out_len <= v) return 0;                              \
-			buf[v] = acc;                                                \
-		}                                                                \
-		acc_len = acc = 0; /* reset acc */                               \
-		v++;                                                             \
-	}                                                                    \
+#define ADDBIT(x) {                                                           \
+	acc = (acc << 1) | (x);                                                   \
+	if (++acc_len == 8) {                                                     \
+		if (buf != NULL) {                                                    \
+			if (max_out_len <= v) return 0;                                   \
+			buf[v] = acc;                                                     \
+		}                                                                     \
+		acc_len = acc = 0; /* reset acc */                                    \
+		v++;                                                                  \
+	}                                                                         \
 }
-
 
 	buf = (uint8_t *)out;
 	n = MKN(logn);
@@ -245,11 +243,11 @@ Zf(decode_pubkey_huffman)(int16_t *q00, int16_t *q10,
 	size_t n, u, v;
 	uint8_t acc, acc_len;
 
-#define ENSUREBIT()                                                      \
-	if (acc_len == 0) {                                                  \
-		if (max_in_len <= v) return 0; /* not enough bits */             \
-		acc = buf[v++];                                                  \
-		acc_len = 8;                                                     \
+#define ENSUREBIT()                                                           \
+	if (acc_len == 0) {                                                       \
+		if (max_in_len <= v) return 0; /* not enough bits */                  \
+		acc = buf[v++];                                                       \
+		acc_len = 8;                                                          \
 	}
 
 #define GETBIT() ((acc >> (--acc_len)) & 1)
@@ -363,16 +361,16 @@ Zf(encode_sig_huffman)(void *out, size_t max_out_len,
 	 * Thus, byte-ordering is little-endian, while bit-ordering is
 	 * big-endian.
 	 */
-#define ADDBIT(x) {                                                      \
-	acc = (acc << 1) | (x);                                              \
-	if (++acc_len == 8) {                                                \
-		if (buf != NULL) {                                               \
-			if (max_out_len <= v) return 0;                              \
-			buf[v] = acc;                                                \
-		}                                                                \
-		acc_len = acc = 0; /* reset acc */                               \
-		v++;                                                             \
-	}                                                                    \
+#define ADDBIT(x) {                                                           \
+	acc = (acc << 1) | (x);                                                   \
+	if (++acc_len == 8) {                                                     \
+		if (buf != NULL) {                                                    \
+			if (max_out_len <= v) return 0;                                   \
+			buf[v] = acc;                                                     \
+		}                                                                     \
+		acc_len = acc = 0; /* reset acc */                                    \
+		v++;                                                                  \
+	}                                                                         \
 }
 
 
@@ -434,15 +432,15 @@ Zf(encode_sig_huffman)(void *out, size_t max_out_len,
 // n = 9: 2^9
 
 static const size_t low_bits_q00[10] = {
-	0 /* unused */, 9, 9, 8, 8, 7, 7, 6, 6, 5
+	0 /* unused */, 1, 2, 2, 3, 3, 4, 4, 5, 5
+};
+static const size_t low_bits_q10[10] = {
+	0 /* unused */, 1, 2, 3, 4, 5, 6, 7, 8, 9
 };
 
-static const size_t low_bits_fg[10] = {
-	0 /* unused */, 3, 3, 2, 2, 1, 1, 0, 0, 0
+static const size_t low_bits_FG[10] = {
+	0 /* unused */, 0, 0, 0, 0, 0, 1, 1, 2, 2
 }; 
-
-#define LOW_BITS_FG 2
-
 
 /* see inner.h */
 size_t
@@ -452,10 +450,10 @@ Zf(encode_pubkey)(void *out, size_t max_out_len,
 	uint8_t *buf;
 	size_t n, u, v;
 	uint16_t w, low_mask;
-	uint32_t acc;
+	uint64_t acc;
 	unsigned acc_len;
 
-	n = (size_t)1 << logn;
+	n = MKN(logn);
 	buf = (uint8_t *)out;
 	low_mask = (1U << low_bits_q00[logn]) - 1;
 
@@ -542,6 +540,7 @@ Zf(encode_pubkey)(void *out, size_t max_out_len,
 	/*
 	 * Encode q10.
 	 */
+	low_mask = (1U << low_bits_q10[logn]) - 1;
 	for (u = 0; u < n; u ++) {
 		/*
 		 * Push the sign bit and store |x| - [x<0] in w.
@@ -554,9 +553,9 @@ Zf(encode_pubkey)(void *out, size_t max_out_len,
 		/*
 		 * Push the low 8 bits of w.
 		 */
-		acc = (acc << 8) | (w & 255);
-		w >>= 8;
-		acc_len += 9;
+		acc = (acc << low_bits_q10[logn]) | (w & low_mask);
+		w >>= low_bits_q10[logn];
+		acc_len += low_bits_q10[logn] + 1;
 
 		/*
 		 * Push as many zeros as necessary, then a one. Since the initial w is
@@ -607,14 +606,15 @@ Zf(decode_pubkey)(int16_t *q00, int16_t *q10,
 {
 	const uint8_t *buf;
 	size_t n, u, v;
-	uint16_t acc, low_mask, high_inc;
+	uint64_t acc;
+	uint16_t low_mask, high_inc;
 	unsigned acc_len;
 
-#define ENSUREBIT()                                                      \
-	if (acc_len == 0) {                                                  \
-		if (v >= max_in_len) return 0; /* not enough bits */             \
-		acc = buf[v++];                                                  \
-		acc_len = 8;                                                     \
+#define ENSUREBIT()                                                           \
+	if (acc_len == 0) {                                                       \
+		if (v >= max_in_len) return 0; /* not enough bits */                  \
+		acc = buf[v++];                                                       \
+		acc_len = 8;                                                          \
 	}
 
 #define GETBIT() ((acc >> (--acc_len)) & 1)
@@ -690,6 +690,8 @@ Zf(decode_pubkey)(int16_t *q00, int16_t *q10,
 	/*
 	 * Decode q10.
 	 */
+	high_inc = (1U << low_bits_q10[logn]);
+	low_mask = high_inc - 1;
 	for (u = 0; u < n; u ++) {
 		uint16_t s, w;
 
@@ -702,7 +704,215 @@ Zf(decode_pubkey)(int16_t *q00, int16_t *q10,
 		/*
 		 * Get next eight bits that make up the lowest significant bits of w.
 		 */
-		if (acc_len < 8) {
+		if (acc_len < low_bits_q10[logn]) {
+			// should be true all the time
+			if (v >= max_in_len) return 0;
+			acc = (acc << 8) | buf[v ++];
+			acc_len += 8;
+
+			// Note: low_bits_q10[logn] may be 9.
+			if (acc_len < low_bits_q10[logn]) {
+				// should be true all the time
+				if (v >= max_in_len) return 0;
+				acc = (acc << 8) | buf[v ++];
+				acc_len += 8;
+			}
+		}
+
+		/*
+		 * Get 8 least significant bits of w.
+		 */
+		w = (acc >> (acc_len -= low_bits_q10[logn])) & low_mask;
+
+		/*
+		 * Recover the most significant bits of w: count number of consecutive
+		 * zeros up to the first 1 and add 2^low_bits_q10[logn] to w for each
+		 * one you see.
+		 */
+		for (;;) {
+			ENSUREBIT();
+			if (GETBIT() != 0) {
+				break;
+			}
+			w += high_inc;
+			if (w >= 4096) {
+				return 0;
+			}
+		}
+
+		q10[u] = w ^ -s;
+	}
+
+	/*
+	 * Unused bits in the last byte must be zero.
+	 */
+	if ((acc & ((1u << acc_len) - 1u)) != 0) {
+		return 0;
+	}
+
+	return v;
+#undef ENSUREBIT
+#undef GETBIT
+}
+
+/* see inner.h */
+size_t
+Zf(encode_complete_sig)(void *out, size_t max_out_len,
+	const int16_t *s0, const int16_t *s1, unsigned logn,
+	size_t lo_bits_s0, size_t lo_bits_s1)
+{
+	uint8_t *buf;
+	uint16_t w;
+	size_t n, u, v;
+	uint64_t acc;
+	unsigned acc_len;
+
+	n = MKN(logn);
+	buf = (uint8_t *)out;
+
+	/*
+	 * Make sure that all values are within the -512..+511 range.
+	 */
+	for (u = 0; u < n; u ++)
+		if (s0[u] < -2048 || s0[u] >= 2048) return 0;
+	for (u = 0; u < n; u ++)
+		if (s1[u] < -512 || s1[u] >= 512) return 0;
+
+	acc = 0;
+	acc_len = 0;
+	v = 0;
+
+	for (u = 0; u < n; u ++) {
+		/*
+		 * Push sign bit
+		 */
+		w = (uint16_t) s0[u];
+		acc = (acc << 1) | (w >> 15);
+		w ^= -(w >> 15);
+
+		/*
+		 * Push the lowest `lo_bits` bits of w which is equal to |x|'.
+		 */
+		acc <<= lo_bits_s0;
+		acc |= w & ((1U << lo_bits_s0) - 1);
+		w >>= lo_bits_s0;
+		acc_len += lo_bits_s0 + 1;
+
+		/*
+		 * Push as many zeros as necessary, then a one.
+		 */
+		acc <<= (w + 1);
+		acc |= 1;
+		acc_len += w + 1;
+		if (acc_len >= 64) return 0; // There is an overflow
+
+		/*
+		 * Produce all full bytes.
+		 */
+		while (acc_len >= 8) {
+			acc_len -= 8;
+			if (buf != NULL) {
+				if (v >= max_out_len) {
+					return 0;
+				}
+				buf[v] = (uint8_t)(acc >> acc_len);
+			}
+			v ++;
+		}
+	}
+
+	for (u = 0; u < n; u ++) {
+		/*
+		 * Push sign bit
+		 */
+		w = (uint16_t) s1[u];
+		acc = (acc << 1) | (w >> 15);
+		w ^= -(w >> 15);
+
+		/*
+		 * Push the lowest `lo_bits` bits of w which is equal to |x|'.
+		 */
+		acc <<= lo_bits_s1;
+		acc |= w & ((1U << lo_bits_s1) - 1);
+		w >>= lo_bits_s1;
+		acc_len += lo_bits_s1 + 1;
+
+		/*
+		 * Push as many zeros as necessary, then a one.
+		 */
+		acc <<= (w + 1);
+		acc |= 1;
+		acc_len += w + 1;
+		if (acc_len >= 64) return 0; // There is an overflow
+
+		/*
+		 * Produce all full bytes.
+		 */
+		while (acc_len >= 8) {
+			acc_len -= 8;
+			if (buf != NULL) {
+				if (v >= max_out_len) {
+					return 0;
+				}
+				buf[v] = (uint8_t)(acc >> acc_len);
+			}
+			v ++;
+		}
+	}
+
+	/*
+	 * Flush remaining bits (if any).
+	 */
+	if (acc_len > 0) {
+		if (buf != NULL) {
+			if (v >= max_out_len) {
+				return 0;
+			}
+			buf[v] = (uint8_t)(acc << (8 - acc_len));
+		}
+		v ++;
+	}
+
+	return v;
+}
+
+size_t
+Zf(decode_complete_sig)(int16_t *s0, int16_t *s1,
+	const void *in, size_t max_in_len, unsigned logn,
+	size_t lo_bits_s0, size_t lo_bits_s1)
+{
+	const uint8_t *buf;
+	uint16_t s, w;
+	size_t n, u, v;
+	uint64_t acc;
+	unsigned acc_len;
+
+#define ENSUREBIT()                                                           \
+	if (acc_len == 0) {                                                       \
+		if (v >= max_in_len) return 0; /* not enough bits */                  \
+		acc = buf[v++];                                                       \
+		acc_len = 8;                                                          \
+	}
+
+#define GETBIT() ((acc >> (--acc_len)) & 1)
+
+	buf = (uint8_t *)in;
+	n = MKN(logn);
+	acc = 0;
+	acc_len = 0;
+	v = 0;
+
+	for (u = 0; u < n; u ++) {
+		/*
+		 * Get sign of the current coefficient
+		 */
+		ENSUREBIT();
+		s = GETBIT();
+
+		/*
+		 * Get next lo_bits bits that make up the lowest significant bits of w.
+		 */
+		if (acc_len < lo_bits_s0) {
 			// should be true all the time
 			if (v >= max_in_len) return 0;
 			acc = (acc << 8) | buf[v ++];
@@ -710,26 +920,58 @@ Zf(decode_pubkey)(int16_t *q00, int16_t *q10,
 		}
 
 		/*
-		 * Get 8 least significant bits of w.
+		 * Get lo_bits least significant bits of w.
 		 */
-		w = (acc >> (acc_len -= 8)) & 255;
+		w = (acc >> (acc_len -= lo_bits_s0)) & ((1U << lo_bits_s0) - 1);
 
 		/*
 		 * Recover the most significant bits of w: count number of consecutive
-		 * zeros up to the first 1 and add 2^8 to w for each one you see.
+		 * zeros up to the first 1 and add 2^lo_bits to w for each one you see.
 		 */
 		for (;;) {
 			ENSUREBIT();
-			if (GETBIT() != 0) {
-				break;
-			}
-			w += 256;
-			if (w >= 4096) {
-				return 0;
-			}
+			if (GETBIT() != 0) break;
+			w += (1U << lo_bits_s0);
+			if (w >= 2048) return 0;
 		}
 
-		q10[u] = w ^ -s;
+		s0[u] = w ^ -s;
+	}
+
+	for (u = 0; u < n; u ++) {
+		/*
+		 * Get sign of the current coefficient
+		 */
+		ENSUREBIT();
+		s = GETBIT();
+
+		/*
+		 * Get next lo_bits bits that make up the lowest significant bits of w.
+		 */
+		if (acc_len < lo_bits_s1) {
+			// should be true all the time
+			if (v >= max_in_len) return 0;
+			acc = (acc << 8) | buf[v ++];
+			acc_len += 8;
+		}
+
+		/*
+		 * Get lo_bits least significant bits of w.
+		 */
+		w = (acc >> (acc_len -= lo_bits_s1)) & ((1U << lo_bits_s1) - 1);
+
+		/*
+		 * Recover the most significant bits of w: count number of consecutive
+		 * zeros up to the first 1 and add 2^lo_bits to w for each one you see.
+		 */
+		for (;;) {
+			ENSUREBIT();
+			if (GETBIT() != 0) break;
+			w += (1U << lo_bits_s1);
+			if (w >= 512) return 0;
+		}
+
+		s1[u] = w ^ -s;
 	}
 
 	/*
@@ -754,7 +996,7 @@ Zf(encode_sig)(void *out, size_t max_out_len, const int16_t *x, unsigned logn,
 	uint64_t acc;
 	unsigned acc_len;
 
-	n = (size_t)1 << logn;
+	n = MKN(logn);
 	buf = (uint8_t *)out;
 
 	/*
@@ -839,11 +1081,11 @@ Zf(decode_sig)(int16_t *x, const void *in, size_t max_in_len, unsigned logn,
 	uint16_t acc;
 	unsigned acc_len;
 
-#define ENSUREBIT()                                                      \
-	if (acc_len == 0) {                                                  \
-		if (v >= max_in_len) return 0; /* not enough bits */             \
-		acc = buf[v++];                                                  \
-		acc_len = 8;                                                     \
+#define ENSUREBIT()                                                           \
+	if (acc_len == 0) {                                                       \
+		if (v >= max_in_len) return 0; /* not enough bits */                  \
+		acc = buf[v++];                                                       \
+		acc_len = 8;                                                          \
 	}
 
 #define GETBIT() ((acc >> (--acc_len)) & 1)
@@ -908,62 +1150,6 @@ Zf(decode_sig)(int16_t *x, const void *in, size_t max_in_len, unsigned logn,
 #undef GETBIT
 }
 
-static inline size_t
-poly_enc(uint8_t *buf, size_t max_out_len, size_t v, const int8_t *x,
-	uint64_t *acc, size_t *acc_len, size_t lo_bits, unsigned logn)
-{
-	size_t u, n;
-
-	n = MKN(logn);
-	for (u = 0; u < n; u ++) {
-		uint8_t w;
-
-		/*
-		 * Push sign bit
-		 */
-		w = (uint8_t) x[u];
-		*acc = (*acc << 1) | (w >> 7);
-		w ^= -(w >> 7);
-
-		/*
-		 * Push the lowest `lo_bits` bits of |x[u]|.
-		 */
-		*acc <<= lo_bits;
-		*acc |= w & ((1U << lo_bits) - 1);
-		w >>= lo_bits;
-		*acc_len += lo_bits + 1;
-
-		/*
-		 * Push as many zeros as necessary, then a one. If this means the data
-		 * cannot be stored in the buffer acc, return 0 which implies that the
-		 * secret key must be rejected. The lo_bits are tuned such that this
-		 * almost never happens.
-		 */
-		*acc_len += w + 1;
-		if (*acc_len > 64) {
-			return 0;
-		}
-
-		*acc <<= (w + 1);
-		*acc |= 1;
-
-		/*
-		 * Produce all full bytes.
-		 */
-		while (*acc_len >= 8) {
-			*acc_len -= 8;
-			if (buf != NULL) {
-				if (v >= max_out_len) {
-					return 0;
-				}
-				buf[v] = (uint8_t)(*acc >> *acc_len);
-			}
-			v ++;
-		}
-	}
-	return v;
-}
-
 /*
  * Optimal choice for sigma_pk = 1.425 is lo_bits_fg = 0, lo_bits_FG = 2
  * Results in |sk| = 1037.2 ± 10.7 bytes, for n=512.
@@ -973,28 +1159,64 @@ size_t
 Zf(encode_seckey)(void *out, size_t max_out_len,
 	const int8_t *f, const int8_t *g, const int8_t *F, unsigned logn)
 {
-	uint8_t *buf;
+	uint8_t *buf, w;
 	uint64_t acc;
-	size_t v, acc_len;
+	size_t n, u, v, acc_len, lo_bits;
 
+	n = MKN(logn);
 	buf = (uint8_t *)out;
 	acc = 0;
 	acc_len = 0;
+	v = 0;
 
-	v = poly_enc(buf, max_out_len, 0, f, &acc, &acc_len, low_bits_fg[logn],
-		logn);
-	if (v == 0) {
-		return 0;
+#define POLY_ENC(x)                                                           \
+	for (u = 0; u < n; u ++) {                                                \
+		/* Push sign bit */                                                   \
+		w = (uint8_t) x[u];                                                   \
+		acc = (acc << 1) | (w >> 7);                                          \
+		w ^= -(w >> 7);                                                       \
+		/*
+		 * Push the lowest `lo_bits` bits of |x[u]|'.
+		 */                                                                   \
+		acc <<= lo_bits;                                                      \
+		acc |= w & ((1U << lo_bits) - 1);                                     \
+		w >>= lo_bits;                                                        \
+		acc_len += lo_bits + 1;                                               \
+		/*
+		 * Push as many zeros as necessary, then a one. If this means the data
+		 * cannot be stored in the buffer acc, return 0 which implies that the
+		 * secret key must be rejected. The lo_bits are tuned such that this
+		 * almost never happens.
+		 */                                                                   \
+		acc_len += w + 1;                                                     \
+		if (acc_len > 64) return 0;                                           \
+		acc = (acc << (w + 1)) | 1;                                           \
+		/* Produce all full bytes. */                                         \
+		while (acc_len >= 8) {                                                \
+			acc_len -= 8;                                                     \
+			if (buf != NULL) {                                                \
+				if (v >= max_out_len) return 0;                               \
+				buf[v] = (uint8_t)(acc >> acc_len);                           \
+			}                                                                 \
+			v ++;                                                             \
+		}                                                                     \
 	}
-	v = poly_enc(buf, max_out_len, v, g, &acc, &acc_len, low_bits_fg[logn],
-		logn);
-	if (v == 0) {
-		return 0;
-	}
-	v = poly_enc(buf, max_out_len, v, F, &acc, &acc_len, LOW_BITS_FG, logn);
-	if (v == 0) {
-		return 0;
-	}
+
+	/*
+	 * Always output f, g in unary since the standard deviation is so small.
+	 */
+	lo_bits = 0;
+	POLY_ENC(f);
+	POLY_ENC(g);
+
+	/*
+	 * Since the coefficient sizes of F, G can be somewhat larger than those of
+	 * f, g, do output the least significant two bits of F, G and then output
+	 * the remainder in unary. Note that G can be reconstructed from f, g and F
+	 * since fG - gF = 1.
+	 */
+	lo_bits = low_bits_FG[logn];
+	POLY_ENC(F);
 
 	/*
 	 * Flush remaining bits (if any).
@@ -1009,71 +1231,7 @@ Zf(encode_seckey)(void *out, size_t max_out_len,
 		v ++;
 	}
 	return v;
-}
-
-static inline size_t
-poly_dec(const uint8_t *buf, size_t max_in_len, size_t v, int8_t *x,
-	uint16_t *acc, size_t *acc_len, size_t lo_bits, unsigned logn)
-{
-	size_t n, u;
-
-#define ENSUREBIT()                                                           \
-	if (*acc_len == 0) {                                                      \
-		if (v >= max_in_len) return 0; /* not enough bits */                  \
-		*acc = buf[v++];                                                      \
-		*acc_len = 8;                                                         \
-	}
-
-#define GETBIT() ((*acc >> (--(*acc_len))) & 1)
-
-	n = MKN(logn);
-
-	for (u = 0; u < n; u ++) {
-		uint16_t s, w;
-
-		/*
-		 * Get sign of the current coefficient
-		 */
-		ENSUREBIT();
-		s = GETBIT();
-
-		/*
-		 * Get next lo_bits bits that make up the lowest significant bits of w.
-		 */
-		if (*acc_len < lo_bits) {
-			// should be true all the time
-			if (v >= max_in_len) return 0;
-			*acc = (*acc << 8) | buf[v ++];
-			*acc_len += 8;
-		}
-
-		/*
-		 * Get lo_bits least significant bits of w.
-		 */
-		w = (*acc >> (*acc_len -= lo_bits)) & ((1U << lo_bits) - 1);
-
-		/*
-		 * Recover the most significant bits of w: count number of consecutive
-		 * zeros up to the first 1 and add 2^lo_bits to w for each one you see.
-		 */
-		for (;;) {
-			ENSUREBIT();
-			if (GETBIT() != 0) {
-				break;
-			}
-			w += (1U << lo_bits);
-			if (w >= 128) {
-				// Value does not fit into a int8_t (signed single byte).
-				return 0;
-			}
-		}
-
-		x[u] = w ^ -s;
-	}
-
-	return v;
-#undef ENSUREBIT
-#undef GETBIT
+#undef POLY_ENC
 }
 
 /*
@@ -1086,27 +1244,56 @@ Zf(decode_seckey)(int8_t *f, int8_t *g, int8_t *F,
 	const void *in, size_t max_in_len, unsigned logn)
 {
 	const uint8_t *buf;
-	uint16_t acc;
-	size_t v, acc_len;
+	uint16_t acc, s, w;
+	size_t n, u, v, lo_bits, acc_len;
 
+	n = MKN(logn);
 	buf = (const uint8_t *)in;
 	acc = 0;
 	acc_len = 0;
+	v = 0;
 
-	v = poly_dec(buf, max_in_len, 0, f, &acc, &acc_len, low_bits_fg[logn],
-		logn);
-	if (v == 0) {
-		return 0;
+#define ENSUREBIT()                                                           \
+	if (acc_len == 0) {                                                       \
+		if (v >= max_in_len) return 0; /* not enough bits */                  \
+		acc = buf[v++];                                                       \
+		acc_len = 8;                                                          \
 	}
-	v = poly_dec(buf, max_in_len, v, g, &acc, &acc_len, low_bits_fg[logn],
-		logn);
-	if (v == 0) {
-		return 0;
+
+#define GETBIT() ((acc >> (--(acc_len))) & 1)
+
+#define POLY_DEC(x)                                                           \
+	for (u = 0; u < n; u ++) {                                                \
+		/* Get sign of the current coefficient */                             \
+		ENSUREBIT();                                                          \
+		s = GETBIT();                                                         \
+		/* Get lo_bits least significant bits of w. */                        \
+		if (acc_len < lo_bits) {                                              \
+			if (v >= max_in_len) return 0;                                    \
+			acc = (acc << 8) | buf[v ++];                                     \
+			acc_len += 8;                                                     \
+		}                                                                     \
+		w = (acc >> (acc_len -= lo_bits)) & ((1U << lo_bits) - 1);            \
+		/*
+		 * Recover the most significant bits of w: count number of consecutive
+		 * zeros up to the first 1 and add 2^lo_bits to w for each one you see.
+		 */                                                                   \
+		for (;;) {                                                            \
+			ENSUREBIT();                                                      \
+			if (GETBIT() != 0) break;                                         \
+			w += (1U << lo_bits);                                             \
+			/* Value does not fit into a int8_t (signed single byte). */      \
+			if (w >= 128) return 0;                                           \
+		}                                                                     \
+		x[u] = w ^ -s;                                                        \
 	}
-	v = poly_dec(buf, max_in_len, v, F, &acc, &acc_len, LOW_BITS_FG, logn);
-	if (v == 0) {
-		return 0;
-	}
+
+	lo_bits = 0;
+	POLY_DEC(f);
+	POLY_DEC(g);
+
+	lo_bits = low_bits_FG[logn];
+	POLY_DEC(F);
 
 	/*
 	 * Unused bits in the last byte must be zero.
@@ -1115,4 +1302,7 @@ Zf(decode_seckey)(int8_t *f, int8_t *g, int8_t *F,
 		return 0;
 	}
 	return v;
+#undef ENSUREBIT
+#undef GETBIT
+#undef POLY_DEC
 }

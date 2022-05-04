@@ -39,8 +39,9 @@ void measure_keygen(size_t n_repetitions, size_t logn) {
 		Zf(fft_to_int16)(q10n, q10, logn);
 		Zf(fft_to_int16)(q11n, q11, logn);
 
-		int pk_sz = Zf(encode_pubkey)(NULL, 0, q00n, q10n, logn);
-		int sk_sz = Zf(encode_seckey)(NULL, 0, f, g, F, logn);
+		// Take the header byte into account:
+		int pk_sz = 1 + Zf(encode_pubkey)(NULL, 0, q00n, q10n, logn);
+		int sk_sz = 1 + Zf(encode_seckey)(NULL, 0, f, g, F, logn);
 
 		pk_sum[logn] += pk_sz;
 		pk_sumsq[logn] += pk_sz * pk_sz;
@@ -80,13 +81,13 @@ int main() {
 
 	size_t nreps[MAX_LOGN + 1];
 	for (size_t logn = 1; logn <= MAX_LOGN; logn++) {
-		nreps[logn] = 1000;
+		nreps[logn] = 400;
 	}
 
 	for (size_t logn = 1; logn <= MAX_LOGN; logn++) {
 		pk_min[logn] = sk_min[logn] = 1000 * 1000;
 		measure_keygen(nreps[logn], logn);
-		printf(".");
+		printf("%zu", logn);
 		fflush(stdout);
 	}
 	printf("\n");
@@ -103,6 +104,8 @@ int main() {
 			sqrt(q11_sumsq[logn] / (double) nreps[logn] / (MKN(logn-1) - 1))
 		);
 	}
+
+/*
 	for (size_t logn = 1; logn <= MAX_LOGN; logn++) {
 		printf("averages Q: %.5f %.5f %.5f\n",
 			q00_sum[logn] / (double) nreps[logn] / (MKN(logn-1) - 1),
@@ -110,12 +113,10 @@ int main() {
 			q11_sum[logn] / (double) nreps[logn] / (MKN(logn-1) - 1)
 		);
 		fflush(stdout);
-	}
+	} */
 
-	printf("logn | Average +/- stddev | min  | max \n");
+	printf("\nlogn | Average +/- stddev | min  | max \n");
 	double avg, std;
-
-	const size_t header_byte = 1;
 
 	printf("-----+- Secret key -------+------+-----\n");
 	// Secret key
@@ -123,7 +124,7 @@ int main() {
 		avg = (double) sk_sum[logn] / nreps[logn];
 		std = sqrt( (double) sk_sumsq[logn] / nreps[logn] - avg*avg );
 		printf("%4d | %7.2f +/- %6.2f | %4lld | %4lld\n",
-			(int) logn, header_byte + avg, std, header_byte + sk_min[logn], header_byte + sk_max[logn]);
+			(int) logn, avg, std, sk_min[logn], sk_max[logn]);
 	}
 
 	printf("-----+- Public key -------+------+-----\n");
@@ -132,7 +133,7 @@ int main() {
 		avg = (double) pk_sum[logn] / nreps[logn];
 		std = sqrt( (double) pk_sumsq[logn] / nreps[logn] - avg*avg );
 		printf("%4d | %7.2f +/- %6.2f | %4lld | %4lld\n",
-			(int) logn, header_byte + avg, std, header_byte + pk_min[logn], header_byte + pk_max[logn]);
+			(int) logn, avg, std, pk_min[logn], pk_max[logn]);
 	}
 	return 0;
 }

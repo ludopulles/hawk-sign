@@ -29,8 +29,6 @@
  * @author   Thomas Pornin <thomas.pornin@nccgroup.com>
  */
 
-#include <assert.h>
-
 #include "inner.h"
 
 /*
