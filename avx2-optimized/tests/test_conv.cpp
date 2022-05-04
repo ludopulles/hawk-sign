@@ -10,7 +10,7 @@
 
 extern "C" {
 	#define restrict
-	#include "inner.h"
+	#include "../inner.h"
 }
 
 long long time_diff(const struct timeval *begin, const struct timeval *end) {
