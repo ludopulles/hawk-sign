@@ -2,28 +2,15 @@
 #include <climits>
 #include <cstdio>
 #include <vector>
+
 #include <mutex>
 #include <thread>
-
-// x86_64 specific:
-#include<sys/time.h>
 
 extern "C" {
 	#define restrict
 	#include "../inner.h"
 }
 using namespace std;
-
-// Simple randomness generator:
-void randombytes(unsigned char *x, unsigned long long xlen) {
-	for (; xlen -- > 0; ++x)
-		*x = ((unsigned char) rand());
-}
-
-long long time_diff(const struct timeval *begin, const struct timeval *end) {
-	return 1000000LL * (end->tv_sec - begin->tv_sec) + (end->tv_usec - begin->tv_usec);
-}
-
 
 /*
  * Create a dynamic Huffman table of size N which is (almost) optimal for a
@@ -89,14 +76,12 @@ size_t encoding_length(const vector<int> &table, int16_t *sig, unsigned logn)
 // =============================================================================
 // | TESTING CODE                                                              |
 // =============================================================================
-constexpr size_t logn = 9, n = MKN(logn);
-constexpr int n_repetitions = 2500;
+constexpr int n_repetitions = 1000;
 
 struct WorkerResult {
 	long long sig_failed[10], sz[10], sz_sq[10];
 	size_t maxsz[10], maxhuf;
 	long long huf_failed, sz_h, sz_hsq;
-
 	long long sum_s0, sumsq_s0, sum_s1, sumsq_s1;
 
 	WorkerResult() : maxhuf(0), huf_failed(0), sz_h(0), sz_hsq(0),
@@ -140,16 +125,19 @@ struct WorkerResult {
 
 vector<int> huffman_s0, huffman_s1;
 
-WorkerResult measure_signatures() {
-	uint8_t b[50 << logn], h[n / 4];
-	int8_t f[n], g[n], F[n], G[n];
-	int16_t s0[n], s1[n];
-	fpr q00[n], q10[n], q11[n];
+WorkerResult measure_signatures(unsigned logn) {
+	uint8_t b[48 * 512], h[512 / 4];
+	int8_t f[512], g[512], F[512], G[512];
+	int16_t s0[512], s1[512];
+	fpr q00[512], q10[512], q11[512];
+	size_t n;
 	unsigned char seed[48];
 	inner_shake256_context sc;
 
+	n = MKN(logn);
+
 	// Initialize a RNG.
-	randombytes(seed, sizeof seed);
+	Zf(get_seed)(seed, sizeof seed);
 	inner_shake256_init(&sc);
 	inner_shake256_inject(&sc, seed, sizeof seed);
 	inner_shake256_flip(&sc);
@@ -176,13 +164,16 @@ WorkerResult measure_signatures() {
 			size_t sz = Zf(encode_sig)(NULL, 0, s1, logn, lobits);
 			result.add(sz, lobits);
 		}
+
 		// size_t szh = Zf(encode_sig_huffman)(NULL, 0, s1, logn);
 		size_t szh = encoding_length(huffman_s1, s1, logn);
 		if (szh != 0) {
 			result.sz_h += szh;
 			result.sz_hsq += szh*szh;
 			result.maxhuf = max(result.maxhuf, szh);
-		} else result.huf_failed++;
+		} else {
+			result.huf_failed++;
+		}
 	}
 	return result;
 }
@@ -193,8 +184,8 @@ mutex mx;
 constexpr fpr sigma_sig = { v: 1.292 };
 constexpr fpr verif_margin = { v: 1.1 };
 
-void work() {
-	WorkerResult result = measure_signatures();
+void work(unsigned logn) {
+	WorkerResult result = measure_signatures(logn);
 
 	{
 		lock_guard<mutex> guard(mx);
@@ -203,43 +194,43 @@ void work() {
 }
 
 int main() {
-	// set seed
-	struct timeval tv;
-	gettimeofday(&tv, NULL);
-	unsigned seed = 1000000 * tv.tv_sec + tv.tv_usec;
-	printf("Seed: %u\n", seed);
-	srand(seed);
-
-	huffman_s0 = generate_huffman_table(512, 405.304);
-	huffman_s1 = generate_huffman_table(512,  62.095);
+	huffman_s0 = generate_huffman_table(512, 357.435);
+	huffman_s1 = generate_huffman_table(512,  62.051);
 
 	const int nthreads = 4;
 	std::thread* pool[nthreads-1];
-	for (int i = 0; i < nthreads-1; i++) pool[i] = new std::thread(work);
-	work();
-	for (int i = 0; i < nthreads-1; i++) pool[i]->join(), delete pool[i];
 
-	long long runs = n_repetitions * nthreads;
+	for (unsigned logn = 8; logn <= 9; logn++) {
+		size_t n = MKN(logn);
+		tot = WorkerResult();
+		size_t salt_and_header = 1 + 40;
 
-	printf("\nNumber of signatures signed = %lld\n\n", runs);
-	double avg_s0 = double(tot.sum_s0) / (runs * n);
-	double avg_s1 = double(tot.sum_s1) / (runs * n);
-	double var_s0 = (long double)(tot.sumsq_s0) / (runs * n) - avg_s0 * avg_s0;
-	double var_s1 = (long double)(tot.sumsq_s1) / (runs * n) - avg_s1 * avg_s1;
-	printf("Average coefficient of s0 ~ %7.3f +/- %7.3Lf\n", avg_s0, sqrtl(var_s0));
-	printf("Average coefficient of s1 ~ %7.3f +/- %7.3Lf\n", avg_s1, sqrtl(var_s1));
+		for (int i = 0; i < nthreads-1; i++) pool[i] = new std::thread(work, logn);
+		work(logn);
+		for (int i = 0; i < nthreads-1; i++) pool[i]->join(), delete pool[i];
 
-	printf("lo_bits | max sig | avg sig. size (B) | #fails\n");
-	for (int lb = 3; lb < 10; lb++) {
-		double avg_sz = (double)tot.sz[lb] / (runs - tot.sig_failed[lb]);
-		double std_sz = (double)tot.sz_sq[lb] / (runs - tot.sig_failed[lb]) - avg_sz * avg_sz;
-		printf("%7u | %7zu | %.1f (std %5.1f) | %5lld\n",
-			lb, tot.maxsz[lb], avg_sz, std_sz, tot.sig_failed[lb]);
+		long long runs = n_repetitions * nthreads;
+
+		printf("\nlogn = %u, num_samples = %lld\n", logn, runs);
+		double avg_s0 = double(tot.sum_s0) / (runs * n);
+		double avg_s1 = double(tot.sum_s1) / (runs * n);
+		double var_s0 = double(tot.sumsq_s0) / (runs * n) - avg_s0 * avg_s0;
+		double var_s1 = double(tot.sumsq_s1) / (runs * n) - avg_s1 * avg_s1;
+		printf("Average coefficient of s0 ~ %7.3f +/- %7.3f\n", avg_s0, sqrt(var_s0));
+		printf("Average coefficient of s1 ~ %7.3f +/- %7.3f\n", avg_s1, sqrt(var_s1));
+
+		printf("lo_bits | max sig | avg sig. size (B) | #fails\n");
+		for (int lb = 3; lb < 10; lb++) {
+			double avg_sz = (double)tot.sz[lb] / (runs - tot.sig_failed[lb]);
+			double var_sz = (double)tot.sz_sq[lb] / (runs - tot.sig_failed[lb]) - avg_sz * avg_sz;
+			printf("%7u | %7zu | %.1f (std %5.1f) | %5lld\n",
+				lb, salt_and_header + tot.maxsz[lb], salt_and_header + avg_sz, sqrt(var_sz), tot.sig_failed[lb]);
+		}
+
+		double avg_h = (double) tot.sz_h / (runs - tot.huf_failed);
+		double var_h = (double) tot.sz_hsq / (runs - tot.huf_failed) - avg_h * avg_h;
+		printf("Huffman | %7zu | %.1f (std %5.1f) | %5lld\n", salt_and_header + tot.maxhuf, salt_and_header + avg_h, sqrt(var_h), tot.huf_failed);
 	}
-	
-	double avg_h = (double) tot.sz_h / (runs - tot.huf_failed);
-	double std_h = (double) tot.sz_hsq / (runs - tot.huf_failed) - avg_h * avg_h;
-	printf("Huffman | %7zu | %.1f (std %5.1f) | %5lld\n", tot.maxhuf, avg_h, std_h, tot.huf_failed);
 
 	return 0;
 }

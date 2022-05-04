@@ -115,12 +115,15 @@ int main() {
 	printf("logn | Average +/- stddev | min  | max \n");
 	double avg, std;
 
+	const size_t header_byte = 1;
+
 	printf("-----+- Secret key -------+------+-----\n");
 	// Secret key
 	for (size_t logn = 1; logn <= MAX_LOGN; logn++) {
 		avg = (double) sk_sum[logn] / nreps[logn];
 		std = sqrt( (double) sk_sumsq[logn] / nreps[logn] - avg*avg );
-		printf("%4d | %7.2f +/- %6.2f | %4lld | %4lld\n", (int) logn, avg, std, sk_min[logn], sk_max[logn]);
+		printf("%4d | %7.2f +/- %6.2f | %4lld | %4lld\n",
+			(int) logn, header_byte + avg, std, header_byte + sk_min[logn], header_byte + sk_max[logn]);
 	}
 
 	printf("-----+- Public key -------+------+-----\n");
@@ -128,7 +131,8 @@ int main() {
 	for (size_t logn = 1; logn <= MAX_LOGN; logn++) {
 		avg = (double) pk_sum[logn] / nreps[logn];
 		std = sqrt( (double) pk_sumsq[logn] / nreps[logn] - avg*avg );
-		printf("%4d | %7.2f +/- %6.2f | %4lld | %4lld\n", (int) logn, avg, std, pk_min[logn], pk_max[logn]);
+		printf("%4d | %7.2f +/- %6.2f | %4lld | %4lld\n",
+			(int) logn, header_byte + avg, std, header_byte + pk_min[logn], header_byte + pk_max[logn]);
 	}
 	return 0;
 }
