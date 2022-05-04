@@ -12,11 +12,8 @@
 #include<sys/time.h>
 
 extern "C" {
-	#ifndef restrict
-		#define restrict
-	#endif
-
-	#include "inner.h"
+	#define restrict
+	#include "../inner.h"
 }
 
 typedef long long ll;

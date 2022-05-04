@@ -4,17 +4,23 @@
  */
 
 #include <assert.h>
-#include <math.h>
 #include <stdio.h>
-// x86_64 specific:
-#include <sys/time.h>
 
-#include "inner.h"
+#include "../inner.h"
+
+int poly_eq(int8_t *p, int8_t *q, unsigned logn) {
+	for (size_t u = 0; u < MKN(logn); u++) {
+		if (p[u] != q[u]) {
+			return 0;
+		}
+	}
+	return 1;
+}
 
 #define LOGN (9)
 #define N MKN(LOGN)
-
 #define BUFLEN (10240)
+
 uint8_t b[48 << LOGN], outbuf[BUFLEN];
 int8_t f[N], g[N], F[N], G[N];
 fpr q00[N], q10[N], q11[N];
@@ -24,27 +30,10 @@ int8_t _f[N], _g[N], _F[N], _G[N];
 int16_t _iq00[N], _iq10[N];
 fpr _q00[N], _q10[N], _q11[N], exp_seckey[EXPANDED_SECKEY_SIZE(LOGN)];
 
-int poly_eq(int8_t *p, int8_t *q, unsigned logn) {
-	/* for (size_t u = 0; u < MKN(logn); u++) printf("%d ", (int) p[u]);
-	printf("\n");
-	for (size_t u = 0; u < MKN(logn); u++) printf("%d ", (int) q[u]);
-	printf("\n"); */
-	for (size_t u = 0; u < MKN(logn); u++) {
-		if (p[u] != q[u]) return 0;
-	}
-	return 1;
-}
+inner_shake256_context sc;
+const int n_repetitions = 100;
 
 void test_encode_decode(unsigned logn) {
-	unsigned char seed[48];
-	inner_shake256_context sc;
-	const int n_repetitions = 100;
-
-	// Initialize a RNG.
-	Zf(get_seed)(seed, sizeof seed);
-	inner_shake256_init(&sc);
-	inner_shake256_inject(&sc, seed, sizeof seed);
-	inner_shake256_flip(&sc);
 
 	for (int i = 0; i < n_repetitions; i++) {
 		// Generate key pair.
@@ -84,15 +73,14 @@ void test_encode_decode(unsigned logn) {
 }
 
 int main() {
-	// set seed
-	struct timeval tv;
-	gettimeofday(&tv, NULL);
-	unsigned seed = 1000000 * tv.tv_sec + tv.tv_usec;
-	printf("Seed: %u\n", seed);
-	srand(seed);
+	// Initialize a RNG.
+	unsigned char seed[48];
+	Zf(get_seed)(seed, sizeof seed);
+	inner_shake256_init(&sc);
+	inner_shake256_inject(&sc, seed, sizeof seed);
+	inner_shake256_flip(&sc);
 
 	for (unsigned logn = 1; logn <= LOGN; logn++) {
-		printf("Testing logn = %u\n", logn);
 		test_encode_decode(logn);
 	}
 	return 0;

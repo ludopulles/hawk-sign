@@ -11,7 +11,7 @@
 // x86_64 specific:
 #include <sys/time.h>
 
-#include "keygen.c"
+#include "../keygen.c"
 
 // Simple randomness generator:
 void randombytes(unsigned char *x, unsigned long long xlen) {

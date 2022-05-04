@@ -6,7 +6,7 @@
 #include <stdlib.h>
 #include <time.h>
 
-#include "keygen.c"
+#include "../keygen.c"
 
 /*
 Table of average number of bits required to represent all the coefficients of
@@ -704,7 +704,7 @@ void sample_FG_sizes(inner_shake256_context *rng, uint8_t *tmp)
 		double avg = ((double)sum_b[depth]) / nsamples;
 		double stddev = sqrt(((double)sum_bsq[depth]) / nsamples - avg*avg);
 		size_t nr_ints = (int)(avg + 6.0 * stddev + 30) / 31;
-		printf("%u", nr_ints);
+		printf("%zu", nr_ints);
 		if (depth == logn-1) printf("\n");
 		else printf(", ");
 	};

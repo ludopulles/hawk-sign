@@ -10,10 +10,7 @@
 #include<sys/time.h>
 
 extern "C" {
-	#ifndef restrict
-		#define restrict
-	#endif
-
+	#define restrict
 	#include "inner.h"
 }
 

@@ -4,14 +4,9 @@
 #include <sys/time.h>
 
 extern "C" {
-	#ifndef restrict
-		#define restrict
-	#endif
-
-	#include "inner.h"
+	#define restrict
+	#include "../inner.h"
 }
-
-#include "inner.h"
 
 // concurrency:
 #include <thread>

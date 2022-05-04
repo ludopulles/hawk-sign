@@ -4,14 +4,9 @@
 #include <sys/time.h>
 
 extern "C" {
-	#ifndef restrict
-		#define restrict
-	#endif
-
-	#include "inner.h"
+	#define restrict
+	#include "../inner.h"
 }
-
-#include "inner.h"
 
 #include <vector>
 // concurrency:
@@ -437,7 +432,7 @@ WorkerResult measure_keygen()
 	struct timeval t0, t1;
 
 	WorkerResult result;
-	result.num_iters = 2500;
+	result.num_iters = 250;
 
 	// Initialize a RNG.
 	randombytes(seed, sizeof seed);

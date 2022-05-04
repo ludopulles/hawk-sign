@@ -38,7 +38,7 @@
  * This code uses only the external API.
  */
 
-#include "hawk.h"
+#include "../hawk.h"
 
 static void *
 xmalloc(size_t len)
@@ -322,7 +322,7 @@ main(int argc, char *argv[])
 	for (unsigned logn = 1; logn <= 9; logn++) {
 		double actual_threshold = threshold;
 		if (logn <= 7) {
-			actual_threshold /= (1u << (7 - logn));
+			actual_threshold /= (1u << (8 - logn));
 		}
 		test_speed_hawk(logn, actual_threshold);
 	}

@@ -20,10 +20,7 @@ FFT seems to scale all standard deviations up by a factor 16 for n = 512 = 2^9..
 #include<sys/time.h>
 
 extern "C" {
-	#ifndef restrict
-		#define restrict
-	#endif
-
+	#define restrict
 	#include "inner.h"
 	#include "fpr.c"
 	#include "fft.c"

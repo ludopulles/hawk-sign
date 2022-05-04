@@ -16,12 +16,9 @@
 #include<sys/time.h>
 
 extern "C" {
-	#ifndef restrict
-		#define restrict
-	#endif
-
+	#define restrict
 	#define HAWK_NO_SIGN_NORM_CHECK
-	#include "inner.h"
+	#include "../inner.h"
 }
 
 using namespace std;

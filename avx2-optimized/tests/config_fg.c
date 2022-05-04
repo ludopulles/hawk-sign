@@ -10,7 +10,7 @@
 #define __CONFIG_fg
 // since MAX_BL_SMALL is const, we use a #define __CONFIG_fg to mark in 
 // keygen.c that we need to use large upper bounds instead.
-#include "keygen.c"
+#include "../keygen.c"
 
 /*
 Table of average number of bits required to represent all the coefficients of
