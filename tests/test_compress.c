@@ -86,11 +86,11 @@ void test_encode_decode(unsigned logn) {
 		// Test complete signature encoding and decoding
 		inner_shake256_extract(&sc, h, n <= 8 ? 2 : n / 4);
 
-		Zf(complete_sign)(&sc, s0, s1, f, g, F, G, h, logn, b);
-		size_t sig_len = Zf(encode_complete_sig)(outbuf, BUFLEN, s0, s1,
+		Zf(sign_simple)(&sc, s0, s1, f, g, F, G, h, logn, b);
+		size_t sig_len = Zf(encode_sig_simple)(outbuf, BUFLEN, s0, s1,
 			logn, 8, 5);
 		assert(sig_len != 0);
-		assert(sig_len == Zf(decode_complete_sig)(_s0, _s1, outbuf, sig_len,
+		assert(sig_len == Zf(decode_sig_simple)(_s0, _s1, outbuf, sig_len,
 			logn, 8, 5));
 
 		assert(poly16_eq(s0, _s0, logn));

@@ -91,7 +91,7 @@ verify_nearest_plane_tree(const fpr *restrict tree,
 	Zf(ffNearestPlane_tree)(t1, tree, t0, logn, t1 + n);
 	Zf(fft_to_int16)(s0, t1, logn);
 
-	return Zf(complete_verify)(h, s0, s1, q00, q10, q11, logn, tmp);
+	return Zf(verify_simple)(h, s0, s1, q00, q10, q11, logn, tmp);
 }
 
 // =============================================================================
@@ -134,7 +134,7 @@ void measure_sign_speed()
 	// Also pregenerate all signatures
 	gettimeofday(&t0, NULL);
 	for (int rep = 0; rep < num_samples; rep++) {
-		Zf(complete_sign)(&sc, pregen_s0[rep], pregen_s1[rep], f, g, F, G, pregen_h[rep], logn, b);
+		Zf(sign_simple)(&sc, pregen_s0[rep], pregen_s1[rep], f, g, F, G, pregen_h[rep], logn, b);
 	}
 	gettimeofday(&t1, NULL);
 	ll cs_us = time_diff(&t0, &t1);
@@ -153,15 +153,15 @@ void measure_sign_speed()
 	gettimeofday(&t1, NULL);
 	ll ss_us = time_diff(&t0, &t1);
 
-	printf("  complete_sign: %.1f us/sign\n", (double)cs_us / num_samples);
-	printf("       sign_dyn: %.1f us/sign\n", (double)sd_us / num_samples);
-	printf("           sign: %.1f us/sign\n", (double)ss_us / num_samples);
+	printf("sign_simple: %.1f us/sign\n", (double)cs_us / num_samples);
+	printf("   sign_dyn: %.1f us/sign\n", (double)sd_us / num_samples);
+	printf("       sign: %.1f us/sign\n", (double)ss_us / num_samples);
 
 	// Run tests:
 	int nr_cor = 0;
 	gettimeofday(&t0, NULL);
 	for (int rep = 0; rep < num_samples; rep++)
-		nr_cor += Zf(complete_verify)(pregen_h[rep], pregen_s0[rep], pregen_s1[rep], q00, q10, q11, logn, b);
+		nr_cor += Zf(verify_simple)(pregen_h[rep], pregen_s0[rep], pregen_s1[rep], q00, q10, q11, logn, b);
 	gettimeofday(&t1, NULL);
 	printf("# correct = %d\n", nr_cor);
 	ll cv_us = time_diff(&t0, &t1);
@@ -206,7 +206,7 @@ void measure_sign_speed()
 	ll vnpt_us = time_diff(&t0, &t1);
 	printf("# correct = %d\n", nr_cor);
 
-	printf("       complete_verify: %.1f us/vrfy\n", (double) cv_us / num_samples);
+	printf("         verify_simple: %.1f us/vrfy\n", (double) cv_us / num_samples);
 	printf("verify_simple_rounding: %.1f us/vrfy\n", (double) vsr_us / num_samples);
 	printf("verify_simple_roundfft: %.1f us/vrfy\n", (double)vfsr_us / num_samples);
 	printf("  verify_nearest_plane: %.1f us/vrfy\n", (double) vnp_us / num_samples);

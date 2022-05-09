@@ -757,7 +757,7 @@ Zf(decode_pubkey)(int16_t *q00, int16_t *q10,
 
 /* see inner.h */
 size_t
-Zf(encode_complete_sig)(void *out, size_t max_out_len,
+Zf(encode_sig_simple)(void *out, size_t max_out_len,
 	const int16_t *s0, const int16_t *s1, unsigned logn,
 	size_t lo_bits_s0, size_t lo_bits_s1)
 {
@@ -877,7 +877,7 @@ Zf(encode_complete_sig)(void *out, size_t max_out_len,
 }
 
 size_t
-Zf(decode_complete_sig)(int16_t *s0, int16_t *s1,
+Zf(decode_sig_simple)(int16_t *s0, int16_t *s1,
 	const void *in, size_t max_in_len, unsigned logn,
 	size_t lo_bits_s0, size_t lo_bits_s1)
 {

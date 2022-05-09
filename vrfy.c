@@ -176,7 +176,7 @@ Zf(complete_pubkey)(const int16_t *restrict iq00, const int16_t *restrict iq10,
 
 /* see inner.h */
 int
-Zf(complete_verify)(const uint8_t *restrict h,
+Zf(verify_simple)(const uint8_t *restrict h,
 	const int16_t *restrict s0, const int16_t *restrict s1,
 	const fpr *restrict q00, const fpr *restrict q10, const fpr *restrict q11,
 	unsigned logn, uint8_t *restrict tmp)
@@ -235,7 +235,7 @@ Zf(verify_simple_rounding)(const uint8_t *restrict h,
 		}
 	}
 
-	return Zf(complete_verify)(h, s0, s1, q00, q10, q11, logn, tmp);
+	return Zf(verify_simple)(h, s0, s1, q00, q10, q11, logn, tmp);
 }
 
 /* see inner.h */
@@ -276,7 +276,7 @@ Zf(verify_nearest_plane)(const uint8_t *restrict h,
 	/*
 	 * Now run the casual verification.
 	 */
-	return Zf(complete_verify)(h, s0, s1, q00, q10, q11, logn, tmp);
+	return Zf(verify_simple)(h, s0, s1, q00, q10, q11, logn, tmp);
 }
 
 /* see inner.h */

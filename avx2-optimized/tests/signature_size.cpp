@@ -82,7 +82,7 @@ constexpr long long salt_and_header = 1 + 40;
 struct WorkerResult {
 	// s1 <- encode_sig()
 	long long sig_failed[10], sz[10], sz_sq[10], maxsz[10];
-	// (s0, s1) <- encode_complete_sig()
+	// (s0, s1) <- encode_sig_simple()
 	long long csig_failed[11], csz[11], csz_sq[11], maxcsz[11];
 	// encode_huffman
 	long long huf_failed, sz_h, sz_hsq, maxhuf;
@@ -185,7 +185,7 @@ WorkerResult measure_signatures(unsigned logn) {
 		inner_shake256_extract(&sc, h, sizeof h);
 
 		// Compute the signature.
-		Zf(complete_sign)(&sc, s0, s1, f, g, F, G, h, logn, b);
+		Zf(sign_simple)(&sc, s0, s1, f, g, F, G, h, logn, b);
 
 		for (size_t u = 0; u < n; u++) {
 			result.sum_s0 += s0[u];
@@ -210,7 +210,7 @@ WorkerResult measure_signatures(unsigned logn) {
 		}
 
 		for (int lobits = 7; lobits < 11; lobits++) {
-			size_t sz = Zf(encode_complete_sig)(NULL, 0, s0, s1, logn, lobits, 5U);
+			size_t sz = Zf(encode_sig_simple)(NULL, 0, s0, s1, logn, lobits, 5U);
 			result.cadd(sz, lobits);
 		}
 		size_t cszh = encoding_length(huffman_s0, s0, logn)
