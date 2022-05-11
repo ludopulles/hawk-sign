@@ -158,12 +158,11 @@ Zf(encode_pubkey_huffman)(void *out, size_t max_out_len,
 	acc = acc_len = 0;
 
 	/*
-	 * The first value of q00 is of the order sigma_pk^2 2d,
-	 * but definitely << 8d when sigma_pk = 1.425, by the standard
-	 * Laurent-Massart bound [1].
-	 * Here, be lazy and print the whole of x[0].
+	 * The constant coefficient of q00 follows a chi-squared distribution, has
+	 * a mean of roughly sigma_pk^2 2n and is quite concentrated by [1] so will
+	 * surely fit in a uint16_t. Thus, print q00[0] in little-endian format.
 	 *
-	 * [1] en.wikipedia.org/wiki/Chi-squared_distribution#Concentration
+	 * [1] https://en.wikipedia.org/wiki/Chi-squared_distribution#Concentration
 	 */
 
 	init_huffman_trees();
@@ -483,9 +482,11 @@ Zf(encode_pubkey)(void *out, size_t max_out_len,
 
 	/*
 	 * Encode q00.
-	 * The first value of q00 is of the order sigma_pk^2 2n,
-	 * but definitely < 2^16 when sigma_pk = 1.425 and n = 512, by the standard
-	 * Laurent-Massart bound (see https://en.wikipedia.org/wiki/Chi-squared_distribution#Concentration).
+	 * The constant coefficient of q00 follows a chi-squared distribution, has
+	 * a mean of roughly sigma_pk^2 2n and is quite concentrated by [1] so will
+	 * surely fit in a uint16_t. Thus, print q00[0] in little-endian format.
+	 *
+	 * [1] https://en.wikipedia.org/wiki/Chi-squared_distribution#Concentration
 	 */
 	if (buf != NULL) {
 		if (max_out_len < 2) return 0;

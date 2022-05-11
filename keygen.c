@@ -2312,7 +2312,7 @@ align_u32(void *base, void *data)
  *
  * see gen_table.cpp for generating this table.
  */
-static const uint64_t gauss_1500[15] = {
+static const uint64_t gauss_1500[14] = {
     2453062048915767484u,
     3871449519226705105u,
     1123680878940444328u,
@@ -2326,8 +2326,7 @@ static const uint64_t gauss_1500[15] = {
                14123567u,
                   84972u,
                     328u,
-                      1u,
-                      0u,
+                      1u
 };
 
 /*

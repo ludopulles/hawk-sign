@@ -323,7 +323,7 @@ extern const size_t HAWK_PUBKEY_SIZE[10];
 
 
 #define HAWK_SIG_SIMPLE_COMPRESSED_MAXSIZE(logn) \
-	(12830)
+	(1283)
 /*
  * Maximum signature size (in bytes) when using the COMPRESSED format.
  * In practice, the signature will be shorter.

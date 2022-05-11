@@ -341,11 +341,7 @@ main(int argc, char *argv[])
 	fflush(stdout);
 
 	for (unsigned logn = 1; logn <= 9; logn++) {
-		double actual_threshold = threshold;
-		if (logn <= 7) {
-			actual_threshold /= (1u << (8 - logn));
-		}
-		test_speed_hawk(logn, actual_threshold);
+		test_speed_hawk(logn, logn <= 7 ? 0.02 : threshold);
 	}
 	return 0;
 }

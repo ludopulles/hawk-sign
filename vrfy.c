@@ -205,12 +205,14 @@ Zf(verify_simple_rounding)(const uint8_t *restrict h,
 {
 	size_t n, u, v, w;
 	uint8_t h0;
-	fpr *t0;
+	fpr *t0, *t1;
 
 	n = MKN(logn);
 	t0 = (fpr *)tmp;
+	t1 = t0 + n;
 
-	hash_to_fft(t0, SECOND_HASH(h, logn), s1, logn);
+	hash_to_fft(t1, SECOND_HASH(h, logn), s1, logn);
+	memcpy(t0, t1, n * sizeof *t1);
 	Zf(poly_mul_fft)(t0, q10, logn);
 	Zf(poly_div_autoadj_fft)(t0, q00, logn);
 	Zf(iFFT)(t0, logn);
@@ -235,7 +237,8 @@ Zf(verify_simple_rounding)(const uint8_t *restrict h,
 		}
 	}
 
-	return Zf(verify_simple)(h, s0, s1, q00, q10, q11, logn, tmp);
+	hash_to_fft(t0, h, s0, logn);
+	return has_short_trace(t0, t1, q00, q10, q11, logn);
 }
 
 /* see inner.h */
@@ -266,7 +269,7 @@ Zf(verify_nearest_plane)(const uint8_t *restrict h,
 	Zf(poly_add)(t0, t1, logn);
 	Zf(poly_mulconst)(t0, fpr_onehalf, logn);
 
-	memcpy(t1, q00, n * sizeof(fpr));
+	memcpy(t1, q00, n * sizeof *q00);
 	/*
 	 * Run Babai with target t0 and Gram-matrix q00.
 	 */

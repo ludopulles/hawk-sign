@@ -79,7 +79,6 @@ static const uint64_t gauss_1292[24] = {
 	             809457u,               60785u,
 	               1500u,                  83u,
 	                  2u,                   0u
-	// ,              0u,                   0u
 };
 
 /*
@@ -89,8 +88,6 @@ static const uint64_t gauss_1292[24] = {
  * proportional to:
  *
  *     exp(- x^2 / (8 1.292^2)).
- *
- * Note: The RNG must be ready for extraction (already flipped).
  */
 static inline int
 mkgauss_1292(prng *rng, uint8_t double_mu)
@@ -100,21 +97,19 @@ mkgauss_1292(prng *rng, uint8_t double_mu)
 	int32_t w;
 
 	/*
-	 * We use two random 64-bit values. First value
-	 * decides on whether the generated value is 0, and,
-	 * if not, the sign of the value. Second random 64-bit
-	 * word is used to generate the non-zero value.
-	 *
-	 * For constant-time code we have to read the complete
-	 * table. This has negligible cost, compared with the
-	 * remainder of the keygen process (solving the NTRU
-	 * equation).
+	 * We use two random 64-bit values. First value is used to generate the
+	 * non-zero value. Second value decides on whether the generated value is 0
+	 * and the sign of the value. For constant-time code we have to read the
+	 * complete table.
 	 */
 
 	r = prng_get_u64(rng) & ~((uint64_t)1 << 63);
 	v = 1;
 	for (k = 1; k < 12; k ++) {
-		v += (r - gauss_1292[2*k + double_mu]) >> 63;
+		/*
+		 * Add 1 if r < gauss_1292[2 * k + double_mu].
+		 */
+		v += (r - gauss_1292[2 * k + double_mu]) >> 63;
 	}
 
 	/*
@@ -128,9 +123,9 @@ mkgauss_1292(prng *rng, uint8_t double_mu)
 	v &= -((gauss_1292[double_mu] - r) >> 63);
 
 	/*
-	 * We apply the sign ('neg' flag). If the value is zero, the sign has no
-	 * effect. In the case mu = 1/2, add 1 if neg=0. Doing so results in 0, 1
-	 * to be equally likely as an outcome and -1, 2 to be equally likely etc.
+	 * We apply the sign ('neg' flag).
+	 * If mu = 0 change v to v if neg = 0 and -v if neg = 1.
+	 * If mu = 1/2, change v to v + 1 if neg = 0 and -v if neg = 1.
 	 */
 	v = (v ^ -neg) + neg + (~neg & double_mu);
 
