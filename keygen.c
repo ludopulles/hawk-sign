@@ -2140,8 +2140,8 @@ poly_sub_scaled_ntt(uint32_t *restrict F, size_t Flen, size_t Fstride,
 	n = MKN(logn);
 	tlen = flen + 1;
 	gm = tmp;
-	igm = gm + MKN(logn);
-	fk = igm + MKN(logn);
+	igm = gm + n;
+	fk = igm + n;
 	t1 = fk + n * tlen;
 
 	primes = PRIMES;

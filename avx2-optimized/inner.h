@@ -1094,4 +1094,14 @@ int Zf(verify_simple_rounding_fft)(const uint8_t *restrict h,
 	const fpr *restrict q10, const fpr *restrict q11, unsigned logn,
 	uint8_t *restrict tmp);
 
+/*
+ * Verify if a signature (s0, s1) is valid for a hashed message h of length n /
+ * 4 bytes. This method does not use any floating point operations.
+ *
+ * Note: tmp[] must have space for at least 32 * 2^logn bytes.
+ */
+int Zf(verify_simple_NTT)(const uint8_t *restrict h,
+	const int16_t *restrict s0, const int16_t *restrict s1,
+	int16_t *restrict q00, int16_t *restrict q10,
+	unsigned logn, uint8_t *restrict tmp);
 #endif

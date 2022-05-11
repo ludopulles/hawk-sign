@@ -324,6 +324,8 @@ extern const size_t HAWK_PUBKEY_SIZE[10];
 
 #define HAWK_SIG_SIMPLE_COMPRESSED_MAXSIZE(logn) \
 	(1283)
+#define HAWK_SIG_SIMPLE_PADDED_SIZE(logn) \
+	(1283)
 /*
  * Maximum signature size (in bytes) when using the COMPRESSED format.
  * In practice, the signature will be shorter.
@@ -401,6 +403,12 @@ extern const size_t HAWK_PUBKEY_SIZE[10];
  */
 #define HAWK_TMPSIZE_VERIFY(logn) \
 	(HAWK_HASH_SIZE(logn) + (42u << (logn)))
+
+/*
+ * Temporary buffer size for verifying a simple signature with NTT.
+ */
+#define HAWK_TMPSIZE_VERIFYSIMPLE(logn) \
+	(HAWK_HASH_SIZE(logn) + (40u << (logn)))
 
 /* ==================================================================== */
 /*
@@ -859,9 +867,9 @@ int hawk_sign_finish(shake256_context *rng, void *sig, size_t *sig_len,
  */
 
 /*
- * Verify the signature sig[] (of length sig_len bytes) with regards to
- * the provided public key pubkey[] (of length pubkey_len bytes) and the
- * message data[] (of length data_len bytes).
+ * Verify the signature sig[] (of length sig_len bytes) with regards to the
+ * provided public key pubkey[] (of length pubkey_len bytes) and the message
+ * data[] (of length data_len bytes).
  *
  * The sig_type parameter must be zero, or one of HAWK_SIG_COMPRESSED or
  * HAWK_SIG_PADDED. The function verifies that the provided signature has the
@@ -869,14 +877,35 @@ int hawk_sign_finish(shake256_context *rng, void *sig, size_t *sig_len,
  * from the signature header byte; note that in that case, the signature is
  * malleable (since a signature value can be transcoded to other formats).
  *
- * The tmp[] buffer is used to hold temporary values. Its size tmp_len
- * MUST be at least HAWK_TMPSIZE_VERIFY(logn) bytes.
+ * The tmp[] buffer is used to hold temporary values. Its size tmp_len MUST be
+ * at least HAWK_TMPSIZE_VERIFYSIMPLE(logn) bytes.
+ *
+ * Returned value: 0 on success, or a negative error code.
+ */
+int hawk_verify_simple(const void *sig, size_t sig_len, int sig_type,
+	const void *pubkey, size_t pubkey_len, const void *data, size_t data_len,
+	void *tmp, size_t tmp_len);
+
+/*
+ * Verify the signature sig[] (of length sig_len bytes) with regards to the
+ * provided public key pubkey[] (of length pubkey_len bytes) and the message
+ * data[] (of length data_len bytes).
+ *
+ * The sig_type parameter must be zero, or one of HAWK_SIG_COMPRESSED or
+ * HAWK_SIG_PADDED. The function verifies that the provided signature has the
+ * correct format. If sig_type is zero, then the signature format is inferred
+ * from the signature header byte; note that in that case, the signature is
+ * malleable (since a signature value can be transcoded to other formats).
+ *
+ * The tmp[] buffer is used to hold temporary values. Its size tmp_len MUST be
+ * at least HAWK_TMPSIZE_VERIFY(logn) bytes.
  *
  * Returned value: 0 on success, or a negative error code.
  */
 int hawk_verify(const void *sig, size_t sig_len, int sig_type,
 	const void *pubkey, size_t pubkey_len, const void *data, size_t data_len,
 	void *tmp, size_t tmp_len);
+
 
 /*
  * Start a streamed signature verification. The provided SHAKE256 context
@@ -891,15 +920,14 @@ int hawk_verify_start(shake256_context *hash_data, const void *sig,
 	size_t sig_len);
 
 /*
- * Finish a streamed signature verification. The signature sig[] (of
- * length sig_len bytes) is verified against the provided public key
- * pubkey[] (of length pubkey_len bytes) and the hashed message. The
- * hashed message is provided as a SHAKE256 context *hash_data;
- * that context must have received the salt and the message itself
- * (usually, the context is initialized and the salt injected as
- * part of a hawk_verify_start() call), and still be in input
- * mode (not yet flipped to output mode). *hash_data is modified by
- * the verification process.
+ * Finish a streamed signature verification. The signature sig[] (of length
+ * sig_len bytes) is verified against the provided public key pubkey[] (of
+ * length pubkey_len bytes) and the hashed message. The hashed message is
+ * provided as a SHAKE256 context *hash_data; that context must have received
+ * the salt and the message itself (usually, the context is initialized and the
+ * salt injected as part of a hawk_verify_start() call), and still be in input
+ * mode (not yet flipped to output mode). *hash_data is modified by the
+ * verification process.
  *
  * The sig_type parameter must be zero, or one of HAWK_SIG_COMPRESSED or
  * HAWK_SIG_PADDED. The function verifies that the provided signature has the
@@ -907,8 +935,33 @@ int hawk_verify_start(shake256_context *hash_data, const void *sig,
  * from the signature header byte; note that in that case, the signature is
  * malleable (since a signature value can be transcoded to other formats).
  *
- * The tmp[] buffer is used to hold temporary values. Its size tmp_len
- * MUST be at least HAWK_TMPSIZE_VERIFY(logn) bytes.
+ * The tmp[] buffer is used to hold temporary values. Its size tmp_len MUST be
+ * at least HAWK_TMPSIZE_VERIFYSIMPLE(logn) bytes.
+ *
+ * Returned value: 0 on success, or a negative error code.
+ */
+int hawk_verify_simple_finish(const void *sig, size_t sig_len, int sig_type,
+	const void *pubkey, size_t pubkey_len, shake256_context *hash_data,
+	void *tmp, size_t tmp_len);
+
+/*
+ * Finish a streamed signature verification. The signature sig[] (of length
+ * sig_len bytes) is verified against the provided public key pubkey[] (of
+ * length pubkey_len bytes) and the hashed message. The hashed message is
+ * provided as a SHAKE256 context *hash_data; that context must have received
+ * the salt and the message itself (usually, the context is initialized and the
+ * salt injected as part of a hawk_verify_start() call), and still be in input
+ * mode (not yet flipped to output mode). *hash_data is modified by the
+ * verification process.
+ *
+ * The sig_type parameter must be zero, or one of HAWK_SIG_COMPRESSED or
+ * HAWK_SIG_PADDED. The function verifies that the provided signature has the
+ * correct format. If sig_type is zero, then the signature format is inferred
+ * from the signature header byte; note that in that case, the signature is
+ * malleable (since a signature value can be transcoded to other formats).
+ *
+ * The tmp[] buffer is used to hold temporary values. Its size tmp_len MUST be
+ * at least HAWK_TMPSIZE_VERIFY(logn) bytes.
  *
  * Returned value: 0 on success, or a negative error code.
  */

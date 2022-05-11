@@ -132,7 +132,7 @@ typedef struct {
 	unsigned logn;
 	shake256_context rng;
 	uint8_t *tmp, *pk, *sk, *esk, *sigsimple, *sig;
-	size_t tmp_len, sig_len;
+	size_t tmp_len, sigsimple_len, sig_len;
 } bench_context;
 
 static inline size_t
@@ -185,9 +185,9 @@ bench_sign_simple(void *ctx, unsigned long num)
 
 	bc = ctx;
 	while (num -- > 0) {
-		bc->sig_len = HAWK_SIG_SIMPLE_COMPRESSED_MAXSIZE(bc->logn);
+		bc->sigsimple_len = HAWK_SIG_SIMPLE_COMPRESSED_MAXSIZE(bc->logn);
 		CC(hawk_sign_simple(&bc->rng,
-			bc->sigsimple, &bc->sig_len, HAWK_SIG_COMPRESSED,
+			bc->sigsimple, &bc->sigsimple_len, HAWK_SIG_COMPRESSED,
 			bc->sk, HAWK_SECKEY_SIZE[bc->logn],
 			"data", 4, bc->tmp, bc->tmp_len));
 	}
@@ -243,6 +243,21 @@ bench_sign(void *ctx, unsigned long num)
 }
 
 static int
+bench_verify_simple(void *ctx, unsigned long num)
+{
+	bench_context *bc;
+
+	bc = ctx;
+	while (num -- > 0) {
+		CC(hawk_verify_simple(
+			bc->sigsimple, bc->sigsimple_len, HAWK_SIG_COMPRESSED,
+			bc->pk, HAWK_PUBKEY_SIZE[bc->logn],
+			"data", 4, bc->tmp, bc->tmp_len));
+	}
+	return 0;
+}
+
+static int
 bench_verify(void *ctx, unsigned long num)
 {
 	bench_context *bc;
@@ -277,6 +292,7 @@ test_speed_hawk(unsigned logn, double threshold)
 	len = maxsz(len, HAWK_TMPSIZE_SIGNNTT(logn));
 	len = maxsz(len, HAWK_TMPSIZE_SIGN(logn));
 	len = maxsz(len, HAWK_TMPSIZE_EXPANDPRIV(logn));
+	len = maxsz(len, HAWK_TMPSIZE_VERIFYSIMPLE(logn));
 	len = maxsz(len, HAWK_TMPSIZE_VERIFY(logn));
 	bc.tmp = xmalloc(len);
 	bc.tmp_len = len;
@@ -284,6 +300,7 @@ test_speed_hawk(unsigned logn, double threshold)
 	bc.sk = xmalloc(HAWK_SECKEY_SIZE[logn]);
 	bc.esk = xmalloc(HAWK_EXPANDEDKEY_SIZE(logn));
 	bc.sigsimple = xmalloc(HAWK_SIG_SIMPLE_COMPRESSED_MAXSIZE(logn));
+	bc.sigsimple_len = 0;
 	bc.sig = xmalloc(HAWK_SIG_COMPRESSED_MAXSIZE(logn));
 	bc.sig_len = 0;
 
@@ -298,6 +315,8 @@ test_speed_hawk(unsigned logn, double threshold)
 	printf(" %8.2f", do_bench(&bench_sign_dyn, &bc, threshold) / 1000.0);
 	fflush(stdout);
 	printf(" %8.2f", do_bench(&bench_sign, &bc, threshold) / 1000.0);
+	fflush(stdout);
+	printf(" %8.2f", do_bench(&bench_verify_simple, &bc, threshold) / 1000.0);
 	fflush(stdout);
 	printf(" %8.2f", do_bench(&bench_verify, &bc, threshold) / 1000.0);
 	fflush(stdout);
@@ -337,11 +356,12 @@ main(int argc, char *argv[])
 	printf("ss = sign simple, sn = sign with NTT, sd = sign (without ek), sek = sign (with ek), vv = verify\n");
 	printf("keygen in milliseconds, other values in microseconds\n");
 	printf("\n");
-	printf("degree  kg(ms)   ek(us)   ss(us)   sn(us)   sd(us)   sek(us)  vv(us)\n");
+	printf("degree  kg(ms)   ek(us)   ss(us)   sn(us)   sd(us)   sek(us)  vn(us)   vv(us)\n");
 	fflush(stdout);
 
 	for (unsigned logn = 1; logn <= 9; logn++) {
 		test_speed_hawk(logn, logn <= 7 ? 0.02 : threshold);
 	}
+
 	return 0;
 }

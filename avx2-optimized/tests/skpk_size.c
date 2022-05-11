@@ -36,8 +36,11 @@ void measure_keygen(size_t n_repetitions, size_t logn) {
 		}
 
 		Zf(fft_to_int16)(q00n, q00, logn);
+		assert(q00n[0] >= 0);
 		Zf(fft_to_int16)(q10n, q10, logn);
 		Zf(fft_to_int16)(q11n, q11, logn);
+		// Pay attention: q11[0] does NOT fit into a int16_t.
+		// assert(q11n[0] >= 0);
 
 		// Take the header byte into account:
 		int pk_sz = 1 + Zf(encode_pubkey)(NULL, 0, q00n, q10n, logn);

@@ -109,6 +109,20 @@ align_i16(void *tmp)
 	return (int16_t *)atmp;
 }
 
+static inline int32_t *
+align_i32(void *tmp)
+{
+	uint8_t *atmp;
+	unsigned off;
+
+	atmp = tmp;
+	off = (uintptr_t)atmp & 3u;
+	if (off != 0) {
+		atmp += 4u - off;
+	}
+	return (int32_t *)atmp;
+}
+
 static inline fpr *
 align_fpr(void *tmp)
 {
@@ -1084,5 +1098,139 @@ hawk_verify(const void *sig, size_t sig_len, int sig_type, const void *pubkey,
 	}
 	shake256_inject(&hd, data, data_len);
 	return hawk_verify_finish(sig, sig_len, sig_type,
+		pubkey, pubkey_len, &hd, tmp, tmp_len);
+}
+
+
+/* see hawk.h */
+int
+hawk_verify_simple_finish(const void *sig, size_t sig_len, int sig_type,
+	const void *pubkey, size_t pubkey_len, shake256_context *hash_data,
+	void *tmp, size_t tmp_len)
+{
+	unsigned logn;
+	uint8_t *hm, *atmp;
+	int16_t *q00, *q10;
+	const uint8_t *pk, *es;
+	size_t u, v, n;
+	int16_t *s0, *s1;
+
+	/*
+	 * Get Hawk degree from public key; verify consistency with
+	 * signature value, and check parameters.
+	 */
+	if (sig_len < 41 || pubkey_len == 0) {
+		return HAWK_ERR_FORMAT;
+	}
+	es = sig;
+	pk = pubkey;
+	if ((pk[0] & 0xF0) != 0x00) {
+		return HAWK_ERR_FORMAT;
+	}
+	logn = pk[0] & 0x0F;
+	if (logn < 1 || logn > 9) {
+		return HAWK_ERR_FORMAT;
+	}
+	if ((es[0] & 0x0F) != logn || (es[0] & 0xF0) != 0x30) {
+		return HAWK_ERR_BADSIG;
+	}
+
+	switch (sig_type) {
+	case 0:
+	case HAWK_SIG_COMPRESSED:
+		break;
+	case HAWK_SIG_PADDED:
+		if (sig_len != HAWK_SIG_SIMPLE_PADDED_SIZE(logn)) {
+			return HAWK_ERR_FORMAT;
+		}
+		break;
+	default:
+		return HAWK_ERR_BADARG;
+	}
+
+	if (pubkey_len != HAWK_PUBKEY_SIZE[logn]) {
+		return HAWK_ERR_FORMAT;
+	}
+	if (tmp_len < HAWK_TMPSIZE_VERIFYSIMPLE(logn)) {
+		return HAWK_ERR_SIZE;
+	}
+
+	n = MKN(logn);
+	hm = (uint8_t *)tmp;
+	s0 = align_i16(hm + HAWK_HASH_SIZE(logn));
+	s1 = s0 + n;
+
+	q00 = s1 + n;
+	q10 = q00 + n;
+	atmp = (uint8_t *)align_i32(q10 + n);
+
+	/*
+	 * Decode public key.
+	 */
+	if (Zf(decode_pubkey)(q00, q10, pk + 1, pubkey_len - 1, logn) == 0)
+	{
+		return HAWK_ERR_FORMAT;
+	}
+
+	/*
+	 * Decode signature value.
+	 */
+	u = 41;
+	v = Zf(decode_sig_simple)(s0, s1, es + u, sig_len - u, logn,
+		SIG0_LOBITS(logn), SIG_LOBITS(logn));
+	if (v == 0) {
+		return HAWK_ERR_FORMAT;
+	}
+	u += v;
+	if (u != sig_len) {
+		/*
+		 * Extra bytes of value 0 are tolerated only for the
+		 * "padded" format.
+		 */
+		if ((sig_type == 0 && sig_len == HAWK_SIG_PADDED_SIZE(logn))
+			|| sig_type == HAWK_SIG_PADDED)
+		{
+			while (u < sig_len) {
+				if (es[u] != 0) {
+					return HAWK_ERR_FORMAT;
+				}
+				u ++;
+			}
+		} else {
+			return HAWK_ERR_FORMAT;
+		}
+	}
+
+	/*
+	 * Hash message to point.
+	 */
+	shake256_flip(hash_data);
+	inner_shake256_extract((inner_shake256_context *)hash_data, hm,
+		HAWK_HASH_SIZE(logn));
+
+	/*
+	 * Verify signature.
+	 */
+	if (!Zf(verify_simple_NTT)(hm, s0, s1, q00, q10, logn, atmp)) {
+		return HAWK_ERR_BADSIG;
+	}
+	return 0;
+}
+
+/* see hawk.h */
+int
+hawk_verify_simple(const void *sig, size_t sig_len, int sig_type, const void *pubkey,
+	size_t pubkey_len, const void *data, size_t data_len, void *tmp,
+	size_t tmp_len)
+{
+	shake256_context hd;
+	int r;
+
+	r = hawk_verify_start(&hd, sig, sig_len);
+	if (r < 0) {
+		return r;
+	}
+	shake256_inject(&hd, data, data_len);
+	return hawk_verify_simple_finish(sig, sig_len, sig_type,
 		pubkey, pubkey_len, &hd, tmp, tmp_len);
 }
