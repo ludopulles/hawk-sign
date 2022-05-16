@@ -321,27 +321,32 @@ extern "C" {
 extern const size_t HAWK_SECKEY_SIZE[10];
 extern const size_t HAWK_PUBKEY_SIZE[10];
 
-
-#define HAWK_SIG_SIMPLE_COMPRESSED_MAXSIZE(logn) \
-	(1283)
-#define HAWK_SIG_SIMPLE_PADDED_SIZE(logn) \
-	(1283)
 /*
- * Maximum signature size (in bytes) when using the COMPRESSED format.
- * In practice, the signature will be shorter.
+ * Maximum practical signature size (in bytes) when using the COMPRESSED format
+ * and the simple scheme.
+ */
+#define HAWK_SIG_SIMPLE_COMPRESSED_MAXSIZE(logn) \
+	(1312u)
+
+/*
+ * Signature size (in bytes) when using the PADDED format and the simple
+ * scheme. The size is exact.
+ */
+#define HAWK_SIG_SIMPLE_PADDED_SIZE(logn) \
+	(1267u)
+
+/*
+ * Maximum practical signature size (in bytes) when using the COMPRESSED
+ * format.
  */
 #define HAWK_SIG_COMPRESSED_MAXSIZE(logn) \
-	(((((11u << (logn)) + (101u >> (10 - (logn)))) \
-	+ 7) >> 3) + 41)
+	(568u)
 
 /*
- * Signature size (in bytes) when using the PADDED format. The size
- * is exact.
+ * Signature size (in bytes) when using the PADDED format. The size is exact.
  */
 #define HAWK_SIG_PADDED_SIZE(logn) \
-	(44u + 3 * (256u >> (10 - (logn))) + 2 * (128u >> (10 - (logn))) \
-	+ 3 * (64u >> (10 - (logn))) + 2 * (16u >> (10 - (logn))) \
-	- 2 * (2u >> (10 - (logn))) - 8 * (1u >> (10 - (logn))))
+	(568u)
 
 /*
  * Temporary buffer size for key pair generation.
@@ -354,6 +359,15 @@ extern const size_t HAWK_PUBKEY_SIZE[10];
  */
 #define HAWK_TMPSIZE_MAKEPUB(logn) \
 	((6u << (logn)) + 1)
+
+/*
+ * The number of bytes that are required for the salt that gets prepended to a
+ * message before hashing.
+ * 
+ * From GPV08, having \lambda security bits and a transcript size of Q_s, having k = \lambda + \log_2(Q_s) salt bits gives a hash collision of message to happen with probability at most 2^-k.
+ * So for n = 512, take k = 192 and for n = 1024, take k = 320.
+ */
+#define HAWK_SALT_SIZE(logn) ((logn) <= 9 ? 24u : 40u)
 
 /*
  * The number of bytes that are required for the hash when signing a message or
@@ -546,7 +560,7 @@ int hawk_make_public(void *pubkey, size_t pubkey_len, const void *privkey,
  * signature. Returned value is the logarithm of the degree (1 to 9),
  * or a negative error code.
  */
-int hawk_get_logn(void *obj, size_t len);
+int hawk_get_logn(const void *obj, size_t len);
 
 /* ==================================================================== */
 /*
@@ -706,16 +720,19 @@ int hawk_sign(shake256_context *rng, void *sig, size_t *sig_len,
 /*
  * Start a signature generation context.
  *
- * A 40-byte salt is generated and written in salt[]. The *hash_data
+ * A (24 or 40)-byte salt is generated and written in salt[]. The *hash_data
  * context is also initialized, and the salt is injected in that context.
  *
  * The source of randomness is the provided SHAKE256 context *rng, which
  * must have been already initialized, seeded, and set to output mode (see
  * shake256_init_prng_from_seed() and shake256_init_prng_from_system()).
+ * Also the private key (or expanded private key) has to be provided to
+ * determine if salt is 24 bytes (for <=128 security bits) or 40 bytes
+ * (256 security bits).
  *
  * Returned value: 0 on success, or a negative error code.
  */
-int hawk_sign_start(shake256_context *rng, void *salt,
+int hawk_sign_start(shake256_context *rng, void *salt, const void *obj,
 	shake256_context *hash_data);
 
 /*

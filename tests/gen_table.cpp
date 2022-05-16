@@ -3,49 +3,73 @@
  * sampling in keygen.c and sign.c.
  */
 #include<bits/stdc++.h>
-long double spk = 1.500, ssig = 1.292;
+typedef long double FT;
+const int LEN = 100;
+const FT spk = 1.500, ssig = 1.278, p63 = powl(2, 63);
+FT rho(FT x, FT sigma) { return expl(-(x * x) / (2.0 * sigma * sigma)); }
 
 int main() {
 	// Table for key generation:
+	std::map<int, long double> table, csum;
+	unsigned long long results[2][LEN] = {};
 
-	long double p63 = powl(2, 63), table[100], csum[100];
-	unsigned long long results[2][25] = {};
-	for (int x = 100; x --> 0; ) {
-		table[x] = expl(-0.5* x*x / spk / spk);
-		csum[x] = table[x];
-		if (x < 99) csum[x] += csum[x+1];
+	for (int x = LEN; x >= -LEN; x--) {
+		table[x] = rho(x, spk);
+		csum[x] = csum[x + 1] + table[x];
 	}
-	results[0][0] = llroundl(p63 * table[0] / (csum[0] + csum[1]));
-	for (int x = 24; --x >= 1; ) {
-		results[0][x] = llroundl(p63 * csum[1+x] / csum[1]);
+
+	results[0][0] = llroundl(p63 * table[0] / csum[-LEN]); // P(X == 0)
+	for (int k = LEN; --k > 0; ) {
+		// result[k] ~ P(X >= k+1 | X >= 1)
+		results[0][k] = llroundl(p63 * csum[k + 1] / csum[1]);
 	}
 
 	int len = 0;
 	while (results[0][len] != 0) len++;
-	len++;
-	printf("static const uint64_t gauss_1500[%d] = {\n", len);
-	for (int x = 0; x < len; x++)
+	printf("static const uint64_t gauss_keygen[%d] = {\n", len);
+	for (int x = 0; x < len; x++) {
 		printf("\t%19lluu,\n", results[0][x]);
+	}
 	printf("};\n\n");
 
 	// Table for signing:
-
-	long double mu = 0;
-	for (int i = 0; i < 2; i++, mu += 0.5) {
-		for (int x = 100; x --> 0; ) {
-			table[x] = expl(-0.5* (x-mu)*(x-mu) / ssig / ssig);
-			csum[x] = table[x];
-			if (x < 99) csum[x] += csum[x+1];
+	for (int coset = 0; coset < 2; coset++) {
+		for (int x = LEN; x >= -LEN; x--) {
+			table[x] = rho(x - 0.5 * coset, ssig);
+			csum[x] = csum[x + 1] + table[x];
 		}
-		results[i][0] = llroundl(p63 * table[i] / (csum[i] + csum[1]));
-		for (int x = 19; --x >= 1; )
-			results[i][x] = llroundl(p63 * csum[1+i+x] / csum[1+i]);
+		if (coset == 0) {
+			// result[0] ~ P(X == 0)
+			results[0][0] = llroundl(p63 * table[0] / csum[-LEN]);
+		} else {
+			// result[1] ~ (P(X == 1) + P(X == 0)) = P(X == 1 | X >= 1)
+			results[1][1] = llroundl(p63 * table[1] / csum[1]);
+		}
+
+		for (int k = LEN; --k > coset; ) {
+			// result[k] ~ P(X >= k + 1 | X >= 1 + coset)
+			results[coset][k] = llroundl(p63 * csum[k + 1] / csum[1 + coset]);
+		}
 	}
 
-	printf("static const uint64_t gauss_1292[26] = {\n");
-	for (int x = 0; x < 13; x++)
-		printf("\t%19lluu, %19lluu,\n", results[0][x], results[1][x]);
-	printf("};\n");
+	len = 0;
+	while (results[0][len] != 0 || results[1][len + 1] != 0) len++;
+	printf("static const uint64_t gauss_sign[%d] = {\n", 2 * len);
+	for (int k = 0; k < len; k++)
+		printf("\t%19lluu, %19lluu,\n", results[0][k], results[1][k + 1]);
+	printf("};\n\n");
+
+	/*
+	 * Generate l2bounds using:
+	 *     l2bound(logn) = floor( (verif_margin * 2 sigma_sig)^2 * 2n ),
+	 * where verif_margin = 1.1.
+	 */
+	printf("const uint32_t Zf(l2bound)[10] = {\n\t0u /* unused */");
+	for (unsigned logn = 1; logn <= 9; logn++) {
+		FT bound = powl(1.1 * 2.0 * ssig, 2) * powl(2, logn + 1);
+		printf(", %lldu", (long long) floorl(bound));
+	}
+	printf("\n};\n");
 
 	return 0;
 }

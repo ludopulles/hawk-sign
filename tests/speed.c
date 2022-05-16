@@ -353,10 +353,10 @@ main(int argc, char *argv[])
 	}
 	printf("time threshold = %.4f s\n", threshold);
 	printf("kg = keygen, ek = expand private key\n");
-	printf("ss = sign simple, sn = sign with NTT, sd = sign (without ek), sek = sign (with ek), vv = verify\n");
+	printf("ss = sign simple, sn = sign with NTT, sd = sign (without ek), sek = sign (with ek), vs = verify simple, vv = verify\n");
 	printf("keygen in milliseconds, other values in microseconds\n");
 	printf("\n");
-	printf("degree  kg(ms)   ek(us)   ss(us)   sn(us)   sd(us)   sek(us)  vn(us)   vv(us)\n");
+	printf("degree  kg(ms)   ek(us)   ss(us)   sn(us)   sd(us)   sek(us)  vs(us)   vv(us)\n");
 	fflush(stdout);
 
 	for (unsigned logn = 1; logn <= 9; logn++) {

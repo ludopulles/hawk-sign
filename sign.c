@@ -33,64 +33,44 @@
 
 // =============================================================================
 
-/* To generate the values in the table below, run the following code:
-
-#include<bits/stdc++.h>
-int main() {
-	long double sigma = 1.292, mu = 0, p63 = powl(2, 63), table[100], csum[100];
-	unsigned long long results[2][20] = {};
-	for (int i = 0; i < 2; i++, mu += 0.5) {
-		for (int x = 100; x --> 0; ) {
-			table[x] = expl(-0.5 * (x-mu)*(x-mu) / sigma / sigma);
-			csum[x] = table[x];
-			if (x < 99) csum[x] += csum[x+1];
-		}
-		results[i][0] = llroundl((1.0+i) * p63 * table[i] / (csum[i] + csum[1]));
-		for (int x = 19; --x >= 1; )
-			results[i][x] = llroundl(p63 * csum[1+i+x] / csum[1+i]);
-	}
-	for (int x = 0; x < 20; x++)
-		printf("\t%19lluu, %19lluu\n", results[0][x], results[1][x]);
-}
-
- */
-
 /*
  * Table below incarnates two discrete Gaussian distribution:
  *    D(x) = exp(-((x - mu)^2)/(2*sigma^2))
- * where sigma = 1.292 and mu is 0 or 1 / 2.
+ * where sigma = 1.278 and mu is 0 or 1 / 2.
  * Element 0 of the first table is P(x = 0) and 2*P(x = 1) in the second table.
  * For k > 0, element k is P(x >= k+1 | x > 0) in the first table, and
  * P(x >= k+2 | x > 1) in the second table.
  * For constant-time principle, mu = 0 is in the even indices and
  * mu = 1 / 2 is in the odd indices.
  * Probabilities are scaled up by 2^63.
+ *
+ * To generate the values in the table below, run 'gen_table.cpp'.
  */
-static const uint64_t gauss_1292[24] = {
-	2847982254933138603u, 5285010687306232178u,
-	3115855658194614154u, 2424313226695581870u,
-	 629245045388085487u,  372648834165936922u,
-	  73110737927091842u,   32559817584178793u,
-	   4785625785139312u,    1592210133688742u,
-	    174470148146634u,      43209976786070u,
-	      3520594834759u,        647780323462u,
-	        39186846585u,          5350987999u,
-	          240149359u,            24322099u,
-	             809457u,               60785u,
-	               1500u,                  83u,
-	                  2u,                   0u
+static const uint64_t gauss_sign[24] = {
+	2879180808586524119u, 5334099443607918879u,
+	3059393892786389767u, 2365650607671913513u,
+	 598985657464043109u,  350188603152862536u,
+	  66570217148287807u,   29069029197456365u,
+	   4111724430703280u,    1332230758935082u,
+	    139536889245539u,      33427798003753u,
+	      2585835445815u,        457141300403u,
+	        26080447382u,          3398953827u,
+	          142905880u,            13721995u,
+	             424994u,               30058u,
+	                686u,                  36u,
+	                  1u,                   0u
 };
 
 /*
  * Sample an integer with parity equal to double_mu from a discrete Gaussian
- * distribution with support 2\ZZ + double_mu, mean 0 and sigma 2 * 1.292.
+ * distribution with support 2\ZZ + double_mu, mean 0 and sigma 2 * 1.278.
  * That is, an integer x (== double_mu mod 2) is chosen with probability
  * proportional to:
  *
- *     exp(- x^2 / (8 1.292^2)).
+ *     exp(- x^2 / (8 1.278^2)).
  */
 static inline int
-mkgauss_1292(prng *rng, uint8_t double_mu)
+mkgauss_sign(prng *rng, uint8_t double_mu)
 {
 	uint64_t r;
 	uint32_t v, k, neg;
@@ -107,9 +87,9 @@ mkgauss_1292(prng *rng, uint8_t double_mu)
 	v = 1;
 	for (k = 1; k < 12; k ++) {
 		/*
-		 * Add 1 if r < gauss_1292[2 * k + double_mu].
+		 * Add 1 if r < gauss_sign[2 * k + double_mu].
 		 */
-		v += (r - gauss_1292[2 * k + double_mu]) >> 63;
+		v += (r - gauss_sign[2 * k + double_mu]) >> 63;
 	}
 
 	/*
@@ -120,7 +100,7 @@ mkgauss_1292(prng *rng, uint8_t double_mu)
 	r = prng_get_u64(rng);
 	neg = (uint32_t)(r >> 63);
 	r &= ~((uint64_t)1 << 63);
-	v &= -((gauss_1292[double_mu] - r) >> 63);
+	v &= -((gauss_sign[double_mu] - r) >> 63);
 
 	/*
 	 * We apply the sign ('neg' flag).
@@ -237,7 +217,7 @@ construct_basis(
 /*
  * Sample a vector (x0, x1) congruent to (t0, t1) = B * (h0, h1) (mod 2) from a
  * discrete Gaussian with lattice coset 2Z^{2n} + (t0, t1) and standard
- * deviation 1.292. Returns whether or not (x0, x1) has a squared l2-norm less
+ * deviation 1.278. Returns whether or not (x0, x1) has a squared l2-norm less
  * than the allowed bound for a signature.
  *
  * If this squared l2-norm is less than the allowed bound, the values in
@@ -274,13 +254,13 @@ sample_short(prng *rng, fpr *restrict x0, fpr *restrict x1,
 
 	for (u = 0; u < n; u ++) {
 		z = fpr_rint(x0[u]) & 1;
-		z = mkgauss_1292(rng, z);
+		z = mkgauss_sign(rng, z);
 		x0[u] = fpr_of(z);
 		norm += z*z;
 	}
 	for (u = 0; u < n; u ++) {
 		z = fpr_rint(x1[u]) & 1;
-		z = mkgauss_1292(rng, z);
+		z = mkgauss_sign(rng, z);
 		x1[u] = fpr_of(z);
 		norm += z*z;
 	}
@@ -529,13 +509,13 @@ do_sign_simple(prng *rng,
 
 	for (u = 0; u < n; u ++) {
 		z = Zf(mq_conv_signed)(x0[u]);
-		z = mkgauss_1292(rng, z & 1);
+		z = mkgauss_sign(rng, z & 1);
 		x0[u] = Zf(mq_conv_small)(z);
 		norm += z*z;
 	}
 	for (u = 0; u < n; u ++) {
 		z = Zf(mq_conv_signed)(x1[u]);
-		z = mkgauss_1292(rng, z & 1);
+		z = mkgauss_sign(rng, z & 1);
 		x1[u] = Zf(mq_conv_small)(z);
 		norm += z*z;
 	}
@@ -704,13 +684,13 @@ do_sign_NTT(prng *rng, int16_t *restrict s1,
 
 	for (u = 0; u < n; u ++) {
 		z = Zf(mq_conv_signed)(x0[u]);
-		z = mkgauss_1292(rng, z & 1);
+		z = mkgauss_sign(rng, z & 1);
 		x0[u] = Zf(mq_conv_small)(z);
 		norm += z*z;
 	}
 	for (u = 0; u < n; u ++) {
 		z = Zf(mq_conv_signed)(x1[u]);
-		z = mkgauss_1292(rng, z & 1);
+		z = mkgauss_sign(rng, z & 1);
 		x1[u] = Zf(mq_conv_small)(z);
 		norm += z*z;
 	}

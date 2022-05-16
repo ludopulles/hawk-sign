@@ -20,8 +20,8 @@ with open(sys.argv[1]) as f:
         b.append(int(fails))
 
 def estimate(cstQ00):
-    # n = 512, sigma_sig = 1.292
-    sigma_ei = math.sqrt(cstQ00) * 1.292
+    # n = 512, sigma_sig = 1.278
+    sigma_ei = math.sqrt(cstQ00) * 1.278
 
     # Perhaps we need a union bound when erf ~ 1
     return 1.0 - math.erf(0.5 / sigma_ei / math.sqrt(2))**512

@@ -2,7 +2,7 @@
 using namespace std;
 
 typedef long double FT; 
-constexpr FT sigma_sig = 1.292;
+constexpr FT sigma_sig = 1.278;
 
 // Returns the error function for a normal distributed variable with standard deviation sigma,
 // i.e. the probability that a sample X has value that does NOT lie in (-x, x).

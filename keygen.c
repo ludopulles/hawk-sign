@@ -2305,28 +2305,28 @@ align_u32(void *base, void *data)
 /*
  * Table below incarnates a discrete Gaussian distribution:
  *    D(x) = exp(-(x^2)/(2*sigma^2))
- * where sigma = 1.425.
+ * where sigma = 1.500.
  * Element 0 of the table is P(x = 0).
  * For k > 0, element k is P(x >= k+1 | x > 0).
  * Probabilities are scaled up by 2^63.
  *
- * see gen_table.cpp for generating this table.
+ * To generate the values in the table below, run 'gen_table.cpp'.
  */
-static const uint64_t gauss_1500[14] = {
-    2453062048915767484u,
-    3871449519226705105u,
-    1123680878940444328u,
-     219134710439743982u,
-      28210262150869885u,
-       2371447864901096u,
-        129302080834770u,
-          4553577562215u,
-           103300286390u,
-             1507025277u,
-               14123567u,
-                  84972u,
-                    328u,
-                      1u
+static const uint64_t gauss_keygen[14] = {
+	2453062048915767484u,
+	3871449519226705105u,
+	1123680878940444328u,
+	 219134710439743982u,
+	  28210262150869885u,
+	   2371447864901096u,
+	    129302080834770u,
+	      4553577562215u,
+	       103300286390u,
+	         1507025277u,
+	           14123567u,
+	              84972u,
+	                328u,
+	                  1u
 };
 
 /*
@@ -2363,7 +2363,7 @@ mkgauss_keygen(prng *rng)
 	r = prng_get_u64(rng);
 	neg = (uint32_t)(r >> 63);
 	r &= ~((uint64_t)1 << 63);
-	f = (uint32_t)((r - gauss_1500[0]) >> 63);
+	f = (uint32_t)((r - gauss_keygen[0]) >> 63);
 
 	/*
 	 * We produce a new random 63-bit integer r, and go over
@@ -2376,7 +2376,7 @@ mkgauss_keygen(prng *rng)
 	r &= ~((uint64_t)1 << 63);
 	for (k = 1; k < 14; k ++) {
 		uint32_t t;
-		t = (uint32_t)((r - gauss_1500[k]) >> 63) ^ 1;
+		t = (uint32_t)((r - gauss_keygen[k]) >> 63) ^ 1;
 		v |= k & -(t & (f ^ 1));
 		f |= t;
 	}
@@ -4106,8 +4106,8 @@ Zf(keygen)(inner_shake256_context *rng,
 
 		/*
 		 * The coefficients of f and g are generated independently of each other,
-		 * with a discrete Gaussian distribution of standard deviation 1.425. The
-		 * expected l2-norm of (f, g) is 2n 1.425^2.
+		 * with a discrete Gaussian distribution of standard deviation 1.500. The
+		 * expected l2-norm of (f, g) is 2n 1.500^2.
 		 *
 		 * We require that N(f) and N(g) are both odd (the NTRU equation solver
 		 * requires it).

@@ -289,10 +289,6 @@ WorkerResult measure_signatures()
 WorkerResult tot;
 std::mutex mx;
 
-constexpr fpr sigma_kg  = { v: 1.425 };
-constexpr fpr sigma_sig = { v: 1.292 };
-constexpr fpr verif_margin = { v: 1.1 };
-
 void work()
 {
 	WorkerResult result = measure_signatures();

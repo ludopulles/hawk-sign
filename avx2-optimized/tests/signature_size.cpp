@@ -76,8 +76,17 @@ size_t encoding_length(const vector<int> &table, int16_t *sig, unsigned logn)
 // =============================================================================
 // | TESTING CODE                                                              |
 // =============================================================================
-constexpr int n_repetitions = 1000;
-constexpr long long salt_and_header = 1 + 40;
+constexpr int n_repetitions = 10 * 1000 / 4;
+
+// Taken from hawk.h:
+/*
+ * The number of bytes that are required for the salt that gets prepended to a
+ * message before hashing.
+ * 
+ * From GPV08, having \lambda security bits and a transcript size of Q_s, having k = \lambda + \log_2(Q_s) salt bits gives a hash collision of message to happen with probability at most 2^-k.
+ * So for n = 512, take k = 192 and for n = 1024, take k = 320.
+ */
+#define HAWK_SALT_SIZE(logn) ((logn) <= 9 ? 24u : 40u)
 
 struct WorkerResult {
 	// s1 <- encode_sig()
@@ -178,8 +187,10 @@ WorkerResult measure_signatures(unsigned logn) {
 
 	WorkerResult result;
 	for (int rep = 0; rep < n_repetitions; rep++) {
-		// Generate key pair.
-		Zf(keygen)(&sc, f, g, F, G, q00, q10, q11, logn, b);
+		if (rep % 100 == 0) {
+			// Generate key pair.
+			Zf(keygen)(&sc, f, g, F, G, q00, q10, q11, logn, b);
+		}
 
 		// make a signature of a random message...
 		inner_shake256_extract(&sc, h, sizeof h);
@@ -229,9 +240,6 @@ WorkerResult measure_signatures(unsigned logn) {
 WorkerResult tot;
 mutex mx;
 
-constexpr fpr sigma_sig = { v: 1.292 };
-constexpr fpr verif_margin = { v: 1.1 };
-
 void work(unsigned logn) {
 	WorkerResult result = measure_signatures(logn);
 
@@ -265,6 +273,8 @@ int main() {
 		double var_s1 = double(tot.sumsq_s1) / (runs * n) - avg_s1 * avg_s1;
 		printf("Average coefficient of s0 ~ %7.3f +/- %7.3f\n", avg_s0, sqrt(var_s0));
 		printf("Average coefficient of s1 ~ %7.3f +/- %7.3f\n", avg_s1, sqrt(var_s1));
+
+		long long salt_and_header = 1 + HAWK_SALT_SIZE(logn);
 
 		printf("lo_bits | max sig | avg sig. size (B) | #fails\n");
 		for (int lb = 3; lb < 10; lb++) {

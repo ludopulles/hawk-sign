@@ -116,7 +116,7 @@ int approximate_fail_prob(inner_shake256_context *rng,
 
 	size_t n, u;
 	n = MKN(logn);
-	uint32_t bound = (uint32_t)(SQR(1.1 * 2 * 1.292) * (2*n));
+	uint32_t bound = (uint32_t)(SQR(1.1 * 2 * 1.278) * (2*n));
 
 	fpr expkey[EXPANDED_SECKEY_SIZE(9)];
 	Zf(expand_seckey)(expkey, f, g, F, logn);

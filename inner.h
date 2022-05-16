@@ -411,17 +411,16 @@ prng_get_u8(prng *p)
  */
 
 /*
- * This number indicates the maximum l2-norm that is allowed for the small
- * error (from a valid signature) that is chosen around the target point during
- * signature generation.
- * The coefficients of this error are distributed according to a discrete
- * gaussian over the integers that have the same parity as the target
- * coefficient and with standard deviation 2 sigma_sig. To compute these
- * values, use:
+ * This number indicates the maximum squared l2-norm of (2s - h) with respect
+ * to the public Hermitian form `Q`. Note that when `x = B * (2s - h)`, this
+ * translates to ||x||^2.
  *
- *     l2bound(logn) = floor( (verif_margin * 2 sigma_sig)^2 * 2n ).
+ * In signing, `s` is generated such that `x` follows a Discrete Gaussian
+ * distribution with support `2Z^{2n} + B*h`, center 0 and standard deviation
+ * sigma_sig and moreover `x` is resampled when its norm is greater than this
+ * bound.
  *
- * Here, we have taken verif_margin = 1.1 and sigma_sig = 1.292.
+ * To generate these values, run 'gen_table.cpp'.
  */
 extern const uint32_t Zf(l2bound)[10];
 

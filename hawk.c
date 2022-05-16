@@ -320,28 +320,18 @@ hawk_make_public(void *pubkey, size_t pubkey_len, const void *privkey,
 
 /* see hawk.h */
 int
-hawk_get_logn(void *obj, size_t len)
+hawk_get_logn(const void *obj, size_t len)
 {
 	unsigned logn;
 
 	if (len == 0) {
 		return HAWK_ERR_FORMAT;
 	}
-	logn = *(uint8_t *)obj & 0x0F;
+	logn = *(const uint8_t *)obj & 0x0F;
 	if (logn < 1 || logn > 9) {
 		return HAWK_ERR_FORMAT;
 	}
 	return logn;
-}
-
-/* see hawk.h */
-int
-hawk_sign_start(shake256_context *rng, void *salt, shake256_context *hash_data)
-{
-	shake256_extract(rng, salt, 40);
-	shake256_init(hash_data);
-	shake256_inject(hash_data, salt, 40);
-	return 0;
 }
 
 /* see hawk.h */
@@ -403,6 +393,24 @@ hawk_expand_privkey(void *expanded_key, size_t expanded_key_len,
 
 /* see hawk.h */
 int
+hawk_sign_start(shake256_context *rng, void *salt, const void *obj, shake256_context *hash_data)
+{
+	unsigned logn, salt_len;
+
+	logn = *(const uint8_t *)obj & 0x0F;
+	if (logn < 1 || logn > 9) {
+		return HAWK_ERR_FORMAT;
+	}
+	salt_len = HAWK_SALT_SIZE(logn);
+
+	shake256_extract(rng, salt, salt_len);
+	shake256_init(hash_data);
+	shake256_inject(hash_data, salt, salt_len);
+	return 0;
+}
+
+/* see hawk.h */
+int
 hawk_sign_finish(shake256_context *rng, void *sig, size_t *sig_len,
 	int sig_type, const void *expanded_key, shake256_context *hash_data,
 	const void *salt, void *tmp, size_t tmp_len)
@@ -425,7 +433,7 @@ hawk_sign_finish(shake256_context *rng, void *sig, size_t *sig_len,
 		return HAWK_ERR_SIZE;
 	}
 	es_len = *sig_len;
-	if (es_len < 41) {
+	if (es_len < 1 + HAWK_SALT_SIZE(logn)) {
 		return HAWK_ERR_SIZE;
 	}
 	expkey = (const fpr *)align_fpr((uint8_t *)expanded_key + 1);
@@ -454,12 +462,12 @@ hawk_sign_finish(shake256_context *rng, void *sig, size_t *sig_len,
 		HAWK_HASH_SIZE(logn));
 
 	/*
-	 * Fix the first byte (containing logn) and 40 bytes for the salt first.
+	 * Fix the first byte (containing logn) and the bytes for the salt first.
 	 */
 	es = sig;
 	es[0] = 0x30 + logn;
-	memcpy(es + 1, salt, 40);
-	u = 41;
+	memcpy(es + 1, salt, HAWK_SALT_SIZE(logn));
+	u = 1 + HAWK_SALT_SIZE(logn);
 
 	if (sig_type == HAWK_SIG_COMPRESSED) {
 		oldcw = set_fpu_cw(2);
@@ -512,7 +520,7 @@ hawk_sign(shake256_context *rng, void *sig, size_t *sig_len, int sig_type,
 	uint8_t salt[40];
 	int r;
 
-	r = hawk_sign_start(rng, salt, &hd);
+	r = hawk_sign_start(rng, salt, expanded_key, &hd);
 	if (r != 0) {
 		return r;
 	}
@@ -552,7 +560,7 @@ hawk_sign_simple_finish(shake256_context *rng, void *sig, size_t *sig_len,
 		return HAWK_ERR_SIZE;
 	}
 	es_len = *sig_len;
-	if (es_len < 41) {
+	if (es_len < 1 + HAWK_SALT_SIZE(logn)) {
 		return HAWK_ERR_SIZE;
 	}
 
@@ -592,12 +600,12 @@ hawk_sign_simple_finish(shake256_context *rng, void *sig, size_t *sig_len,
 		HAWK_HASH_SIZE(logn));
 
 	/*
-	 * Fix the first byte (containing logn) and 40 bytes for the salt first.
+	 * Fix the first byte (containing logn) and the bytes for the salt first.
 	 */
 	es = sig;
 	es[0] = 0x30 + logn;
-	memcpy(es + 1, salt, 40);
-	u = 41;
+	memcpy(es + 1, salt, HAWK_SALT_SIZE(logn));
+	u = 1 + HAWK_SALT_SIZE(logn);
 
 	if (sig_type == HAWK_SIG_COMPRESSED) {
 		oldcw = set_fpu_cw(2);
@@ -654,7 +662,7 @@ hawk_sign_simple(shake256_context *rng, void *sig, size_t *sig_len, int sig_type
 	uint8_t salt[40];
 	int r;
 
-	r = hawk_sign_start(rng, salt, &hd);
+	r = hawk_sign_start(rng, salt, privkey, &hd);
 	if (r != 0) {
 		return r;
 	}
@@ -695,7 +703,7 @@ hawk_sign_dyn_finish(shake256_context *rng, void *sig, size_t *sig_len,
 		return HAWK_ERR_SIZE;
 	}
 	es_len = *sig_len;
-	if (es_len < 41) {
+	if (es_len < 1 + HAWK_SALT_SIZE(logn)) {
 		return HAWK_ERR_SIZE;
 	}
 
@@ -734,12 +742,12 @@ hawk_sign_dyn_finish(shake256_context *rng, void *sig, size_t *sig_len,
 		HAWK_HASH_SIZE(logn));
 
 	/*
-	 * Fix the first byte (containing logn) and 40 bytes for the salt first.
+	 * Fix the first byte (containing logn) and the bytes for the salt first.
 	 */
 	es = sig;
 	es[0] = 0x30 + logn;
-	memcpy(es + 1, salt, 40);
-	u = 41;
+	memcpy(es + 1, salt, HAWK_SALT_SIZE(logn));
+	u = 1 + HAWK_SALT_SIZE(logn);
 
 	if (sig_type == HAWK_SIG_COMPRESSED) {
 		oldcw = set_fpu_cw(2);
@@ -794,7 +802,7 @@ hawk_sign_dyn(shake256_context *rng, void *sig, size_t *sig_len, int sig_type,
 	uint8_t salt[40];
 	int r;
 
-	r = hawk_sign_start(rng, salt, &hd);
+	r = hawk_sign_start(rng, salt, privkey, &hd);
 	if (r != 0) {
 		return r;
 	}
@@ -835,7 +843,7 @@ hawk_sign_NTT_finish(shake256_context *rng, void *sig, size_t *sig_len,
 		return HAWK_ERR_SIZE;
 	}
 	es_len = *sig_len;
-	if (es_len < 41) {
+	if (es_len < 1 + HAWK_SALT_SIZE(logn)) {
 		return HAWK_ERR_SIZE;
 	}
 
@@ -874,12 +882,12 @@ hawk_sign_NTT_finish(shake256_context *rng, void *sig, size_t *sig_len,
 		HAWK_HASH_SIZE(logn));
 
 	/*
-	 * Fix the first byte (containing logn) and 40 bytes for the salt first.
+	 * Fix the first byte (containing logn) and the bytes for the salt first.
 	 */
 	es = sig;
 	es[0] = 0x30 + logn;
-	memcpy(es + 1, salt, 40);
-	u = 41;
+	memcpy(es + 1, salt, HAWK_SALT_SIZE(logn));
+	u = 1 + HAWK_SALT_SIZE(logn);
 
 	if (sig_type == HAWK_SIG_COMPRESSED) {
 		oldcw = set_fpu_cw(2);
@@ -935,7 +943,7 @@ hawk_sign_NTT(shake256_context *rng, void *sig, size_t *sig_len, int sig_type,
 	uint8_t salt[40];
 	int r;
 
-	r = hawk_sign_start(rng, salt, &hd);
+	r = hawk_sign_start(rng, salt, privkey, &hd);
 	if (r != 0) {
 		return r;
 	}
@@ -949,14 +957,19 @@ hawk_sign_NTT(shake256_context *rng, void *sig, size_t *sig_len, int sig_type,
 int
 hawk_verify_start(shake256_context *hash_data, const void *sig, size_t sig_len)
 {
-	if (sig_len < 41) {
+	unsigned logn, salt_len;
+
+	logn = hawk_get_logn(sig, sig_len);
+	salt_len = HAWK_SALT_SIZE(logn);
+	if (sig_len < salt_len + 1) {
 		return HAWK_ERR_FORMAT;
 	}
+
 	shake256_init(hash_data);
 	/*
 	 * First inject the salt in the SHAKE context.
 	 */
-	shake256_inject(hash_data, (const uint8_t *)sig + 1, 40);
+	shake256_inject(hash_data, (const uint8_t *)sig + 1, salt_len);
 	return 0;
 }
 
@@ -966,7 +979,7 @@ hawk_verify_finish(const void *sig, size_t sig_len, int sig_type,
 	const void *pubkey, size_t pubkey_len, shake256_context *hash_data,
 	void *tmp, size_t tmp_len)
 {
-	unsigned logn;
+	unsigned logn, salt_len;
 	uint8_t *hm, *atmp;
 	int16_t *iq00, *iq10;
 	fpr *q00, *q10, *q11;
@@ -978,7 +991,7 @@ hawk_verify_finish(const void *sig, size_t sig_len, int sig_type,
 	 * Get Hawk degree from public key; verify consistency with
 	 * signature value, and check parameters.
 	 */
-	if (sig_len < 41 || pubkey_len == 0) {
+	if (sig_len == 0 || pubkey_len == 0) {
 		return HAWK_ERR_FORMAT;
 	}
 	es = sig;
@@ -992,6 +1005,11 @@ hawk_verify_finish(const void *sig, size_t sig_len, int sig_type,
 	}
 	if ((es[0] & 0x0F) != logn || (es[0] & 0xF0) != 0x30) {
 		return HAWK_ERR_BADSIG;
+	}
+
+	salt_len = HAWK_SALT_SIZE(logn);
+	if (sig_len < 1 + salt_len) {
+		return HAWK_ERR_FORMAT;
 	}
 
 	switch (sig_type) {
@@ -1037,7 +1055,7 @@ hawk_verify_finish(const void *sig, size_t sig_len, int sig_type,
 	/*
 	 * Decode signature value.
 	 */
-	u = 41;
+	u = 1 + salt_len;
 	v = Zf(decode_sig)(sv, es + u, sig_len - u, logn, SIG_LOBITS(logn));
 	if (v == 0) {
 		return HAWK_ERR_FORMAT;
@@ -1108,7 +1126,7 @@ hawk_verify_simple_finish(const void *sig, size_t sig_len, int sig_type,
 	const void *pubkey, size_t pubkey_len, shake256_context *hash_data,
 	void *tmp, size_t tmp_len)
 {
-	unsigned logn;
+	unsigned logn, salt_len;
 	uint8_t *hm, *atmp;
 	int16_t *q00, *q10;
 	const uint8_t *pk, *es;
@@ -1119,7 +1137,7 @@ hawk_verify_simple_finish(const void *sig, size_t sig_len, int sig_type,
 	 * Get Hawk degree from public key; verify consistency with
 	 * signature value, and check parameters.
 	 */
-	if (sig_len < 41 || pubkey_len == 0) {
+	if (sig_len == 0 || pubkey_len == 0) {
 		return HAWK_ERR_FORMAT;
 	}
 	es = sig;
@@ -1133,6 +1151,11 @@ hawk_verify_simple_finish(const void *sig, size_t sig_len, int sig_type,
 	}
 	if ((es[0] & 0x0F) != logn || (es[0] & 0xF0) != 0x30) {
 		return HAWK_ERR_BADSIG;
+	}
+
+	salt_len = HAWK_SALT_SIZE(logn);
+	if (sig_len < 1 + salt_len) {
+		return HAWK_ERR_FORMAT;
 	}
 
 	switch (sig_type) {
@@ -1175,7 +1198,7 @@ hawk_verify_simple_finish(const void *sig, size_t sig_len, int sig_type,
 	/*
 	 * Decode signature value.
 	 */
-	u = 41;
+	u = 1 + salt_len;
 	v = Zf(decode_sig_simple)(s0, s1, es + u, sig_len - u, logn,
 		SIG0_LOBITS(logn), SIG_LOBITS(logn));
 	if (v == 0) {
