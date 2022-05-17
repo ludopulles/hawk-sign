@@ -11,6 +11,95 @@
 // =============================================================================
 
 /*
+ * Table below incarnates a discrete Gaussian distribution:
+ *    D(x) = exp(-(x^2)/(2*sigma^2))
+ * where sigma = 1.500.
+ * Element 0 of the table is P(x = 0).
+ * For k > 0, element k is P(x >= k+1 | x > 0).
+ * Probabilities are scaled up by 2^63.
+ *
+ * To generate the values in the table below, run 'gen_table.cpp'.
+ */
+static const uint64_t gauss_keygen[14] = {
+	2453062048915767484u,
+	3871449519226705105u,
+	1123680878940444328u,
+	 219134710439743982u,
+	  28210262150869885u,
+	   2371447864901096u,
+	    129302080834770u,
+	      4553577562215u,
+	       103300286390u,
+	         1507025277u,
+	           14123567u,
+	              84972u,
+	                328u,
+	                  1u
+};
+
+/*
+ * Generate a random value with a Gaussian distribution centered on 0.
+ * The RNG must be ready for extraction (already flipped).
+ * Distribution has standard deviation 1.5.
+ */
+static int
+mkgauss_keygen(prng *rng)
+{
+	/*
+	 * Each iteration generates one value with the
+	 * Gaussian distribution for N = 512.
+	 *
+	 * We use two random 64-bit values. First value
+	 * decides on whether the generated value is 0, and,
+	 * if not, the sign of the value. Second random 64-bit
+	 * word is used to generate the non-zero value.
+	 *
+	 * For constant-time code we have to read the complete
+	 * table. This has negligible cost, compared with the
+	 * remainder of the keygen process (solving the NTRU
+	 * equation).
+	 */
+	uint64_t r;
+	uint32_t f, v, k, neg;
+
+	/*
+	 * First value:
+	 *  - flag 'neg' is randomly selected to be 0 or 1.
+	 *  - flag 'f' is set to 1 if the generated value is zero,
+	 *    or set to 0 otherwise.
+	 */
+	r = prng_get_u64(rng);
+	neg = (uint32_t)(r >> 63);
+	r &= ~((uint64_t)1 << 63);
+	f = (uint32_t)((r - gauss_keygen[0]) >> 63);
+
+	/*
+	 * We produce a new random 63-bit integer r, and go over
+	 * the array, starting at index 1. We store in v the
+	 * index of the first array element which is not greater
+	 * than r, unless the flag f was already 1.
+	 */
+	v = 0;
+	r = prng_get_u64(rng);
+	r &= ~((uint64_t)1 << 63);
+	for (k = 1; k < 14; k ++) {
+		uint32_t t;
+		t = (uint32_t)((r - gauss_keygen[k]) >> 63) ^ 1;
+		v |= k & -(t & (f ^ 1));
+		f |= t;
+	}
+
+	/*
+	 * We apply the sign ('neg' flag). If the value is zero,
+	 * the sign has no effect.
+	 */
+	v = (v ^ -neg) + neg;
+	return *(int32_t *)&v;
+}
+
+// =============================================================================
+
+/*
  * Table below incarnates two discrete Gaussian distribution:
  *    D(x) = exp(-((x - mu)^2)/(2*sigma^2))
  * where sigma = 1.278 and mu is 0 or 1 / 2.
@@ -97,25 +186,28 @@ mkgauss_sign(prng *rng, uint8_t double_mu)
 
 // =============================================================================
 
-const int num_samples = 1 << 25;
+const int num_samples = 10 * 1000 * 1000;
 typedef double FT;
 
-int freq[100] = {};
 /*
  * As we are sampling, our epsilon must be taken quite large, since sampling
  * does not give the exact correct probability, but only close up to a factor
  * of ~ 1 / sqrt(num_samples).
  */
-FT sigma_sig = 1.278, eps = 0.01, check[100] = {};
+const FT sigma_pk = 1.500, sigma_sig = 1.278;
 
-FT rho(FT x) {
-	return expl(-x * x / (8.0 * sigma_sig * sigma_sig));
+FT eps = 0.001, P[100] = {};
+int freq[100] = {};
+
+FT rho(FT x, FT sigma) {
+	return expl(-x * x / (2.0 * sigma * sigma));
 }
 
 int main() {
 	inner_shake256_context sc;
 	unsigned char seed[48];
 	prng p;
+	FT norm_pk = 0.0, norm[2] = { 0.0, 0.0 };
 
 	// Initialize PRNG
 	Zf(get_seed)(seed, sizeof seed);
@@ -124,9 +216,47 @@ int main() {
 	inner_shake256_flip(&sc);
 	Zf(prng_init)(&p, &sc);
 
-	for (int i = -50; i < 50; i++) {
-		check[i + 50] = rho(i);
+
+	// Key generation sampler:
+	for (int i = -50; i < 50; i++)
+		P[i + 50] = rho(i, sigma_pk), norm_pk += P[i + 50];
+	// normalize:
+	for (int i = -50; i < 50; i++) P[i + 50] /= norm_pk;
+
+	memset(freq, 0, sizeof freq);
+	for (int i = num_samples; i--; ) {
+		int x = mkgauss_keygen(&p);
+		freq[x + 50]++;
 	}
+
+	FT max_abs_diff = 0.0, max_rel_diff = 0.0;
+	for (int i = -50; i < 50; i++) {
+		if (freq[i + 50] == 0) continue;
+		FT found = (FT) freq[i + 50] / num_samples, expected = P[i + 50];
+		// printf("P(X == %d) = %12.8f, %12.8f\n", i, found, expected);
+
+		FT abs_diff = fabs(found - expected);
+		FT rel_diff = abs_diff / expected;
+		if (abs_diff > max_abs_diff)
+			max_abs_diff = abs_diff;
+		if (rel_diff < abs_diff && rel_diff > max_rel_diff)
+			max_rel_diff = rel_diff;
+
+		assert(abs_diff < eps || rel_diff < eps);
+	}
+	printf("Keygen sampler        has abs.diff. < %.5f and rel.diff. < %.5f\n",
+		max_abs_diff, max_rel_diff);
+
+
+	// Signing sampler:
+	for (int i = -50; i < 50; i++) {
+		// sample from 2Z + coset by scaling everything up by a factor of two
+		P[i + 50] = rho(i, 2.0 * sigma_sig);
+		norm[((unsigned) i) & 1] += P[i + 50];
+	}
+	// normalize:
+	for (int i = -50; i < 50; i++)
+		P[i + 50] /= norm[((unsigned) i) & 1];
 
 	for (int coset = 0; coset < 2; coset++) {
 		memset(freq, 0, sizeof freq);
@@ -136,22 +266,23 @@ int main() {
 			freq[x + 50]++;
 		}
 
-		FT norm = 0.0;
+		max_abs_diff = max_rel_diff = 0.0;
 		for (int i = -50; i < 50; i++) {
-			if ((i + 10000) % 2 == coset) {
-				norm += check[i + 50];
-			}
-		}
-
-		printf("center = %d/2\n", coset);
-		for (int i = -20; i < 20; i++) {
 			if (freq[i + 50] == 0) continue;
-			FT found = (FT) freq[i + 50] / num_samples;
-			FT expected = check[i + 50] / norm;
-			printf("P(X == %d) = %12.8f, %12.8f\n", i, found, expected);
-			assert(found < eps || (1 - eps < found/expected && found/expected < 1 + eps));
+			FT found = (FT) freq[i + 50] / num_samples, expected = P[i + 50];
+			// printf("P(X == %d) = %12.8f, %12.8f\n", i, found, expected);
+
+			FT abs_diff = fabs(found - expected);
+			FT rel_diff = abs_diff / expected;
+			if (abs_diff > max_abs_diff)
+				max_abs_diff = abs_diff;
+			if (rel_diff < abs_diff && rel_diff > max_rel_diff)
+				max_rel_diff = rel_diff;
+
+			assert(abs_diff < eps || rel_diff < eps);
 		}
-		printf("\n");
+		printf("Sign sampler (2Z + %d) has abs.diff. < %.5f and rel.diff. < %.5f\n",
+			coset, max_abs_diff, max_rel_diff);
 	}
 
 	return 0;

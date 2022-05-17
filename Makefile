@@ -8,7 +8,7 @@ CFLAGS = -W -Wall -Wshadow -O2 -fdiagnostics-color=always
 LIBS = -lm
 
 OBJ = build/common.o build/compress.o build/fft.o build/ffo.o build/fpr.o build/keygen.o build/ntt.o build/rng.o build/shake.o build/sign.o build/vrfy.o
-PROGS = bin/test_forge bin/speed bin/test_compress
+PROGS = bin/test_forge bin/speed bin/test_compress bin/test_sampler
 
 HEAD = fpr.h inner.h
 
@@ -32,6 +32,8 @@ bin/speed: tests/speed.c build/hawk.o $(OBJ)
 bin/test_compress: tests/test_compress.c $(OBJ)
 	$(CC) $(CFLAGS) -o bin/test_compress tests/test_compress.c $(OBJ) $(LIBS)
 
+bin/test_sampler: tests/test_sampler.c build/rng.o build/shake.o
+	$(CC) $(CFLAGS) -o bin/test_sampler tests/test_sampler.c $(LIBS)
 
 # Object files:
 build/common.o: common.c $(HEAD)
