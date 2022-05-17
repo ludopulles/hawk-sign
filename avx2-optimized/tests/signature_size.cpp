@@ -76,7 +76,7 @@ size_t encoding_length(const vector<int> &table, int16_t *sig, unsigned logn)
 // =============================================================================
 // | TESTING CODE                                                              |
 // =============================================================================
-constexpr int n_repetitions = 10 * 1000 / 4;
+constexpr int n_repetitions = 250;
 
 // Taken from hawk.h:
 /*
@@ -187,10 +187,8 @@ WorkerResult measure_signatures(unsigned logn) {
 
 	WorkerResult result;
 	for (int rep = 0; rep < n_repetitions; rep++) {
-		if (rep % 100 == 0) {
-			// Generate key pair.
-			Zf(keygen)(&sc, f, g, F, G, q00, q10, q11, logn, b);
-		}
+		// Generate key pair.
+		Zf(keygen)(&sc, f, g, F, G, q00, q10, q11, logn, b);
 
 		// make a signature of a random message...
 		inner_shake256_extract(&sc, h, sizeof h);

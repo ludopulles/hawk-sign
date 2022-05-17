@@ -129,33 +129,32 @@ extern "C" {
  * possible padding.
  *
  * Below are the average sizes in number of bytes of secret keys and public
- * keys, taken over 10000 samples. To arrive at the minimal and maximal sizes,
+ * keys, taken over 1000 samples. To arrive at the minimal and maximal sizes,
  * add -,+5 std.dev. to the average and round to the average.
  *
- * TODO: run test_sizes with fixed compress.c, or where flushing last byte only happens at the end...
- * TODO: also account for the 1 header byte containing type of key & logn.
+ * TODO: run code for 10'000 samples.
+
  * logn | Average +/- stddev | min  | max
  * -----+- Secret key -------+------+-----
- *    1 |    3.45 +/-   0.64 |    3 |    7
- *    2 |    7.49 +/-   0.90 |    6 |   11
- *    3 |   15.49 +/-   1.33 |   12 |   21
- *    4 |   29.63 +/-   1.50 |   25 |   36
- *    5 |   57.83 +/-   2.49 |   50 |   69
- *    6 |  106.48 +/-   2.88 |   96 |  118
- *    7 |  203.70 +/-   4.94 |  187 |  223
- *    8 |  367.20 +/-   5.64 |  346 |  391
- *    9 |  678.76 +/-   6.66 |  653 |  703
+ *    1 |    3.40 +/-   0.49 |    3 |    5
+ *    2 |    5.40 +/-   0.51 |    5 |    7
+ *    3 |    9.51 +/-   0.70 |    8 |   12
+ *    4 |   18.21 +/-   1.03 |   15 |   21
+ *    5 |   36.90 +/-   1.82 |   32 |   43
+ *    6 |   76.15 +/-   2.08 |   71 |   83
+ *    7 |  158.85 +/-   3.58 |  149 |  170
+ *    8 |  332.19 +/-   4.14 |  318 |  345
+ *    9 |  694.63 +/-   6.93 |  672 |  716
  * -----+- Public key -------+------+-----
- *    1 |    5.27 +/-   0.52 |    0 |    8
- *    2 |    9.59 +/-   0.71 |    9 |   14
- *    3 |   18.00 +/-   1.03 |   16 |   26
- *    4 |   34.46 +/-   1.36 |   31 |   42
- *    5 |   66.70 +/-   2.06 |   60 |   77
- *    6 |  130.40 +/-   2.69 |  122 |  141
- *    7 |  255.17 +/-   4.17 |  242 |  274
- *    8 |  501.60 +/-   5.32 |  485 |  528
- *    9 |  984.52 +/-   8.32 |  955 | 1019
- *
+ *    1 |    4.37 +/-   0.49 |    4 |    6
+ *    2 |    6.32 +/-   0.49 |    6 |    8
+ *    3 |   10.99 +/-   0.75 |   10 |   16
+ *    4 |   21.59 +/-   0.87 |   20 |   25
+ *    5 |   45.47 +/-   1.55 |   42 |   52
+ *    6 |   98.04 +/-   1.81 |   93 |  104
+ *    7 |  213.59 +/-   3.11 |  204 |  224
+ *    8 |  464.20 +/-   3.66 |  454 |  477
+ *    9 | 1006.21 +/-   6.32 |  987 | 1028
  *
  * There are two formats for signatures:
  *
@@ -177,6 +176,9 @@ extern "C" {
  * degree (100 random keys, 100 signatures per key):
  *
  * TODO: update table.
+ * Hawk512 (simple):   1222.9 (+/- 7.2)
+ * Hawk512 (efficient): 541.5 (+/- 4.3)
+ *
  * degree     ct   padded  compressed (with std. dev)  comp_max
  *     2      44      44       44.00 (+/- 0.00)            44
  *     4      47      47       46.03 (+/- 0.17)            47
@@ -322,31 +324,46 @@ extern const size_t HAWK_SECKEY_SIZE[10];
 extern const size_t HAWK_PUBKEY_SIZE[10];
 
 /*
+ * Currently, only the signature sizes for logn = 9 are determined, as these
+ * are determined by simulations in each case, giving an average size and
+ * standard deviation. Currently the compressed maxsize is avg + 12 stdddev,
+ * while the padded size is avg + 6 stddev.
+ *
+ * The padded signature is therefore expected to fail with probability at most
+ * 2 10^{-9} times and if this fails, signing is restarted (while reusing the
+ * old hash).
+ *
+ * The compressed signature may fail with probability at most 10^{-32} assuming
+ * the sizes are normally distributed with the found average and standard
+ * deviation.
+ */
+
+/*
  * Maximum practical signature size (in bytes) when using the COMPRESSED format
  * and the simple scheme.
  */
 #define HAWK_SIG_SIMPLE_COMPRESSED_MAXSIZE(logn) \
-	(1312u)
+	(1309u)
 
 /*
  * Signature size (in bytes) when using the PADDED format and the simple
  * scheme. The size is exact.
  */
 #define HAWK_SIG_SIMPLE_PADDED_SIZE(logn) \
-	(1267u)
+	(1266u)
 
 /*
  * Maximum practical signature size (in bytes) when using the COMPRESSED
  * format.
  */
 #define HAWK_SIG_COMPRESSED_MAXSIZE(logn) \
-	(568u)
+	(593u)
 
 /*
  * Signature size (in bytes) when using the PADDED format. The size is exact.
  */
 #define HAWK_SIG_PADDED_SIZE(logn) \
-	(568u)
+	(567u)
 
 /*
  * Temporary buffer size for key pair generation.
@@ -363,7 +380,7 @@ extern const size_t HAWK_PUBKEY_SIZE[10];
 /*
  * The number of bytes that are required for the salt that gets prepended to a
  * message before hashing.
- * 
+ *
  * From GPV08, having \lambda security bits and a transcript size of Q_s, having k = \lambda + \log_2(Q_s) salt bits gives a hash collision of message to happen with probability at most 2^-k.
  * So for n = 512, take k = 192 and for n = 1024, take k = 320.
  */

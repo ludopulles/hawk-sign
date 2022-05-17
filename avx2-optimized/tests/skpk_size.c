@@ -84,7 +84,7 @@ int main() {
 
 	size_t nreps[MAX_LOGN + 1];
 	for (size_t logn = 1; logn <= MAX_LOGN; logn++) {
-		nreps[logn] = 400;
+		nreps[logn] = 1000;
 	}
 
 	for (size_t logn = 1; logn <= MAX_LOGN; logn++) {
@@ -118,7 +118,8 @@ int main() {
 		fflush(stdout);
 	} */
 
-	printf("\nlogn | Average +/- stddev | min  | max \n");
+	printf("\nIterations performed: %u", (unsigned) nreps[MAX_LOGN]);
+	printf("\nlogn | Average +/- stddev | min  | max\n");
 	double avg, std;
 
 	printf("-----+- Secret key -------+------+-----\n");

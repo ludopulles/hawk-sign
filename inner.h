@@ -901,7 +901,7 @@ void Zf(sign_simple)(inner_shake256_context *rng,
 
 /*
  * Compute s1 of a signature of h, i.e. a signature is a vector (s0, s1) that
- * is close to (h0, h1) / 2 with respect to the quadratic form Q. It is 
+ * is close to (h0, h1) / 2 with respect to the quadratic form Q. It is
  * guaranteed that one can succesfully recover a s0 during verification such
  * that (s0, s1) is a valid signature.
  *
@@ -932,7 +932,7 @@ void Zf(expand_seckey)(fpr *restrict expanded_seckey,
 
 /*
  * Compute s1 of a signature of h, i.e. a signature is a vector (s0, s1) that
- * is close to (h0, h1) / 2 with respect to the quadratic form Q. It is 
+ * is close to (h0, h1) / 2 with respect to the quadratic form Q. It is
  * guaranteed that one can succesfully recover a s0 during verification such
  * that (s0, s1) is a valid signature.
  *
@@ -944,7 +944,7 @@ void Zf(sign)(inner_shake256_context *rng, int16_t *restrict sig,
 
 /*
  * Compute s1 of a signature of h, i.e. a signature is a vector (s0, s1) that
- * is close to (h0, h1) / 2 with respect to the quadratic form Q. It is 
+ * is close to (h0, h1) / 2 with respect to the quadratic form Q. It is
  * guaranteed that one can succesfully recover a s0 during verification such
  * that (s0, s1) is a valid signature.
  *
