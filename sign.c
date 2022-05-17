@@ -265,6 +265,9 @@ sample_short(prng *rng, fpr *restrict x0, fpr *restrict x1,
 		norm += z*z;
 	}
 
+	Zf(FFT)(x0, logn);
+	Zf(FFT)(x1, logn);
+
 	/*
 	 * Test whether the l2-norm of (x0, x1) is below the given bound. The
 	 * code below uses only 32-bit operations to compute the squared norm,
@@ -272,17 +275,7 @@ sample_short(prng *rng, fpr *restrict x0, fpr *restrict x1,
 	 * For a large enough verification margin, it is unlikely that the
 	 * norm of the gaussian (x0, x1) is too large.
 	 */
-	if ((uint32_t)norm > Zf(l2bound)[logn]) {
-		return 0;
-	}
-
-	/*
-	 * Norm of (x0, x1) is acceptable.
-	 */
-	Zf(FFT)(x0, logn);
-	Zf(FFT)(x1, logn);
-
-	return 1;
+	return (uint32_t)norm <= Zf(l2bound)[logn];
 }
 
 /*
