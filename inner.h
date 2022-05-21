@@ -261,13 +261,6 @@ void Zf(prng_refill)(prng *p);
 void Zf(prng_get_bytes)(prng *p, void *dst, size_t len);
 
 /*
- * Get precisely 80 bytes from a PRNG, use this to fill a uint64_t and a
- * uint16_t as this provides exactly the same value on both little-endian and
- * big-endian architectures.
- */
-void Zf(prng_get_80_bits)(prng *p, uint16_t *bit16, uint64_t *bit64);
-
-/*
  * Get a 64-bit random value from a PRNG.
  */
 static inline uint64_t
@@ -303,18 +296,38 @@ prng_get_u64(prng *p)
 }
 
 /*
- * Get an 8-bit random value from a PRNG.
+ * Get precisely 80 bytes from a PRNG, use this to return a uint64_t and fill a
+ * uint16_t as this provides exactly the same value on both little-endian and
+ * big-endian architectures.
  */
-static inline unsigned
-prng_get_u8(prng *p)
+static inline void
+prng_get_80_bits(prng *p, uint16_t *bit16, uint64_t *bit64)
 {
-	unsigned v;
+	size_t u;
 
-	v = p->buf.d[p->ptr ++];
-	if (p->ptr == sizeof p->buf.d) {
+	/*
+	 * If there are less than 10 bytes in the buffer, refill the buffer.
+	 */
+	u = p->ptr;
+	if (u + 10u >= sizeof p->buf.d) {
 		Zf(prng_refill)(p);
+		u = 0;
 	}
-	return v;
+	p->ptr = u + 10;
+
+	/*
+	 * On systems that use little-endian encoding and allow unaligned accesses,
+	 * simply read the data where it is.
+	 */
+	*bit16 = (uint16_t)p->buf.d[u + 8] | ((uint16_t)p->buf.d[u + 9] << 8);
+	*bit64 = (uint64_t)p->buf.d[u + 0]
+		| ((uint64_t)p->buf.d[u + 1] << 8)
+		| ((uint64_t)p->buf.d[u + 2] << 16)
+		| ((uint64_t)p->buf.d[u + 3] << 24)
+		| ((uint64_t)p->buf.d[u + 4] << 32)
+		| ((uint64_t)p->buf.d[u + 5] << 40)
+		| ((uint64_t)p->buf.d[u + 6] << 48)
+		| ((uint64_t)p->buf.d[u + 7] << 56);
 }
 
 /* ==================================================================== */

@@ -261,31 +261,3 @@ Zf(prng_get_bytes)(prng *p, void *dst, size_t len)
 		}
 	}
 }
-
-/* see inner.h */
-void
-Zf(prng_get_80_bits)(prng *p, uint16_t *bit16, uint64_t *bit64)
-{
-	size_t u;
-
-	/*
-	 * This function requires 10 bytes to be present in the buffer.
-	 */
-	u = p->ptr;
-	if (u + 10 >= sizeof p->buf.d) {
-		/*
-		 * If there are less than 10 bytes in the buffer, first refill it and
-		 * then read the bytes from the freshly filled buffer.
-		 */
-		Zf(prng_refill)(p);
-		u = 0;
-	}
-
-	/*
-	 * On systems that use little-endian encoding and allow unaligned accesses,
-	 * simply read the data where it is.
-	 */
-	*bit16 = (uint16_t)p->buf.d[u+8] | ((uint16_t)p->buf.d[u+9] << 8);
-	*bit64 = *(uint64_t *)&p->buf.d[u];
-	p->ptr = u + 10;
-}

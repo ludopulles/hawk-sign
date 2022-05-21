@@ -210,7 +210,7 @@ static const uint64_t gauss_lo[26] = {
 };
 
 static inline int8_t
-secure_gauss(prng *rng, uint8_t double_mu)
+secure_gauss(prng *rng, uint8_t parity)
 {
 	uint16_t r_hi, p_hi;
 	uint64_t r_lo, p_lo;
@@ -223,19 +223,28 @@ secure_gauss(prng *rng, uint8_t double_mu)
 	 * way is better than doing a comparison to achieve constant-time
 	 * execution.
 	 */
-	Zf(prng_get_80_bits)(rng, &r_hi, &r_lo);
-	r_hi &= 0x7FFF;
+	prng_get_80_bits(rng, &r_hi, &r_lo);
 
 	/*
 	 * Get the sign bit out of the lowest part
 	 */
 	neg = (uint8_t)(r_lo >> 63);
+
+	/*
+	 * Unset the sign bits in the unsigned ints for convenience in comparisons
+	 * later on, as we can now use the highest bit of `a - b` to check if `a <
+	 * b` or not for numbers `a, b`.
+	 */
+	r_hi &= ~((uint16_t)1u << 15);
 	r_lo &= ~((uint64_t)1u << 63);
 
 	v = 0;
-	for (k = 5; k < 13; k ++) {
-		p_lo = gauss_lo[2*k];
-		p_lo ^= -double_mu & (gauss_lo[2*k] ^ gauss_lo[2*k+1]);
+	for (k = 10; k < 26; k += 2) {
+		/*
+		 * Constant-time for:
+		 *     p_lo = gauss_lo[k + parity];
+		 */
+		p_lo = (gauss_lo[k] & (parity - 1u)) | ((gauss_lo[k + 1] & -parity));
 
 		/*
 		 * Add 1 iff r_lo < p_lo.
@@ -249,11 +258,14 @@ secure_gauss(prng *rng, uint8_t double_mu)
 	 */
 	v = v & -((r_hi - 1) >> 15);
 
-	for (k = 0; k < 5; k ++) {
-		p_lo = gauss_lo[2*k];
-		p_lo ^= -double_mu & (gauss_lo[2*k] ^ gauss_lo[2*k+1]);
-		p_hi = gauss_hi[2*k];
-		p_hi ^= -double_mu & (gauss_hi[2*k] ^ gauss_hi[2*k+1]);
+	for (k = 0; k < 10; k += 2) {
+		/*
+		 * Constant-time for:
+		 *     p_lo = gauss_lo[k + parity];
+		 *     p_hi = gauss_hi[k + parity];
+		 */
+		p_lo = (gauss_lo[k] & (parity - 1u)) | ((gauss_lo[k + 1] & -parity));
+		p_hi = (gauss_hi[k] & (parity - 1u)) | ((gauss_hi[k + 1] & -parity));
 
 		/*
 		 * c = [[ r_lo < p_lo ]]
@@ -262,7 +274,7 @@ secure_gauss(prng *rng, uint8_t double_mu)
 
 		/*
 		 * Constant-time code to add 1 to v iff
-		 *     r_hi < p_hi or (r_hi == p_hi and c == 1)
+		 *     r_hi < p_hi or (r_hi == p_hi and c is true)
 		 * holds.
 		 */
 		c = (uint8_t)((uint16_t)(r_hi - p_hi - c) >> 15);
@@ -271,10 +283,10 @@ secure_gauss(prng *rng, uint8_t double_mu)
 
 	/*
 	 * Multiply by two and apply the change in support:
-	 * If double_mu = 0, then v = 0,2,4,...
-	 * If double_mu = 1, then v = 1,3,5,...
+	 * If parity = 0, then v = 0,2,4,...
+	 * If parity = 1, then v = 1,3,5,...
 	 */
-	v = (v << 1) | double_mu;
+	v = (v << 1) | parity;
 
 	/*
 	 * Apply the sign ('neg' flag). If neg = 0, this has no effect.
@@ -287,17 +299,18 @@ secure_gauss(prng *rng, uint8_t double_mu)
 
 // =============================================================================
 
-const int num_samples = 10 * 1000 * 1000;
+#define NUM_SAMPLES ((int64_t)(10 * 1000000))
 typedef double FT;
 
 /*
  * As we are sampling, our epsilon must be taken quite large, since sampling
  * does not give the exact correct probability, but only close up to a factor
- * of ~ 1 / sqrt(num_samples).
+ * of ~ 1 / sqrt(NUM_SAMPLES).
  */
 const FT sigma_pk = 1.500, sigma_sig = 1.278;
+const FT eps = 2.0 / sqrt(NUM_SAMPLES);
 
-FT eps = 0.001, P[100] = {};
+FT P[100] = {};
 int freq[100] = {};
 
 FT rho(FT x, FT sigma) {
@@ -325,7 +338,7 @@ int main() {
 	for (int i = -50; i < 50; i++) P[i + 50] /= norm_pk;
 
 	memset(freq, 0, sizeof freq);
-	for (int i = num_samples; i--; ) {
+	for (int i = NUM_SAMPLES; i--; ) {
 		int x = mkgauss_keygen(&p);
 		freq[x + 50]++;
 	}
@@ -333,7 +346,7 @@ int main() {
 	FT max_abs_diff = 0.0, max_rel_diff = 0.0;
 	for (int i = -50; i < 50; i++) {
 		if (freq[i + 50] == 0) continue;
-		FT found = (FT) freq[i + 50] / num_samples, expected = P[i + 50];
+		FT found = (FT) freq[i + 50] / NUM_SAMPLES, expected = P[i + 50];
 		// printf("P(X == %d) = %12.8f, %12.8f\n", i, found, expected);
 
 		FT abs_diff = fabs(found - expected);
@@ -362,7 +375,7 @@ int main() {
 	for (int8_t coset = 0; coset < 2; coset++) {
 		memset(freq, 0, sizeof freq);
 
-		for (int i = num_samples; i--; ) {
+		for (int i = NUM_SAMPLES; i--; ) {
 			int x = secure_gauss(&p, coset);
 			freq[x + 50]++;
 		}
@@ -370,7 +383,7 @@ int main() {
 		max_abs_diff = max_rel_diff = 0.0;
 		for (int i = -50; i < 50; i++) {
 			if (freq[i + 50] == 0) continue;
-			FT found = (FT) freq[i + 50] / num_samples, expected = P[i + 50];
+			FT found = (FT) freq[i + 50] / NUM_SAMPLES, expected = P[i + 50];
 			// printf("P(X == %d) = %12.8f, %12.8f\n", i, found, expected);
 
 			FT abs_diff = fabs(found - expected);

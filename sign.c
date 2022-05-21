@@ -34,88 +34,134 @@
 // =============================================================================
 
 /*
- * Table below incarnates two discrete Gaussian distribution:
- *    D(x) = exp(-((x - mu)^2)/(2*sigma^2))
- * where sigma = 1.278 and mu is 0 or 1 / 2.
- * Element 0 of the first table is P(x = 0) and 2*P(x = 1) in the second table.
- * For k > 0, element k is P(x >= k+1 | x > 0) in the first table, and
- * P(x >= k+2 | x > 1) in the second table.
- * For constant-time principle, mu = 0 is in the even indices and
- * mu = 1 / 2 is in the odd indices.
- * Probabilities are scaled up by 2^63.
+ * The table below contains the cumulative probability table for two discrete
+ * gaussian distribution. The first is a discrete gaussian on 2Z with standard
+ * deviation 2 sigma, and the other is a discrete gaussian on 2Z + 1 with the
+ * same standard deviation.  For n = 512, we have sigma = 1.278.
  *
- * To generate the values in the table below, run 'gen_table.cpp'.
+ * The elements in the even indices of the table (starting from zero) contain
+ * the probabilities P(|X| >= 2), P(|X| >= 4), etc. when X is sampled from
+ * D_{2Z, 2sigma}, and the number is scaled by a factor of 2^{78}, and then the
+ * highest 15 bits are stored in gauss_hi while the lowest 63 bits are stored
+ * in gauss_lo. Similarly the odd indices in the table contain P(|X| >= 3),
+ * P(|X| >= 5), etc.
+ *
+ * The generation is contant-time so the whole probability is read fully such
+ * that the time consumption does not depend on the coset that is sampled from
+ * nor on the outcome of the sampling.
+ *
+ * To generate the values, run `sage code/renyi.sage`.
  */
-static const uint64_t gauss_sign[24] = {
-	2879180808586524119u, 5334099443607918879u,
-	3059393892786389767u, 2365650607671913513u,
-	 598985657464043109u,  350188603152862536u,
-	  66570217148287807u,   29069029197456365u,
-	   4111724430703280u,    1332230758935082u,
-	    139536889245539u,      33427798003753u,
-	      2585835445815u,        457141300403u,
-	        26080447382u,          3398953827u,
-	          142905880u,            13721995u,
-	             424994u,               30058u,
-	                686u,                  36u,
-	                  1u,                   0u
+static const uint16_t gauss_hi[10] = {
+	0x580B, 0x35F9,
+	0x1D34, 0x0DD7,
+	0x05B7, 0x020C,
+	0x00A2, 0x002B,
+	0x000A, 0x0001,
 };
 
-/*
- * Sample an integer with parity equal to double_mu from a discrete Gaussian
- * distribution with support 2\ZZ + double_mu, mean 0 and sigma 2 * 1.278.
- * That is, an integer x (== double_mu mod 2) is chosen with probability
- * proportional to:
- *
- *     exp(- x^2 / (8 1.278^2)).
- */
-static inline int
-mkgauss_sign(prng *rng, uint8_t double_mu)
+static const uint64_t gauss_lo[26] = {
+	0x0C27920A04F8F267, 0x3C689D9213449DC9,
+	0x1C4FF17C204AA058, 0x7B908C81FCE3524F,
+	0x5E63263BE0098FFD, 0x4EBEFD8FF4F07378,
+	0x56AEDFB0876A3BD8, 0x4628BC6B23887196,
+	0x061E21D588CC61CC, 0x7F769211F07B326F,
+	0x2BA568D92EEC18E7, 0x0668F461693DFF8F,
+	0x00CF0F8687D3B009, 0x001670DB65964485,
+	0x000216A0C344EB45, 0x00002AB6E11C2552,
+	0x000002EDF0B98A84, 0x0000002C253C7E81,
+	0x000000023AF3B2E7, 0x0000000018C14ABF,
+	0x0000000000EBCC6A, 0x000000000007876E,
+	0x00000000000034CF, 0x000000000000013D,
+	0x0000000000000006, 0x0000000000000000,
+};
+
+static inline int8_t
+mkgauss_sign(prng *rng, uint8_t parity)
 {
-	uint64_t r;
-	uint32_t v, k, neg;
-	int32_t w;
+	uint16_t r_hi, p_hi;
+	uint64_t r_lo, p_lo;
+	uint8_t c, v, k, neg;
 
 	/*
-	 * We use two random 64-bit values. First value is used to generate the
-	 * non-zero value. Second value decides on whether the generated value is 0
-	 * and the sign of the value. For constant-time code we have to read the
-	 * complete table.
+	 * We use 80 random bits to determine the value, by looking in the
+	 * cumulative probability table. However, we only use 15 bits for r_hi so
+	 * we can check if r_hi < p_hi holds by computing (r_hi - p_hi) >> 15. This
+	 * way is better than doing a comparison to achieve constant-time
+	 * execution.
 	 */
+	prng_get_80_bits(rng, &r_hi, &r_lo);
 
-	r = prng_get_u64(rng) & ~((uint64_t)1 << 63);
-	v = 1;
-	for (k = 1; k < 12; k ++) {
+	/*
+	 * Get the sign bit out of the lowest part
+	 */
+	neg = (uint8_t)(r_lo >> 63);
+
+	/*
+	 * Unset the sign bits in the unsigned ints for convenience in comparisons
+	 * later on, as we can now use the highest bit of `a - b` to check if `a <
+	 * b` or not for numbers `a, b`.
+	 */
+	r_hi &= ~((uint16_t)1u << 15);
+	r_lo &= ~((uint64_t)1u << 63);
+
+	v = 0;
+	for (k = 10; k < 26; k += 2) {
 		/*
-		 * Add 1 if r < gauss_sign[2 * k + double_mu].
+		 * Constant-time for:
+		 *     p_lo = gauss_lo[k + parity];
 		 */
-		v += (r - gauss_sign[2 * k + double_mu]) >> 63;
+		p_lo = (gauss_lo[k] & (parity - 1u)) | ((gauss_lo[k + 1] & -parity));
+
+		/*
+		 * Add 1 iff r_lo < p_lo.
+		 */
+		v += (uint8_t)((uint64_t)(r_lo - p_lo) >> 63);
 	}
 
 	/*
-	 * First value:
-	 *  - flag 'neg' is randomly selected to be 0 or 1.
-	 *  - if r/2^63 <= P(X == 0), then set v to zero.
+	 * If r_hi > 0, set v to zero, otherwise leave v as is. This is a
+	 * micro-optimization as p_hi would be zero for all k >= 5.
 	 */
-	r = prng_get_u64(rng);
-	neg = (uint32_t)(r >> 63);
-	r &= ~((uint64_t)1 << 63);
-	v &= -((gauss_sign[double_mu] - r) >> 63);
+	v = v & -((r_hi - 1) >> 15);
+
+	for (k = 0; k < 10; k += 2) {
+		/*
+		 * Constant-time for:
+		 *     p_lo = gauss_lo[k + parity];
+		 *     p_hi = gauss_hi[k + parity];
+		 */
+		p_lo = (gauss_lo[k] & (parity - 1u)) | ((gauss_lo[k + 1] & -parity));
+		p_hi = (gauss_hi[k] & (parity - 1u)) | ((gauss_hi[k + 1] & -parity));
+
+		/*
+		 * c = [[ r_lo < p_lo ]]
+		 */
+		c = (uint8_t)((uint64_t)(r_lo - p_lo) >> 63);
+
+		/*
+		 * Constant-time code to add 1 to v iff
+		 *     r_hi < p_hi or (r_hi == p_hi and c is true)
+		 * holds.
+		 */
+		c = (uint8_t)((uint16_t)(r_hi - p_hi - c) >> 15);
+		v += c;
+	}
 
 	/*
-	 * We apply the sign ('neg' flag).
-	 * If mu = 0 change v to v if neg = 0 and -v if neg = 1.
-	 * If mu = 1/2, change v to v + 1 if neg = 0 and -v if neg = 1.
+	 * Multiply by two and apply the change in support:
+	 * If parity = 0, then v = 0,2,4,...
+	 * If parity = 1, then v = 1,3,5,...
 	 */
-	v = (v ^ -neg) + neg + (~neg & double_mu);
+	v = (v << 1) | parity;
 
 	/*
-	 * Now, transform the support of the sampler from Z to 2Z - double_mu, i.e.
-	 * for mu = 1/2, we have -1, 1 with equal likelihood and -2, 2 with equal
-	 * likelihood, etc.
+	 * Apply the sign ('neg' flag). If neg = 0, this has no effect.
+	 * However, if neg = 1, this changes v into -v = (~v) + 1.
 	 */
-	w = *(int32_t *)&v;
-	return 2 * w - (int) double_mu;
+	v = (v ^ -neg) + neg;
+	return *(int8_t *)&v;
+
 }
 
 // =============================================================================
