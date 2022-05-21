@@ -6,7 +6,7 @@
 
 /* see inner.h */
 const uint32_t Zf(l2bound)[10] = {
-	0u /* unused */, 31u, 63u, 126u, 252u, 505u, 1011u, 2023u, 4047u, 8094u
+	0u /* unused */, 32u, 64u, 129u, 259u, 519u, 1039u, 2079u, 4158u, 8317u
 };
 
 /* see inner.h */

@@ -13,12 +13,6 @@
 
 #include "../keygen.c"
 
-// Simple randomness generator:
-void randombytes(unsigned char *x, unsigned long long xlen) {
-	for (; xlen -- > 0; ++x)
-		*x = ((unsigned char) rand());
-}
-
 long long time_diff(const struct timeval *begin, const struct timeval *end) {
 	return 1000000LL * (end->tv_sec - begin->tv_sec) + (end->tv_usec - begin->tv_usec);
 }
@@ -417,40 +411,117 @@ Zf(comp_encode_q10)(
 /* see inner.h for keygen */
 void
 keygen_count_fails(inner_shake256_context *rng,
-	int8_t *restrict f, int8_t *restrict g, // secret key
-	int8_t *restrict F, int8_t *restrict G, // secret key
-	fpr *restrict q00, fpr *restrict q10, fpr *restrict q11, // public key
-	unsigned logn, uint8_t *restrict tmp, int *num_fails)
+	int8_t *restrict f, int8_t *restrict g,
+	int8_t *restrict F, int8_t *restrict G,
+	fpr *restrict q00, fpr *restrict q10, fpr *restrict q11,
+	unsigned logn, uint8_t *restrict tmp,
+	int *normfg_even_fails, int *normfg_fails,
+	int *norminvq00_fails, int *NTRU_fails)
 {
-	size_t n = MKN(logn);
+	/*
+	 * Algorithm is the following:
+	 *
+	 *  - Generate f and g with the Gaussian distribution.
+	 *
+	 *  - If either N(f) or N(g) is even, try again.
+	 *
+	 *  - Solve the NTRU equation fG - gF = 1; if the solving fails, try again.
+	 *    Usual failure condition is when N(f) and N(g) are not coprime.
+	 *
+	 *  - Use Babai Reduction on F, G.
+	 *
+	 *  - Calculate the Gram matrix of the basis [[f, g], [F, G]].
+	 */
+	size_t n, u;
+	uint8_t fg_okay;
+	int32_t norm;
+	prng p;
+	fpr *rt1, *rt2, *rt3;
+
+	n = MKN(logn);
+	rt1 = (fpr *)tmp;
+	rt2 = rt1 + n;
+	rt3 = rt2 + n;
+
 	for (;;) {
-		fpr *rt1, *rt2;
-		prng p;
+		/*
+		 * The coefficients of polynomials f and g will be generated from a
+		 * discrete gaussian that draws random numbers from a fast PRNG that is
+		 * seeded from a SHAKE context ('rng').
+		 */
 		Zf(prng_init)(&p, rng);
-		poly_small_mkgauss(&p, f, logn);
-		poly_small_mkgauss(&p, g, logn);
-		if (!solve_NTRU(logn, F, G, f, g, 127, (uint32_t *)tmp)) {
-			(*num_fails)++;
+
+		/*
+		 * The coefficients of f and g are generated independently of each
+		 * other, with a discrete Gaussian distribution of standard deviation
+		 * 1.500. The expected l2-norm of (f, g) is 2n sigma^2.
+		 *
+		 * We require that N(f) and N(g) are both odd (the binary GCD in the
+		 * NTRU solver requires it), so we require (fg_okay & 1) == 1.
+		 */
+		fg_okay = poly_small_mkgauss(&p, f, logn)
+			& poly_small_mkgauss(&p, g, logn) & 1u;
+
+		if (fg_okay == 0u) {
+			(*normfg_even_fails)++;
 			continue;
 		}
 
-		rt1 = (fpr *)tmp;
-		rt2 = rt1 + n;
-		Zf(int8_to_fft)(q00, f, logn);
-		Zf(int8_to_fft)(rt1, g, logn);
-		Zf(int8_to_fft)(q11, F, logn);
-		Zf(int8_to_fft)(rt2, G, logn);
+		Zf(int8_to_fft)(rt2, f, logn);
+		Zf(int8_to_fft)(rt3, g, logn);
+		Zf(poly_invnorm2_fft)(rt1, rt2, rt3, logn);
+		Zf(iFFT)(rt1, logn);
 
-		// Optional: do Babai reduction here on (F,G) w.r.t (f,g).
-		Zf(ffBabai_reduce)(q00, rt1, q11, rt2, F, G, logn, rt2 + n);
+		if (logn == 9) {
+			/*
+			 * For n = 512, we reject a key pair if cst(1/q00) >= 0.001, as the
+			 * failure probability of decompressing a signature is bounded from
+			 * above by 1.9e-32 < 2^{-105}.  Experimentally this fails with
+			 * probability of 9%.
+			 */
+			fg_okay &= fpr_lt(rt1[0], fpr_inv(fpr_of(1000)));
+			if (fg_okay == 0u) {
+				(*norminvq00_fails)++;
+				continue;
+			}
+		}
 
-		Zf(poly_add_muladj_fft)(q10, q11, rt2, q00, rt1, logn);
-		Zf(poly_mulselfadj_fft)(q00, logn); // f*adj(f)
-		Zf(poly_mulselfadj_fft)(rt1, logn); // g*adj(g)
-		Zf(poly_add)(q00, rt1, logn);
-		Zf(poly_mulselfadj_fft)(q11, logn); // F*adj(F)
-		Zf(poly_mulselfadj_fft)(rt2, logn); // G*adj(G)
-		Zf(poly_add)(q11, rt2, logn);
+		/*
+		 * If the l2-norm of (f, g) is shorter than sigma_sec^2 * 2n, BKZ may
+		 * return a shortest vector when given the public key much faster than
+		 * other instances, so this private key is not secure to use.
+		 * Thus, set fg_okay to 0 when ||(f, g)||^2 < Zf(l2bound)[logn]/4.
+		 */
+		norm = 0;
+		for (u = 0; u < n; u++) {
+			norm += (int32_t)f[u] * (int32_t)f[u];
+			norm += (int32_t)g[u] * (int32_t)g[u];
+		}
+		norm -= (int32_t)(Zf(l2bound)[logn] >> 2);
+		fg_okay &= ((uint32_t) -norm) >> 31;
+
+		if (fg_okay == 0u) {
+			(*normfg_fails)++;
+			continue;
+		}
+
+		assert(fg_okay == 1u);
+
+		/*
+		 * Try to solve the NTRU equation for polynomials f and g, i.e. find
+		 * polynomials F, G that satisfy
+		 *
+		 *     f * G - g * F = 1 (mod X^n + 1).
+		 */
+		if (!solve_NTRU(logn, F, G, f, g, 127, (uint32_t *)tmp)) {
+			(*NTRU_fails)++;
+			continue;
+		}
+
+		Zf(make_public)(f, g, F, G, q00, q10, q11, logn, tmp);
+		/*
+		 * A valid key pair is generated.
+		 */
 		break;
 	}
 }
@@ -472,7 +543,7 @@ void measure_keygen() {
 	const int n_repetitions = 1000;
 
 	// Initialize a RNG.
-	randombytes(seed, sizeof seed);
+	Zf(get_seed)(seed, sizeof seed);
 	inner_shake256_init(&sc);
 	inner_shake256_inject(&sc, seed, sizeof seed);
 	inner_shake256_flip(&sc);
@@ -484,10 +555,12 @@ void measure_keygen() {
 	size_t sq_h00 = 0, sq_c00 = 0;
 	size_t sq_h10 = 0, sq_c10 = 0;
 
-	int fails = 0;
+	int normfg_even_fails = 0, normfg_fails = 0;
+	int norminvq00_fails = 0, NTRU_fails = 0;
 	for (int i = 0; i < n_repetitions; i++) {
 		// Generate key pair.
-		keygen_count_fails(&sc, f, g, F, G, q00, q10, q11, logn, b, &fails);
+		keygen_count_fails(&sc, f, g, F, G, q00, q10, q11, logn, b,
+			&normfg_even_fails, &normfg_fails, &norminvq00_fails, &NTRU_fails);
 
 		Zf(fft_to_int16)(q00n, q00, logn);
 		Zf(fft_to_int16)(q10n, q10, logn);
@@ -515,11 +588,27 @@ void measure_keygen() {
 	gettimeofday(&t1, NULL);
 	double kg_duration = (double)time_diff(&t0, &t1) / n_repetitions; // (in us)
 	printf("Average time per keygen: %.3f ms\n", kg_duration / 1000.0);
-	// This requires catching failed attempts
-	printf("Probability failure: %.2f%%\n", 100.0 * fails / n_repetitions);
+
+	/*
+	 * Crunch analysis on what may fail during basis completion, once f, g are
+	 * generated.
+	 */
+	int samples = n_repetitions
+		+ normfg_even_fails + normfg_fails
+		+ norminvq00_fails + NTRU_fails;
+	printf("Pr[ N(f) or N(g) even       ] = %.2f%%\n",
+		100.0 * normfg_even_fails / samples);
+	printf("Pr[ || (f,g) ||^2 too small ] = %.2f%%\n",
+		100.0 * normfg_fails / samples);
+	printf("Pr[ cst(1/q00) too large    ] = %.2f%%\n",
+		100.0 * norminvq00_fails / samples);
+	printf("Pr[ NTRU_solve fails        ] = %.2f%%\n",
+		100.0 * NTRU_fails / samples);
+	printf("Pr[ keygen works            ] = %.2f%%\n",
+		100.0 * NTRU_fails / samples);
 
 	double avg, std;
-	printf("Type | |pk| (#bytes) (h = huffman, c = falcon-compression)\n");
+	printf("\nType | |pk| (#bytes) (h = huffman, c = falcon-compression)\n");
 
 	avg = (double) tot_h00 / n_repetitions;
 	std = sqrt( (double) sq_h00 / n_repetitions - avg*avg );
@@ -536,15 +625,43 @@ void measure_keygen() {
 	printf("cq10 | %.1f (%.1f)\n", avg, std);
 }
 
-int main() {
-	// set seed
-	struct timeval tv;
-	gettimeofday(&tv, NULL);
-	unsigned seed = 1000000 * tv.tv_sec + tv.tv_usec;
-	printf("Seed: %u\n", seed);
-	srand(seed);
+void report_invq00_fail_prob() {
+	const int n_repetitions = 100 * 1000;
 
+	int8_t f[n], g[n];
+	fpr rt1[n], rt2[n], rt3[n];
+	unsigned char seed[48];
+	inner_shake256_context sc;
+	prng p;
+
+	// Initialize a RNG.
+	Zf(get_seed)(seed, sizeof seed);
+	inner_shake256_init(&sc);
+	inner_shake256_inject(&sc, seed, sizeof seed);
+	inner_shake256_flip(&sc);
+	Zf(prng_init)(&p, &sc);
+
+	int num_fails = 0;
+	for (int i = 0; i < n_repetitions; i++) {
+		poly_small_mkgauss(&p, f, logn);
+		poly_small_mkgauss(&p, g, logn);
+
+		Zf(int8_to_fft)(rt2, f, logn);
+		Zf(int8_to_fft)(rt3, g, logn);
+		Zf(poly_invnorm2_fft)(rt1, rt2, rt3, logn);
+		Zf(iFFT)(rt1, logn);
+
+		num_fails += !fpr_lt(rt1[0], fpr_inv(fpr_of(1000)));
+	}
+
+	printf("\nExperimental probability that cst(1/q00) >= 0.001 is %.6f\n",
+		((double) num_fails) / n_repetitions);
+}
+
+
+int main() {
 	init_huffman_trees();
 	measure_keygen();
+	report_invq00_fail_prob();
 	return 0;
 }

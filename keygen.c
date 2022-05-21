@@ -2310,10 +2310,10 @@ align_u32(void *base, void *data)
  * To generate the values in the table below, run `sage code/renyi.sage`.
  */
 static const uint64_t gauss_keygen[13] = {
-		6770309987939008324u, 2841792919453817158u, 824825004081786282u,
-		160853309707784581u, 20707417942076380u, 1740733985516594u,
-		94912702842187u, 3342501151111u, 75826385177u, 1106214542u, 10367241u,
-		62372u, 240u
+	6770309987939008324u, 2841792919453817158u, 824825004081786282u,
+	160853309707784581u, 20707417942076380u, 1740733985516594u,
+	94912702842187u, 3342501151111u, 75826385177u, 1106214542u, 10367241u,
+	62372u, 240u
 };
 
 static int8_t mkgauss_keygen(prng *rng)
@@ -3973,8 +3973,9 @@ Zf(keygen)(inner_shake256_context *rng,
 	 *
 	 *  - Calculate the Gram matrix of the basis [[f, g], [F, G]].
 	 */
-	size_t n;
+	size_t n, u;
 	uint8_t fg_okay;
+	int32_t norm;
 	prng p;
 	fpr *rt1, *rt2, *rt3;
 
@@ -4017,11 +4018,25 @@ Zf(keygen)(inner_shake256_context *rng,
 			fg_okay &= fpr_lt(rt1[0], fpr_inv(fpr_of(1000)));
 		}
 
+		/*
+		 * If the l2-norm of (f, g) is shorter than sigma_sec^2 * 2n, BKZ may
+		 * return a shortest vector when given the public key much faster than
+		 * other instances, so this private key is not secure to use.
+		 * Thus, set fg_okay to 0 when ||(f, g)||^2 < Zf(l2bound)[logn]/4.
+		 */
+		norm = 0;
+		for (u = 0; u < n; u++) {
+			norm += (int32_t)f[u] * (int32_t)f[u];
+			norm += (int32_t)g[u] * (int32_t)g[u];
+		}
+		norm -= (int32_t)(Zf(l2bound)[logn] >> 2);
+		fg_okay &= ((uint32_t) -norm) >> 31;
+
 		if (fg_okay == 0) {
 			/*
 			 * Generation of (f, g) failed because:
-			 * 1) N(f) was even,
-			 * 2) N(g) was even or,
+			 * 1) N(f) or N(g) was even,
+			 * 2) cst(q00) = ||(f,g)||^2 < l2bound(logn)/4, or
 			 * 3) cst(1/q00) >= 0.001.
 			 * Thus, resample f and g.
 			 */
