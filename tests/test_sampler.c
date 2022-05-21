@@ -192,6 +192,7 @@ static const uint16_t gauss_hi[10] = {
 	0x00A2, 0x002B,
 	0x000A, 0x0001,
 };
+
 static const uint64_t gauss_lo[26] = {
 	0x0C27920A04F8F267, 0x3C689D9213449DC9,
 	0x1C4FF17C204AA058, 0x7B908C81FCE3524F,
@@ -217,16 +218,14 @@ secure_gauss(prng *rng, uint8_t double_mu)
 
 	/*
 	 * We use 80 random bits to determine the value, by looking in the
-	 * cumulative probability table.
+	 * cumulative probability table. However, we only use 15 bits for r_hi so
+	 * we can check if r_hi < p_hi holds by computing (r_hi - p_hi) >> 15. This
+	 * way is better than doing a comparison to achieve constant-time
+	 * execution.
 	 */
-	r_hi = prng_get_u8(rng);
-	/*
-	 * However to do comparisons in constant between say a and b, we look at
-	 * the sign of (a - b) and therefore to compare the highest part of the
-	 * numbers, we only use 15 randomly sampled bits.
-	 */
-	r_hi = ((r_hi << 8) | prng_get_u8(rng)) & 0x7FFF;
-	r_lo = prng_get_u64(rng);
+	Zf(prng_get_80_bits)(rng, &r_hi, &r_lo);
+	r_hi &= 0x7FFF;
+
 	/*
 	 * Get the sign bit out of the lowest part
 	 */
@@ -235,34 +234,36 @@ secure_gauss(prng *rng, uint8_t double_mu)
 
 	v = 0;
 	for (k = 5; k < 13; k ++) {
-		p_lo = gauss_lo[2 * k + double_mu];
+		p_lo = gauss_lo[2*k];
+		p_lo ^= -double_mu & (gauss_lo[2*k] ^ gauss_lo[2*k+1]);
 
 		/*
-		 * add 1 iff r_lo < p_lo.
+		 * Add 1 iff r_lo < p_lo.
 		 */
 		v += (uint8_t)((uint64_t)(r_lo - p_lo) >> 63);
 	}
 
 	/*
-	 * If r_hi > 0, set v to zero, otherwise leave v as is.
+	 * If r_hi > 0, set v to zero, otherwise leave v as is. This is a
+	 * micro-optimization as p_hi would be zero for all k >= 5.
 	 */
 	v = v & -((r_hi - 1) >> 15);
 
 	for (k = 0; k < 5; k ++) {
-		p_lo = gauss_lo[2 * k + double_mu];
-		p_hi = gauss_hi[2 * k + double_mu];
+		p_lo = gauss_lo[2*k];
+		p_lo ^= -double_mu & (gauss_lo[2*k] ^ gauss_lo[2*k+1]);
+		p_hi = gauss_hi[2*k];
+		p_hi ^= -double_mu & (gauss_hi[2*k] ^ gauss_hi[2*k+1]);
 
 		/*
-		 * c = 1 if r_lo < p_lo, else c = 0
+		 * c = [[ r_lo < p_lo ]]
 		 */
 		c = (uint8_t)((uint64_t)(r_lo - p_lo) >> 63);
 
 		/*
-		 * if (r_hi < p_hi or (r_hi == p_hi and c == 1)) {
-		 *     c = 1;
-		 * } else {
-		 *     c = 0;
-		 * }
+		 * Constant-time code to add 1 to v iff
+		 *     r_hi < p_hi or (r_hi == p_hi and c == 1)
+		 * holds.
 		 */
 		c = (uint8_t)((uint16_t)(r_hi - p_hi - c) >> 15);
 		v += c;

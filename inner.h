@@ -261,6 +261,13 @@ void Zf(prng_refill)(prng *p);
 void Zf(prng_get_bytes)(prng *p, void *dst, size_t len);
 
 /*
+ * Get precisely 80 bytes from a PRNG, use this to fill a uint64_t and a
+ * uint16_t as this provides exactly the same value on both little-endian and
+ * big-endian architectures.
+ */
+void Zf(prng_get_80_bits)(prng *p, uint16_t *bit16, uint64_t *bit64);
+
+/*
  * Get a 64-bit random value from a PRNG.
  */
 static inline uint64_t
