@@ -360,7 +360,7 @@ main(int argc, char *argv[])
 	fflush(stdout);
 
 	for (unsigned logn = 1; logn <= 9; logn++) {
-		test_speed_hawk(logn, logn <= 7 ? 0.02 : threshold);
+		test_speed_hawk(logn, logn <= 7 ? 0.001 : threshold);
 	}
 
 	return 0;

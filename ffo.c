@@ -240,7 +240,7 @@ Zf(ffNearestPlane_dyn)(fpr *restrict t, fpr *restrict g, unsigned logn, fpr *res
 	/*
 	 * Second recursive invocation: target is t'_0 and gram matrix is D_00.
 	 */
-	Zf(ffNearestPlane_dyn)(g, tmp, logn - 1, tmp + n);
+	Zf(ffNearestPlane_dyn)(g, tmp, logn - 1, tmp + hn);
 	// Memory layout: t: L_10, ???; g: z_0, z_1; tmp: ???
 
 	Zf(poly_merge_fft)(t, g, g + hn, logn);

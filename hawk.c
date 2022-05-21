@@ -145,7 +145,7 @@ hawk_keygen_make(shake256_context *rng, unsigned logn, void *privkey,
 {
 	int8_t *f, *g, *F, *G;
 	int16_t *iq00, *iq10;
-	fpr *q00, *q10, *q11;
+	fpr *q00, *q10;
 	uint8_t *sk, *pk, *atmp;
 	size_t u, n, sk_len, pk_len;
 	unsigned oldcw;
@@ -169,27 +169,22 @@ hawk_keygen_make(shake256_context *rng, unsigned logn, void *privkey,
 
 	/*
 	 * Prepare buffers and generate private key.
+	 * The buffers for iq00 and iq10 overlap with those of f, g, F, G but this
+	 * is fine as we encode the public key after the private key is already
+	 * encoded.
 	 */
 	n = MKN(logn);
-	f = (int8_t *)tmp;
+
+	iq00 = align_i16(tmp);
+	iq10 = iq00 + n;
+
+	f = (int8_t *)iq00;
 	g = f + n;
 	F = g + n;
 	G = F + n;
 	q00 = align_fpr(G + n);
 	q10 = q00 + n;
-	q11 = q10 + n;
-
-	/*
-	 * These buffers overlap with f, g, F, G but this is fine as we encode the
-	 * public key after the private key is already encoded. Also, the first
-	 * byte of q00 may overlap with iq10 because of alignment, but the data
-	 * of q00[0] is first extracted and only afterwards is the last value of
-	 * iq10 set.
-	 */
-	iq00 = align_i16(tmp);
-	iq10 = iq00 + n;
-
-	atmp = (uint8_t *)(q11 + n);
+	atmp = (uint8_t *)(q10 + n);
 
 	/*
 	 * Fix the first byte of secret key and private key.
@@ -204,7 +199,7 @@ hawk_keygen_make(shake256_context *rng, unsigned logn, void *privkey,
 
 	do {
 		oldcw = set_fpu_cw(2);
-		Zf(keygen)((inner_shake256_context *)rng, f, g, F, G, q00, q10, q11,
+		Zf(keygen)((inner_shake256_context *)rng, f, g, F, G, q00, q10, NULL,
 			logn, atmp);
 		set_fpu_cw(oldcw);
 

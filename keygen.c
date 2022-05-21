@@ -2306,126 +2306,67 @@ align_u32(void *base, void *data)
  * Table below incarnates a discrete Gaussian distribution:
  *    D(x) = exp(-(x^2)/(2*sigma^2))
  * where sigma = 1.500.
- * Element 0 of the table is P(x = 0).
- * For k > 0, element k is P(x >= k+1 | x > 0).
- * Probabilities are scaled up by 2^63.
- *
- * To generate the values in the table below, run 'gen_table.cpp'.
+ * Element k (k >= 0) contains P(|X| >= k+1) scaled up by 2^63.
+ * To generate the values in the table below, run `sage code/renyi.sage`.
  */
-static const uint64_t gauss_keygen[14] = {
-	2453062048915767484u,
-	3871449519226705105u,
-	1123680878940444328u,
-	 219134710439743982u,
-	  28210262150869885u,
-	   2371447864901096u,
-	    129302080834770u,
-	      4553577562215u,
-	       103300286390u,
-	         1507025277u,
-	           14123567u,
-	              84972u,
-	                328u,
-	                  1u
+static const uint64_t gauss_keygen[13] = {
+		6770309987939008324u, 2841792919453817158u, 824825004081786282u,
+		160853309707784581u, 20707417942076380u, 1740733985516594u,
+		94912702842187u, 3342501151111u, 75826385177u, 1106214542u, 10367241u,
+		62372u, 240u
 };
 
-/*
- * Generate a random value with a Gaussian distribution centered on 0.
- * The RNG must be ready for extraction (already flipped).
- * Distribution has standard deviation 1.5.
- */
-static int
-mkgauss_keygen(prng *rng)
+static int8_t mkgauss_keygen(prng *rng)
 {
-	/*
-	 * Each iteration generates one value with the
-	 * Gaussian distribution for N = 512.
-	 *
-	 * We use two random 64-bit values. First value
-	 * decides on whether the generated value is 0, and,
-	 * if not, the sign of the value. Second random 64-bit
-	 * word is used to generate the non-zero value.
-	 *
-	 * For constant-time code we have to read the complete
-	 * table. This has negligible cost, compared with the
-	 * remainder of the keygen process (solving the NTRU
-	 * equation).
-	 */
 	uint64_t r;
-	uint32_t f, v, k, neg;
+	uint8_t v, k, neg;
 
 	/*
-	 * First value:
-	 *  - flag 'neg' is randomly selected to be 0 or 1.
-	 *  - flag 'f' is set to 1 if the generated value is zero,
-	 *    or set to 0 otherwise.
+	 * Generate a 64 bit value.
 	 */
 	r = prng_get_u64(rng);
-	neg = (uint32_t)(r >> 63);
-	r &= ~((uint64_t)1 << 63);
-	f = (uint32_t)((r - gauss_keygen[0]) >> 63);
 
 	/*
-	 * We produce a new random 63-bit integer r, and go over
-	 * the array, starting at index 1. We store in v the
-	 * index of the first array element which is not greater
-	 * than r, unless the flag f was already 1.
+	 * Get the sign bit, and unset this bit in r.
 	 */
+	neg = (uint8_t)(r >> 63);
+	r &= ~((uint64_t)1u << 63);
+
 	v = 0;
-	r = prng_get_u64(rng);
-	r &= ~((uint64_t)1 << 63);
-	for (k = 1; k < 14; k ++) {
-		uint32_t t;
-		t = (uint32_t)((r - gauss_keygen[k]) >> 63) ^ 1;
-		v |= k & -(t & (f ^ 1));
-		f |= t;
+	for (k = 0; k < 13; k++) {
+		/*
+		 * Add 1 iff r < gauss_keygen[k].
+		 */
+		v += (uint8_t)((uint64_t)(r - gauss_keygen[k]) >> 63);
 	}
 
 	/*
-	 * We apply the sign ('neg' flag). If the value is zero,
-	 * the sign has no effect.
+	 * Apply the sign ('neg' flag). If neg = 0, this has no effect.
+	 * However, if neg = 1, this changes v into -v = (~v) + 1.
 	 */
 	v = (v ^ -neg) + neg;
-	return *(int32_t *)&v;
+	return *(int8_t *)&v;
 }
 
+
 /*
- * Generate a random polynomial with a Gaussian distribution. This function
- * also makes sure that the resultant of the polynomial with phi is odd.
+ * Generate a random polynomial with a Gaussian distribution and return the XOR
+ * of coefficients modulo 2. The algebraic norm of the polynomial is odd if and
+ * only if the sum is odd.
  */
-static void
+static uint8_t
 poly_small_mkgauss(prng *rng, int8_t *f, unsigned logn)
 {
 	size_t n, u;
-	int s;
-	unsigned mod2;
+	uint8_t mod2;
 
 	n = MKN(logn);
-	mod2 = 0;
-
-	for (u = n; u -- > 1; ) {
-		do {
-			s = mkgauss_keygen(rng);
-			/*
-			 * We need the coefficient to fit within -127..+127;
-			 * realistically, this is always the case except for
-			 * the very low degrees (N = 2 or 4), for which there
-			 * is no real security anyway.
-			 */
-		} while (s < -127 || s > 127);
-		mod2 ^= (unsigned)(s & 1);
-		f[u] = (int8_t)s;
+	mod2 = 0u;
+	for (u = 0; u < n; u++) {
+		f[u] = mkgauss_keygen(rng);
+		mod2 ^= (uint8_t)f[u];
 	}
-
-	do {
-		s = mkgauss_keygen(rng);
-		/*
-		 * We need the sum of all coefficients to be 1; otherwise,
-		 * the resultant of the polynomial with X^N+1 will be even,
-		 * and the binary GCD will fail.
-		 */
-	} while (s < -127 || s > 127 || mod2 == (unsigned)(s & 1));
-	f[0] = (int8_t)s;
+	return mod2;
 }
 
 /*
@@ -3592,8 +3533,8 @@ solve_NTRU_binary_depth1(unsigned logn_top,
 }
 
 /*
- * Solving the NTRU equation, top level. Upon entry, the F and G
- * from the previous level should be in the tmp[] array.
+ * Solving the NTRU equation, top level. Upon entry, the F and G from the
+ * previous level should be in the tmp[] array.
  *
  * Returned value: 1 on success, 0 on error.
  */
@@ -3794,12 +3735,12 @@ solve_NTRU_binary_depth0(unsigned logn,
 	}
 	Zf(FFT)(rt3, logn);
 	rt2 = align_fpr(tmp, t2);
-	memmove(rt2, rt3, hn * sizeof *rt3);
+	memmove(rt2, rt3, n * sizeof *rt3);
 
 	/*
 	 * Convert F*adj(f)+G*adj(g) in FFT representation.
 	 */
-	rt3 = rt2 + hn;
+	rt3 = rt2 + n;
 	for (u = 0; u < n; u ++) {
 		rt3[u] = fpr_of(((int32_t *)t1)[u]);
 	}
@@ -3810,6 +3751,13 @@ solve_NTRU_binary_depth0(unsigned logn,
 	 * its rounded normal representation in t1.
 	 */
 	Zf(poly_div_autoadj_fft)(rt3, rt2, logn);
+
+	/*
+	 * Babai (F, G) with respect to the GSO of (f, g) using Ducas-Prest's Fast
+	 * Fourier Orthogonalization ffNP routine.
+	 */
+	Zf(ffNearestPlane_dyn)(rt3, rt2, logn, rt3 + n);
+
 	Zf(iFFT)(rt3, logn);
 	for (u = 0; u < n; u ++) {
 		t1[u] = modp_set((int32_t)fpr_rint(rt3[u]), p);
@@ -3860,8 +3808,8 @@ solve_NTRU_binary_depth0(unsigned logn,
 
 /*
  * Solve the NTRU equation, but now for q = 1. Returned value is 1 on success,
- * 0 on error.  G can be NULL, in which case that value is computed but not
- * returned.  If any of the coefficients of F and G exceeds lim (in absolute
+ * 0 on error. G can be NULL, in which case that value is computed but not
+ * returned. If any of the coefficients of F and G exceeds lim (in absolute
  * value), then 0 is returned.
  */
 static int
@@ -3871,7 +3819,6 @@ solve_NTRU(unsigned logn, int8_t *F, int8_t *G,
 	size_t n, u, depth;
 	uint32_t *ft, *gt, *Ft, *Gt, *gm;
 	uint32_t p, p0i, r, z;
-	const small_prime *primes;
 
 	n = MKN(logn);
 
@@ -3879,31 +3826,23 @@ solve_NTRU(unsigned logn, int8_t *F, int8_t *G,
 		return 0;
 	}
 
-	depth = logn;
-	if (logn <= 2) {
-		while (depth -- > 0) {
-			if (!solve_NTRU_intermediate(logn, f, g, depth, tmp)) {
-				return 0;
-			}
-		}
-	} else {
-		while (depth -- > 2) {
-			if (!solve_NTRU_intermediate(logn, f, g, depth, tmp)) {
-				return 0;
-			}
-		}
-		/*
-		 * Note: we are not making a  version of these two functions.
-		 * We can do this since the numbers are <2^64 with overwhelming probability,
-		 * and therefore, MAX_BL_* and MAX_BL_* are equal.
-		 */
-		if (!solve_NTRU_binary_depth1(logn, f, g, tmp)) {
+	for (depth = logn - 1; depth >= 2; depth --) {
+		if (!solve_NTRU_intermediate(logn, f, g, depth, tmp)) {
 			return 0;
 		}
+	}
 
-		if (!solve_NTRU_binary_depth0(logn, f, g, tmp)) {
-			return 0;
-		}
+	if (logn >= 2 && !solve_NTRU_binary_depth1(logn, f, g, tmp)) {
+		return 0;
+	}
+
+	/*
+	 * Solve the top level of the NTRU equation, assuming the F, G from
+	 * previous level are in tmp. Note that this method also does FFO Babai
+	 * reduction on (F, G).
+	 */
+	if (!solve_NTRU_binary_depth0(logn, f, g, tmp)) {
+		return 0;
 	}
 
 	/*
@@ -3917,37 +3856,30 @@ solve_NTRU(unsigned logn, int8_t *F, int8_t *G,
 	}
 
 	/*
-	 * Verify that the NTRU equation is fulfilled for q = 1. Since all elements
-	 * have short lengths, verifying modulo a small prime p works, and allows
-	 * using the NTT.
-	 *
-	 * We put Gt[] first in tmp[], and process it first, so that it does
-	 * not overlap with G[] in case we allocated it ourselves.
+	 * Verify that the NTRU equation fG - gF = 1 is fulfilled. Since all
+	 * elements have short lengths, verifying modulo a small prime p works and
+	 * allows using the NTT.
 	 */
-	Gt = tmp;
-	ft = Gt + n;
+	ft = tmp;
 	gt = ft + n;
 	Ft = gt + n;
-	gm = Ft + n;
+	Gt = Ft + n;
+	gm = Gt + n;
 
-	primes = PRIMES;
-	p = primes[0].p;
+	p = PRIMES[0].p;
 	p0i = modp_ninv31(p);
-	modp_mkgm2(gm, tmp, logn, primes[0].g, p, p0i);
-	for (u = 0; u < n; u ++) {
-		Gt[u] = modp_set(G[u], p);
-	}
+	modp_mkgm2(gm, tmp, logn, PRIMES[0].g, p, p0i);
 	for (u = 0; u < n; u ++) {
 		ft[u] = modp_set(f[u], p);
 		gt[u] = modp_set(g[u], p);
 		Ft[u] = modp_set(F[u], p);
+		Gt[u] = modp_set(G[u], p);
 	}
 	modp_NTT2(ft, gm, logn, p, p0i);
 	modp_NTT2(gt, gm, logn, p, p0i);
 	modp_NTT2(Ft, gm, logn, p, p0i);
 	modp_NTT2(Gt, gm, logn, p, p0i);
 
-	// Changed: use q=1
 	r = modp_montymul(1, 1, p, p0i);
 	for (u = 0; u < n; u ++) {
 		z = modp_sub(modp_montymul(ft[u], Gt[u], p, p0i),
@@ -3990,7 +3922,8 @@ Zf(make_public)(const int8_t *restrict f, const int8_t *restrict g,
 		size_t u, hn;
 
 		/*
-		 * Compute G = (1 + gF) / f, where all polynomials are in FFT representation.
+		 * Compute G = (1 + gF) / f, where all polynomials are in FFT
+		 * representation.
 		 */
 		hn = MKN(logn) >> 1;
 		Zf(poly_prod_fft)(bG, bg, bq11, logn);
@@ -4019,65 +3952,11 @@ Zf(make_public)(const int8_t *restrict f, const int8_t *restrict g,
 }
 
 /* see inner.h */
-int
-Zf(complete_private)(const int8_t *restrict f, const int8_t *restrict g,
-	int8_t *restrict F, int8_t *restrict G,
-	fpr *restrict q00, fpr *restrict q10, fpr *restrict q11, // public key
-	unsigned logn, uint8_t *restrict tmp)
-{
-	size_t n;
-	fpr *rt1, *rt2;
-
-	n = MKN(logn);
-	rt1 = (fpr *)tmp;
-	rt2 = rt1 + n;
-
-	/*
-	 * Try to complete the basis.
-	 */
-	if (!solve_NTRU(logn, F, G, f, g, 127, (uint32_t *)tmp)) {
-		return 0;
-	}
-
-	/*
-	 * Calculate q00, q10, q11 (in FFT representation) using
-	 * Q = B * adj(B^{T}).
-	 *
-	 */
-	Zf(int8_to_fft)(q00, f, logn);
-	Zf(int8_to_fft)(rt1, g, logn);
-	Zf(int8_to_fft)(q11, F, logn);
-	Zf(int8_to_fft)(rt2, G, logn);
-
-	/*
-	 * Perform Babai's Nearest Plane Algorithm to reduce (F, G) with
-	 * respect to (f, g).
-	 * In this case, tmp needs to have size for 6 polynomials of size 2^logn.
-	 */
-	Zf(ffBabai_reduce)(q00, rt1, q11, rt2, F, G, logn, rt2 + n);
-
-	// q10 = F*adj(f) + G*adj(g)
-	Zf(poly_add_muladj_fft)(q10, q11, rt2, q00, rt1, logn);
-
-	// q00 = f*adj(f) + g*adj(g)
-	Zf(poly_mulselfadj_fft)(q00, logn); // f*adj(f)
-	Zf(poly_mulselfadj_fft)(rt1, logn); // g*adj(g)
-	Zf(poly_add)(q00, rt1, logn);
-
-	// q11 = F*bar(F) + G*bar(G)
-	Zf(poly_mulselfadj_fft)(q11, logn); // F*adj(F)
-	Zf(poly_mulselfadj_fft)(rt2, logn); // G*adj(G)
-	Zf(poly_add)(q11, rt2, logn);
-
-	return 1;
-}
-
-/* see inner.h */
 void
 Zf(keygen)(inner_shake256_context *rng,
-	int8_t *restrict f, int8_t *restrict g, // secret key
-	int8_t *restrict F, int8_t *restrict G, // secret key
-	fpr *restrict q00, fpr *restrict q10, fpr *restrict q11, // public key
+	int8_t *restrict f, int8_t *restrict g,
+	int8_t *restrict F, int8_t *restrict G,
+	fpr *restrict q00, fpr *restrict q10, fpr *restrict q11,
 	unsigned logn, uint8_t *restrict tmp)
 {
 	/*
@@ -4094,7 +3973,15 @@ Zf(keygen)(inner_shake256_context *rng,
 	 *
 	 *  - Calculate the Gram matrix of the basis [[f, g], [F, G]].
 	 */
+	size_t n;
+	uint8_t fg_okay;
 	prng p;
+	fpr *rt1, *rt2, *rt3;
+
+	n = MKN(logn);
+	rt1 = (fpr *)tmp;
+	rt2 = rt1 + n;
+	rt3 = rt2 + n;
 
 	for (;;) {
 		/*
@@ -4105,34 +3992,39 @@ Zf(keygen)(inner_shake256_context *rng,
 		Zf(prng_init)(&p, rng);
 
 		/*
-		 * The coefficients of f and g are generated independently of each other,
-		 * with a discrete Gaussian distribution of standard deviation 1.500. The
-		 * expected l2-norm of (f, g) is 2n 1.500^2.
+		 * The coefficients of f and g are generated independently of each
+		 * other, with a discrete Gaussian distribution of standard deviation
+		 * 1.500. The expected l2-norm of (f, g) is 2n sigma^2.
 		 *
-		 * We require that N(f) and N(g) are both odd (the NTRU equation solver
-		 * requires it).
+		 * We require that N(f) and N(g) are both odd (the binary GCD in the
+		 * NTRU solver requires it), so we require (fg_okay & 1) == 1.
 		 */
-		poly_small_mkgauss(&p, f, logn);
-		poly_small_mkgauss(&p, g, logn);
+		fg_okay = poly_small_mkgauss(&p, f, logn)
+			& poly_small_mkgauss(&p, g, logn) & 1u;
 
-		Zf(int8_to_fft)(q10, f, logn);
-		Zf(int8_to_fft)(q11, g, logn);
-		Zf(poly_invnorm2_fft)(q00, q10, q11, logn);
-		Zf(iFFT)(q00, logn); // 1 / Q_00
+		Zf(int8_to_fft)(rt2, f, logn);
+		Zf(int8_to_fft)(rt3, g, logn);
+		Zf(poly_invnorm2_fft)(rt1, rt2, rt3, logn);
+		Zf(iFFT)(rt1, logn);
 
-		/*
-		 * For n = 512, we reject a key pair if cst(1 / Q_{00}) > 0.001,
-		 * as the failure probability of decompressing a signature is bounded
-		 * from above by 9.98263 10^{-32} < 2^{-64}.
-		 *
-		 * Note that experimentally, cst(1 / Q_{00}) ~ 0.00097 +/- 0.00016, so
-		 * rejection happens regularly because of this criterion.
-		 *
-		 * TODO: perhaps do this as well for other n's.
-		 */
-		if (logn == 9 && fpr_lt(fpr_inv(fpr_of(1000)), q00[0])) {
-		/* double v = *(double *)&q00[0];
-		if (!(0.005 < v && v < 0.0055)) { */
+		if (logn == 9) {
+			/*
+			 * For n = 512, we reject a key pair if cst(1/q00) >= 0.001, as the
+			 * failure probability of decompressing a signature is bounded from
+			 * above by 1.9e-32 < 2^{-105}.  Experimentally this fails with
+			 * probability of 9%.
+			 */
+			fg_okay &= fpr_lt(rt1[0], fpr_inv(fpr_of(1000)));
+		}
+
+		if (fg_okay == 0) {
+			/*
+			 * Generation of (f, g) failed because:
+			 * 1) N(f) was even,
+			 * 2) N(g) was even or,
+			 * 3) cst(1/q00) >= 0.001.
+			 * Thus, resample f and g.
+			 */
 			continue;
 		}
 
@@ -4142,11 +4034,14 @@ Zf(keygen)(inner_shake256_context *rng,
 		 *
 		 *     f * G - g * F = 1 (mod X^n + 1).
 		 */
-		if (Zf(complete_private)(f, g, F, G, q00, q10, q11, logn, tmp)) {
-			/*
-			 * A valid key pair is generated.
-			 */
-			return;
+		if (!solve_NTRU(logn, F, G, f, g, 127, (uint32_t *)tmp)) {
+			continue;
 		}
+
+		Zf(make_public)(f, g, F, G, q00, q10, q11, logn, tmp);
+		/*
+		 * A valid key pair is generated.
+		 */
+		break;
 	}
 }

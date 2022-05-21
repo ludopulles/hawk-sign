@@ -97,6 +97,49 @@ mkgauss_keygen(prng *rng)
 	return *(int32_t *)&v;
 }
 
+
+static const uint64_t gauss[13] = {
+		6770309987939008324u, 2841792919453817158u, 824825004081786282u,
+		160853309707784581u, 20707417942076380u, 1740733985516594u,
+		94912702842187u, 3342501151111u, 75826385177u, 1106214542u, 10367241u,
+		62372u, 240u
+};
+
+static int8_t secure_keygen(prng *rng)
+{
+	uint64_t r;
+	uint8_t v, k, neg;
+
+	/*
+	 * Generate a 64 bit value.
+	 * The highest bit determines the sign, say the other 63 bits give a value
+	 * r. Then v = sum_{k=0}^{12} [[ v < gauss[k] ]].
+	 */
+	r = prng_get_u64(rng);
+
+	/*
+	 * Get the sign bit, and unset this bit in r.
+	 */
+	neg = (uint8_t)(r >> 63);
+	r &= ~((uint64_t)1u << 63);
+
+	v = 0;
+	for (k = 0; k < 13; k++) {
+		/*
+		 * Add 1 iff r < gauss[k].
+		 */
+		v += (uint8_t)((uint64_t)(r - gauss[k]) >> 63);
+	}
+
+	/*
+	 * Apply the sign ('neg' flag). If neg = 0, this has no effect.
+	 * However, if neg = 1, this changes v into -v = (~v) + 1.
+	 */
+	v = (v ^ -neg) + neg;
+	return *(int8_t *)&v;
+}
+
+
 // =============================================================================
 
 /*
@@ -210,7 +253,7 @@ static const uint64_t gauss_lo[26] = {
 };
 
 static inline int8_t
-secure_gauss(prng *rng, uint8_t parity)
+secure_sign(prng *rng, uint8_t parity)
 {
 	uint16_t r_hi, p_hi;
 	uint64_t r_lo, p_lo;
@@ -339,7 +382,7 @@ int main() {
 
 	memset(freq, 0, sizeof freq);
 	for (int i = NUM_SAMPLES; i--; ) {
-		int x = mkgauss_keygen(&p);
+		int x = secure_keygen(&p);
 		freq[x + 50]++;
 	}
 
@@ -376,7 +419,7 @@ int main() {
 		memset(freq, 0, sizeof freq);
 
 		for (int i = NUM_SAMPLES; i--; ) {
-			int x = secure_gauss(&p, coset);
+			int x = secure_sign(&p, coset);
 			freq[x + 50]++;
 		}
 
