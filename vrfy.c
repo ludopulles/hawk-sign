@@ -31,8 +31,6 @@
 
 #include "inner.h"
 
-#include <assert.h>
-
 /*
  * The hash of a message has two parts: (h0, h1), where each is a polynomial of
  * length n with coefficients in {0,1}. However, these bits are collected into
@@ -42,7 +40,7 @@
 #define SECOND_HASH(h, logn) \
 	((h) + ((logn) <= 3 ? 1u : 1u << ((logn) - 3)))
 
-/**
+/*
  * If s != NULL, set the polynomial p equal to h - 2 * s.
  * Otherwise, set p equal to h.
  * Returns the polynomial in FFT format.
@@ -55,8 +53,8 @@ hash_to_fft(fpr *p, const uint8_t *h, const int16_t *s, unsigned logn)
 
 	n = MKN(logn);
 	if (logn <= 3) {
-		for (v = 0; v < n; v ++) {
-			p[v] = fpr_of(((h[0] >> v) & 1) - (s == NULL ? 0 : 2 * s[v]));
+		for (u = 0; u < n; u ++) {
+			p[u] = fpr_of(((h[0] >> u) & 1) - (s == NULL ? 0 : 2 * s[u]));
 		}
 	} else {
 		for (u = 0; u < n; ) {
@@ -193,7 +191,8 @@ Zf(verify_simple)(const uint8_t *restrict h,
 	 */
 	hash_to_fft(t0, h, s0, logn);
 	hash_to_fft(t1, SECOND_HASH(h, logn), s1, logn);
-	return has_short_trace(t0, t1, q00, q10, q11, logn);
+	return Zf(in_positive_half)(s1, SECOND_HASH(h, logn), logn)
+		&& has_short_trace(t0, t1, q00, q10, q11, logn);
 }
 
 /* see inner.h */
@@ -223,8 +222,8 @@ Zf(verify_simple_rounding)(const uint8_t *restrict h,
 	 */
 	if (logn <= 3) {
 		h0 = h[0];
-		for (v = 0; v < n; v ++) {
-			s0[v] = fpr_rint(fpr_half(fpr_add(fpr_of(h0 & 1), t0[v])));
+		for (u = 0; u < n; u ++) {
+			s0[u] = fpr_rint(fpr_half(fpr_add(fpr_of(h0 & 1), t0[u])));
 			h0 >>= 1;
 		}
 	} else {
@@ -238,7 +237,8 @@ Zf(verify_simple_rounding)(const uint8_t *restrict h,
 	}
 
 	hash_to_fft(t0, h, s0, logn);
-	return has_short_trace(t0, t1, q00, q10, q11, logn);
+	return Zf(in_positive_half)(s1, SECOND_HASH(h, logn), logn)
+		&& has_short_trace(t0, t1, q00, q10, q11, logn);
 }
 
 /* see inner.h */
@@ -279,7 +279,8 @@ Zf(verify_nearest_plane)(const uint8_t *restrict h,
 	/*
 	 * Now run the casual verification.
 	 */
-	return Zf(verify_simple)(h, s0, s1, q00, q10, q11, logn, tmp);
+	return Zf(in_positive_half)(s1, SECOND_HASH(h, logn), logn)
+		&& Zf(verify_simple)(h, s0, s1, q00, q10, q11, logn, tmp);
 }
 
 /* see inner.h */
@@ -309,9 +310,9 @@ Zf(verify_simple_rounding_fft)(const uint8_t *restrict h,
 	 */
 	if (logn <= 3) {
 		h0 = h[0];
-		for (v = 0; v < n; v ++) {
-			s0w = fpr_rint(fpr_half(fpr_add(fpr_of(h0 & 1), t0[v])));
-			t0[v] = fpr_of((h0 & 1) - 2 * s0w);
+		for (u = 0; u < n; u ++) {
+			s0w = fpr_rint(fpr_half(fpr_add(fpr_of(h0 & 1), t0[u])));
+			t0[u] = fpr_of((h0 & 1) - 2 * s0w);
 			h0 >>= 1;
 		}
 	} else {
@@ -326,7 +327,8 @@ Zf(verify_simple_rounding_fft)(const uint8_t *restrict h,
 	}
 	Zf(FFT)(t0, logn);
 
-	return has_short_trace(t0, t1, q00, q10, q11, logn);
+	return Zf(in_positive_half)(s1, SECOND_HASH(h, logn), logn)
+		&& has_short_trace(t0, t1, q00, q10, q11, logn);
 }
 
 /* ============================================================================
@@ -766,7 +768,7 @@ modp_iNTT2(uint32_t *a, const uint32_t *igm, unsigned logn,
 	}
 }
 
-/**
+/*
  * Set the polynomial a equal to h - 2 * s and converts it to Montgomery NTT
  * representation.
  */
@@ -782,8 +784,8 @@ hash_to_i32(uint32_t *a, const uint8_t *h, const int16_t *s,
 	b = (int32_t *)a;
 
 	if (logn <= 3) {
-		for (v = 0; v < n; v ++) {
-			a[v] = ((h[0] >> v) & 1) - 2 * s[v];
+		for (u = 0; u < n; u ++) {
+			a[u] = ((h[0] >> u) & 1) - 2 * s[u];
 		}
 	} else {
 		for (u = 0; u < n; ) {
@@ -804,16 +806,13 @@ hash_to_i32(uint32_t *a, const uint8_t *h, const int16_t *s,
 	}
 }
 
-// Assumption: Zf(l2bound)[logn] * n/2 < p.
+/* see inner.h */
 int
 Zf(verify_simple_NTT)(const uint8_t *restrict h,
 	const int16_t *restrict s0, const int16_t *restrict s1,
 	int16_t *restrict q00, int16_t *restrict q10,
 	unsigned logn, uint8_t *restrict tmp)
 {
-	// O(n^2) algorithm for multiplication:
-	// c(X) = a(X) b(X), where
-	// c_{k} = \sum_{i=0}^{n-1} a_i b_{k - i}, with b_{-i} = -b_{n-i} (i > 0).
 	uint32_t norm, norm0, term, p, p0i, R, R2;
 	uint32_t *gm, *igm, *q00_i32, *q10_i32, *q11_i32, *s0_i32, *s1_i32;
 	int32_t *q11;
@@ -927,6 +926,7 @@ Zf(verify_simple_NTT)(const uint8_t *restrict h,
 		norm0 |= -((norm - norm0) >> 31);
 	}
 
-	return (norm0 & (hn - 1)) == 0
+	return Zf(in_positive_half)(s1, SECOND_HASH(h, logn), logn)
+		&& (norm0 & (hn - 1)) == 0
 		&& (norm0 >> (logn - 1)) <= Zf(l2bound)[logn];
 }

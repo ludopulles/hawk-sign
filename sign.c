@@ -34,6 +34,8 @@
 // =============================================================================
 
 /*
+ * Discrete Gaussian Sampler
+ *
  * The table below contains the cumulative probability table for two discrete
  * gaussian distribution. The first is a discrete gaussian on 2Z with standard
  * deviation 2 sigma, and the other is a discrete gaussian on 2Z + 1 with the
@@ -176,6 +178,36 @@ mkgauss_sign(prng *rng, uint8_t parity)
 #define SECOND_HASH(h, logn) \
 	((h) + ((logn) <= 3 ? 1u : 1u << ((logn) - 3)))
 
+/*
+ * When flag = 1, this does nothing.
+ * When flag = 0, this replaces s by h - s.
+ */
+static void
+conditional_flip(uint16_t flag, int16_t *s, const uint8_t *h, unsigned logn)
+{
+	size_t n, u, v;
+	int16_t value;
+	uint8_t hash;
+
+	n = MKN(logn);
+
+	if (logn <= 3) {
+		for (u = 0; u < n; u ++) {
+			value = (int16_t)((h[0] >> u) & 1) - 2 * s[u];
+			s[u] += value & (flag - 1);
+		}
+	} else {
+		for (u = 0; u < n; ) {
+			hash = *h++;
+			for (v = 0; v < 8; v ++, u ++) {
+				value = (int16_t)(hash & 1) - 2 * s[u];
+				s[u] += value & (flag - 1);
+				hash >>= 1;
+			}
+		}
+	}
+}
+
 static void
 hash_to_fft(fpr *p, const uint8_t *h, unsigned logn)
 {
@@ -185,8 +217,8 @@ hash_to_fft(fpr *p, const uint8_t *h, unsigned logn)
 	n = MKN(logn);
 
 	if (logn <= 3) {
-		for (v = 0; v < n; v ++) {
-			p[v] = fpr_of((h[0] >> v) & 1);
+		for (u = 0; u < n; u ++) {
+			p[u] = fpr_of((h[0] >> u) & 1);
 		}
 	} else {
 		for (u = 0; u < n; ) {
@@ -215,9 +247,9 @@ noise_to_lattice(int16_t *s, const uint8_t *h, const fpr *noise, unsigned logn)
 
 	n = MKN(logn);
 	if (logn <= 3) {
-		for (v = 0; v < n; v ++) {
-			x = fpr_rint(noise[v]);
-			s[v] = (int16_t)((int64_t)((h[0] >> v) & 1) - x) / 2;
+		for (u = 0; u < n; u ++) {
+			x = fpr_rint(noise[u]);
+			s[u] = (int16_t)((int64_t)((h[0] >> u) & 1) - x) / 2;
 		}
 	} else {
 		for (u = 0; u < n; ) {
@@ -340,6 +372,7 @@ do_sign_dyn(prng *rng, int16_t *restrict s1,
 {
 	size_t n, u;
 	fpr *x0, *x1, *bf, *bg, *bF, *bG;
+	uint16_t flag;
 
 	n = MKN(logn);
 	bf = (fpr *)tmp;
@@ -383,6 +416,10 @@ do_sign_dyn(prng *rng, int16_t *restrict s1,
 	Zf(poly_add_mul_fft)(bF, x0, x1, bg, bf, logn);
 	Zf(iFFT)(bF, logn);
 	noise_to_lattice(s1, SECOND_HASH(h, logn), bF, logn);
+
+	flag = (uint16_t)Zf(in_positive_half)(s1, SECOND_HASH(h, logn), logn);
+	conditional_flip(flag, s1, SECOND_HASH(h, logn), logn);
+
 	return 1;
 }
 
@@ -395,6 +432,7 @@ do_sign(prng *rng, int16_t *restrict s1,
 	size_t n, u;
 	const fpr *bf, *bg, *bF, *bG, *invq00;
 	fpr *x0, *x1, *res;
+	uint16_t flag;
 
 	n = MKN(logn);
 
@@ -439,6 +477,10 @@ do_sign(prng *rng, int16_t *restrict s1,
 	Zf(poly_add_mul_fft)(res, x0, x1, bg, bf, logn);
 	Zf(iFFT)(res, logn);
 	noise_to_lattice(s1, SECOND_HASH(h, logn), res, logn);
+
+	flag = (uint16_t)Zf(in_positive_half)(s1, SECOND_HASH(h, logn), logn);
+	conditional_flip(flag, s1, SECOND_HASH(h, logn), logn);
+
 	return 1;
 }
 
@@ -465,7 +507,7 @@ do_sign_simple(prng *rng,
 {
 	size_t n, u, v, w;
 	uint8_t h0, h1;
-	uint16_t *bf, *bg, *bF, *bG, *x0, *x1;
+	uint16_t flag, *bf, *bg, *bF, *bG, *x0, *x1;
 	int32_t norm, z;
 
 	n = MKN(logn);
@@ -500,9 +542,9 @@ do_sign_simple(prng *rng,
 	 * Put the hash (h0, h1) inside x0, x1.
 	 */
 	if (logn <= 3) {
-		for (v = 0; v < n; v ++) {
-			x0[v] = (h[0] >> v) & 1;
-			x1[v] = (h[1] >> v) & 1;
+		for (u = 0; u < n; u ++) {
+			x0[u] = (h[0] >> u) & 1;
+			x1[u] = (h[1] >> u) & 1;
 		}
 	} else {
 		for (u = w = 0; u < n; w ++) {
@@ -611,9 +653,9 @@ do_sign_simple(prng *rng,
 
 	n = MKN(logn);
 	if (logn <= 3) {
-		for (v = 0; v < n; v ++) {
-			s0[v] = (((h[0] >> v) & 1) - s0[v]) / 2;
-			s1[v] = (((h[1] >> v) & 1) - s1[v]) / 2;
+		for (u = 0; u < n; u ++) {
+			s0[u] = (((h[0] >> u) & 1) - s0[u]) / 2;
+			s1[u] = (((h[1] >> u) & 1) - s1[u]) / 2;
 		}
 	} else {
 		for (u = w = 0; u < n; w ++) {
@@ -628,6 +670,10 @@ do_sign_simple(prng *rng,
 		}
 	}
 
+	flag = (uint16_t)Zf(in_positive_half)(s1, SECOND_HASH(h, logn), logn);
+	conditional_flip(flag, s0, h, logn);
+	conditional_flip(flag, s1, SECOND_HASH(h, logn), logn);
+
 	return 1;
 }
 
@@ -640,7 +686,7 @@ do_sign_NTT(prng *rng, int16_t *restrict s1,
 {
 	size_t n, u, v, w;
 	uint8_t h0, h1;
-	uint16_t *bf, *bg, *bF, *bG, *x0, *x1;
+	uint16_t flag, *bf, *bg, *bF, *bG, *x0, *x1;
 	int32_t norm, z;
 
 	n = MKN(logn);
@@ -675,9 +721,9 @@ do_sign_NTT(prng *rng, int16_t *restrict s1,
 	 * Put the hash (h0, h1) inside x0, x1.
 	 */
 	if (logn <= 3) {
-		for (v = 0; v < n; v ++) {
-			x0[v] = (h[0] >> v) & 1;
-			x1[v] = (h[1] >> v) & 1;
+		for (u = 0; u < n; u ++) {
+			x0[u] = (h[0] >> u) & 1;
+			x1[u] = (h[1] >> u) & 1;
 		}
 	} else {
 		for (u = w = 0; u < n; w ++) {
@@ -776,8 +822,8 @@ do_sign_NTT(prng *rng, int16_t *restrict s1,
 
 	n = MKN(logn);
 	if (logn <= 3) {
-		for (v = 0; v < n; v ++) {
-			s1[v] = (((h[1] >> v) & 1) - s1[v]) / 2;
+		for (u = 0; u < n; u ++) {
+			s1[u] = (((h[1] >> u) & 1) - s1[u]) / 2;
 		}
 	} else {
 		for (u = w = 0; u < n; w ++) {
@@ -788,6 +834,9 @@ do_sign_NTT(prng *rng, int16_t *restrict s1,
 			}
 		}
 	}
+
+	flag = (uint16_t)Zf(in_positive_half)(s1, SECOND_HASH(h, logn), logn);
+	conditional_flip(flag, s1, SECOND_HASH(h, logn), logn);
 
 	return 1;
 }

@@ -605,7 +605,7 @@ void measure_keygen() {
 	printf("Pr[ NTRU_solve fails        ] = %.2f%%\n",
 		100.0 * NTRU_fails / samples);
 	printf("Pr[ keygen works            ] = %.2f%%\n",
-		100.0 * NTRU_fails / samples);
+		100.0 * n_repetitions / samples);
 
 	double avg, std;
 	printf("\nType | |pk| (#bytes) (h = huffman, c = falcon-compression)\n");

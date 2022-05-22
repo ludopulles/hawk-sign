@@ -525,6 +525,17 @@ void Zf(int8_to_fft)(fpr *p, const int8_t *x, unsigned logn);
  */
 void Zf(fft_to_int16)(int16_t *x, fpr *p, unsigned logn);
 
+/*
+ * On input s and h both of length 2^logn, find the first position i for which
+ * h_i != 2 s_i holds and return whether we have h_i - 2 s_i > 0 here.
+ *
+ * One needs to do this check on the second half of a signature during signing
+ * and verification, as otherwise given a valid signature (s_0, s_1) for a hash
+ * (h_0, h_1), one could forge a signature on the same message by using
+ *     (h_0 - s_0, h_1 - s_1).
+ */
+int Zf(in_positive_half)(const int16_t *s, const uint8_t *h, unsigned logn);
+
 /* ==================================================================== */
 /*
  * Coding & decoding (compress.c)
@@ -1091,6 +1102,7 @@ int Zf(verify_simple_rounding_fft)(const uint8_t *restrict h,
 /*
  * Verify if a signature (s0, s1) is valid for a hashed message h of length n /
  * 4 bytes. This method does not use any floating point operations.
+ * Assumes Zf(l2bound)[logn] * n/2 < 2^30.
  *
  * Note: tmp[] must have space for at least 32 * 2^logn bytes.
  */
