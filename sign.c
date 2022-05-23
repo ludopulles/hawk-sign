@@ -373,6 +373,7 @@ do_sign_dyn(prng *rng, int16_t *restrict s1,
 	size_t n, u;
 	fpr *x0, *x1, *bf, *bg, *bF, *bG;
 	uint16_t flag;
+	int norm_okay;
 
 	n = MKN(logn);
 	bf = (fpr *)tmp;
@@ -384,9 +385,7 @@ do_sign_dyn(prng *rng, int16_t *restrict s1,
 
 	construct_basis(f, g, F, G, bf, bg, bF, bG, logn);
 
-	if (!sample_short(rng, x0, x1, bf, bg, bF, bG, h, logn)) {
-		return 0;
-	}
+	norm_okay = sample_short(rng, x0, x1, bf, bg, bF, bG, h, logn);
 
 	/*
 	 * Compute *twice* the rounding error, which is given by:
@@ -395,7 +394,12 @@ do_sign_dyn(prng *rng, int16_t *restrict s1,
 	 *
 	 * If the above quantity is in the (-1, 1)^n box, simple rounding works for
 	 * recovering s0. Otherwise, reject this signature.
+	 *
+	 * Currently, this check is NOT performed, as the probability of a failure
+	 * to happen here is (heuristically) less than 2^{-105}.
 	 */
+
+/*
 	Zf(poly_add_muladj_fft)(bF, x0, x1, bf, bg, logn);
 	Zf(poly_invnorm2_fft)(bG, bf, bg, logn);
 	Zf(poly_mul_autoadj_fft)(bF, bG, logn);
@@ -406,6 +410,7 @@ do_sign_dyn(prng *rng, int16_t *restrict s1,
 			return 0;
 		}
 	}
+*/
 
 	/*
 	 * Compute s1 in (s0, s1) = ((h0, h1) - B^{-1} (x0, x1)) / 2, so
@@ -420,7 +425,7 @@ do_sign_dyn(prng *rng, int16_t *restrict s1,
 	flag = (uint16_t)Zf(in_positive_half)(s1, SECOND_HASH(h, logn), logn);
 	conditional_flip(flag, s1, SECOND_HASH(h, logn), logn);
 
-	return 1;
+	return norm_okay;
 }
 
 /* helper for Zf(sign) */
@@ -433,6 +438,7 @@ do_sign(prng *rng, int16_t *restrict s1,
 	const fpr *bf, *bg, *bF, *bG, *invq00;
 	fpr *x0, *x1, *res;
 	uint16_t flag;
+	int norm_okay;
 
 	n = MKN(logn);
 
@@ -446,9 +452,7 @@ do_sign(prng *rng, int16_t *restrict s1,
 	x1 = x0 + n;
 	res = x1 + n;
 
-	if (!sample_short(rng, x0, x1, bf, bg, bF, bG, h, logn)) {
-		return 0;
-	}
+	norm_okay = sample_short(rng, x0, x1, bf, bg, bF, bG, h, logn);
 
 	/*
 	 * Compute *twice* the rounding error, which is given by:
@@ -457,7 +461,12 @@ do_sign(prng *rng, int16_t *restrict s1,
 	 *
 	 * If the above quantity is in the (-1, 1)^n box, simple rounding works for
 	 * recovering s0. Otherwise, reject this signature.
+	 *
+	 * Currently, this check is NOT performed, as the probability of a failure
+	 * to happen here is (heuristically) less than 2^{-105}.
 	 */
+
+/*
 	Zf(poly_add_muladj_fft)(res, x0, x1, bf, bg, logn);
 	Zf(poly_mul_autoadj_fft)(res, invq00, logn);
 	Zf(iFFT)(res, logn);
@@ -467,6 +476,7 @@ do_sign(prng *rng, int16_t *restrict s1,
 			return 0;
 		}
 	}
+*/
 
 	/*
 	 * Compute s1 in (s0, s1) = ((h0, h1) - B^{-1} (x0, x1)) / 2, so
@@ -481,7 +491,7 @@ do_sign(prng *rng, int16_t *restrict s1,
 	flag = (uint16_t)Zf(in_positive_half)(s1, SECOND_HASH(h, logn), logn);
 	conditional_flip(flag, s1, SECOND_HASH(h, logn), logn);
 
-	return 1;
+	return norm_okay;
 }
 
 
@@ -601,20 +611,6 @@ do_sign_simple(prng *rng,
 		norm += z*z;
 	}
 
-	/*
-	 * Test whether the l2-norm of (x0, x1) is below the given bound. The
-	 * code below uses only 32-bit operations to compute the squared norm,
-	 * since the max. value is 2n * 128^2 <= 2^24 (when logn <= 9).
-	 * For a large enough verification margin, it is unlikely that the
-	 * norm of the gaussian (x0, x1) is too large.
-	 */
-	if ((uint32_t)norm > Zf(l2bound)[logn]) {
-		return 0;
-	}
-
-	/*
-	 * Norm of (x0, x1) is acceptable.
-	 */
 	Zf(mq_NTT)(x0, logn);
 	Zf(mq_NTT)(x1, logn);
 
@@ -674,7 +670,7 @@ do_sign_simple(prng *rng,
 	conditional_flip(flag, s0, h, logn);
 	conditional_flip(flag, s1, SECOND_HASH(h, logn), logn);
 
-	return 1;
+	return (uint32_t)norm <= Zf(l2bound)[logn];
 }
 
 /* helper for Zf(sign_NTT) */
@@ -780,20 +776,6 @@ do_sign_NTT(prng *rng, int16_t *restrict s1,
 		norm += z*z;
 	}
 
-	/*
-	 * Test whether the l2-norm of (x0, x1) is below the given bound. The
-	 * code below uses only 32-bit operations to compute the squared norm,
-	 * since the max. value is 2n * 128^2 <= 2^24 (when logn <= 9).
-	 * For a large enough verification margin, it is unlikely that the
-	 * norm of the gaussian (x0, x1) is too large.
-	 */
-	if ((uint32_t)norm > Zf(l2bound)[logn]) {
-		return 0;
-	}
-
-	/*
-	 * Norm of (x0, x1) is acceptable.
-	 */
 	Zf(mq_NTT)(x0, logn);
 	Zf(mq_NTT)(x1, logn);
 
@@ -838,7 +820,7 @@ do_sign_NTT(prng *rng, int16_t *restrict s1,
 	flag = (uint16_t)Zf(in_positive_half)(s1, SECOND_HASH(h, logn), logn);
 	conditional_flip(flag, s1, SECOND_HASH(h, logn), logn);
 
-	return 1;
+	return (uint32_t)norm <= Zf(l2bound)[logn];
 }
 
 /* =================================================================== */
