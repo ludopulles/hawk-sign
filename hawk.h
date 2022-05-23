@@ -427,7 +427,14 @@ extern const size_t HAWK_PUBKEY_SIZE[10];
  * Size of an expanded private key.
  */
 #define HAWK_EXPANDEDKEY_SIZE(logn) \
-	((36u << (logn)) + 8)
+	((32u << (logn)) + 8)
+
+/*
+ * When performing decompression checks, one also needs 1/q00 as part of the
+ * expanded private key, giving the following size:
+ *
+ * #define HAWK_EXPANDEDKEY_SIZE(logn) ((36u << (logn)) + 8)
+ */
 
 /*
  * Temporary buffer size for verifying a signature.

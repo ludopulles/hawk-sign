@@ -370,7 +370,7 @@ do_sign_dyn(prng *rng, int16_t *restrict s1,
 	const int8_t *restrict F, const int8_t *restrict G,
 	const uint8_t *restrict h, unsigned logn, uint8_t *restrict tmp)
 {
-	size_t n, u;
+	size_t n;
 	fpr *x0, *x1, *bf, *bg, *bF, *bG;
 	uint16_t flag;
 	int norm_okay;
@@ -434,8 +434,8 @@ do_sign(prng *rng, int16_t *restrict s1,
 	const fpr *restrict expanded_seckey, const uint8_t *restrict h,
 	unsigned logn, uint8_t *restrict tmp)
 {
-	size_t n, u;
-	const fpr *bf, *bg, *bF, *bG, *invq00;
+	size_t n;
+	const fpr *bf, *bg, *bF, *bG;
 	fpr *x0, *x1, *res;
 	uint16_t flag;
 	int norm_okay;
@@ -446,7 +446,6 @@ do_sign(prng *rng, int16_t *restrict s1,
 	bg = bf + n;
 	bF = bg + n;
 	bG = bF + n;
-	invq00 = bG + n;
 
 	x0 = (fpr *)tmp;
 	x1 = x0 + n;
@@ -467,6 +466,8 @@ do_sign(prng *rng, int16_t *restrict s1,
 	 */
 
 /*
+	const fpr *invq00 = bG + n;
+
 	Zf(poly_add_muladj_fft)(res, x0, x1, bf, bg, logn);
 	Zf(poly_mul_autoadj_fft)(res, invq00, logn);
 	Zf(iFFT)(res, logn);
@@ -831,20 +832,25 @@ Zf(expand_seckey)(fpr *restrict expanded_seckey,
 	const int8_t *f, const int8_t *g, const int8_t *F, unsigned logn)
 {
 	size_t n;
-	fpr *bf, *bg, *bF, *bG, *invq00;
+	fpr *bf, *bg, *bF, *bG;
 
 	n = MKN(logn);
 	bf = expanded_seckey;
 	bg = bf + n;
 	bF = bg + n;
 	bG = bF + n;
-	invq00 = bG + n;
 
 	/*
 	 * We load the private key elements directly into the 2x2 matrix B.
 	 */
 	construct_basis(f, g, F, NULL, bf, bg, bF, bG, logn);
-	Zf(poly_invnorm2_fft)(invq00, bf, bg, logn);
+
+	/*
+	 * Not needed as there is no decompression check:
+	 *
+	 * fpr *invq00 = bG + n;
+	 * Zf(poly_invnorm2_fft)(invq00, bf, bg, logn);
+	 */
 }
 
 /*
