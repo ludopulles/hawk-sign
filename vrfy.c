@@ -174,7 +174,7 @@ Zf(complete_pubkey)(const int16_t *restrict iq00, const int16_t *restrict iq10,
 
 /* see inner.h */
 int
-Zf(verify_simple)(const uint8_t *restrict h,
+Zf(uncompressed_verify)(const uint8_t *restrict h,
 	const int16_t *restrict s0, const int16_t *restrict s1,
 	const fpr *restrict q00, const fpr *restrict q10, const fpr *restrict q11,
 	unsigned logn, uint8_t *restrict tmp)
@@ -280,7 +280,7 @@ Zf(verify_nearest_plane)(const uint8_t *restrict h,
 	 * Now run the casual verification.
 	 */
 	return Zf(in_positive_half)(s1, SECOND_HASH(h, logn), logn)
-		&& Zf(verify_simple)(h, s0, s1, q00, q10, q11, logn, tmp);
+		&& Zf(uncompressed_verify)(h, s0, s1, q00, q10, q11, logn, tmp);
 }
 
 /* see inner.h */
@@ -332,7 +332,7 @@ Zf(verify_simple_rounding_fft)(const uint8_t *restrict h,
 }
 
 /* ============================================================================
- * Below is all the code necessary for the NTT-version of Zf(verify_simple).
+ * Below is all the code necessary for Zf(uncompressed_verify_NTT).
  * Note that a lot of it is duplicate code with the code in keygen.c
  * ==========================================================================*/
 
@@ -808,9 +808,9 @@ hash_to_i32(uint32_t *a, const uint8_t *h, const int16_t *s,
 
 /* see inner.h */
 int
-Zf(verify_simple_NTT)(const uint8_t *restrict h,
+Zf(uncompressed_verify_NTT)(const uint8_t *restrict h,
 	const int16_t *restrict s0, const int16_t *restrict s1,
-	int16_t *restrict q00, int16_t *restrict q10,
+	const int16_t *restrict q00, const int16_t *restrict q10,
 	unsigned logn, uint8_t *restrict tmp)
 {
 	uint32_t norm, norm0, term, p, p0i, R, R2;

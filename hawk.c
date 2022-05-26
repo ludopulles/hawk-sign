@@ -132,6 +132,8 @@ align_fpr(void *tmp)
 	return (fpr *)atmp;
 }
 
+/* ========================================================================= */
+
 /* see hawk.h */
 int
 hawk_keygen_make(shake256_context *rng, unsigned logn, void *seckey,
@@ -163,9 +165,9 @@ hawk_keygen_make(shake256_context *rng, unsigned logn, void *seckey,
 	}
 
 	/*
-	 * Prepare buffers and generate private key.
+	 * Prepare buffers and generate secret key.
 	 * The buffers for iq00 and iq10 overlap with those of f, g, F, G but this
-	 * is fine as we encode the public key after the private key is already
+	 * is fine as we encode the public key after the secret key is already
 	 * encoded.
 	 */
 	n = MKN(logn);
@@ -182,7 +184,7 @@ hawk_keygen_make(shake256_context *rng, unsigned logn, void *seckey,
 	atmp = (uint8_t *)(q10 + n);
 
 	/*
-	 * Fix the first byte of secret key and private key.
+	 * Fix the first byte of secret key and secret key.
 	 */
 	sk = seckey;
 	sk[0] = 0x50 + logn;
@@ -201,7 +203,7 @@ hawk_keygen_make(shake256_context *rng, unsigned logn, void *seckey,
 		sk_len = Zf(encode_seckey)(sk + 1, HAWK_SECKEY_SIZE(logn) - 1, f, g, F, logn);
 
 		/*
-		 * Destroy the private key basis [[f,g], [F,G]] to store q00, q10.
+		 * Destroy the secret key basis [[f,g], [F,G]] to store q00, q10.
 		 */
 		Zf(fft_to_int16)(iq00, q00, logn);
 		Zf(fft_to_int16)(iq10, q10, logn);
@@ -216,7 +218,7 @@ hawk_keygen_make(shake256_context *rng, unsigned logn, void *seckey,
 
 	/*
 	 * Do not forgot that there is one header byte in sk and pk. Pad the secret
-	 * and private key with zeros up to the key size.
+	 * and secret key with zeros up to the key size.
 	 */
 	for (u = 1; u < HAWK_SECKEY_SIZE(logn); u ++) {
 		// if (u >= 1 + sk_len) sk[u] = 0;
@@ -246,8 +248,7 @@ hawk_make_public(void *pubkey, size_t pubkey_len, const void *seckey,
 	fpr *q00, *q10;
 
 	/*
-	 * Get degree from private key header byte, and check
-	 * parameters.
+	 * Get degree from secret key header byte, and check parameters.
 	 */
 	if (seckey_len == 0) {
 		return HAWK_ERR_FORMAT;
@@ -266,7 +267,7 @@ hawk_make_public(void *pubkey, size_t pubkey_len, const void *seckey,
 	}
 
 	/*
-	 * Decode private key (f and g).
+	 * Decode secret key (f and g).
 	 */
 	n = MKN(logn);
 	f = (int8_t *)tmp;
@@ -326,7 +327,7 @@ hawk_get_logn(const void *obj, size_t len)
 
 /* see hawk.h */
 int
-hawk_expand_privkey(void *expanded_key, size_t expanded_key_len,
+hawk_expand_seckey(void *expanded_key, size_t expanded_key_len,
 	const void *seckey, size_t seckey_len, void *tmp, size_t tmp_len)
 {
 	unsigned logn, oldcw;
@@ -336,8 +337,7 @@ hawk_expand_privkey(void *expanded_key, size_t expanded_key_len,
 	fpr *expkey;
 
 	/*
-	 * Get degree from private key header byte, and check
-	 * parameters.
+	 * Get degree from secret key header byte, and check parameters.
 	 */
 	if (seckey_len == 0) {
 		return HAWK_ERR_FORMAT;
@@ -357,7 +357,7 @@ hawk_expand_privkey(void *expanded_key, size_t expanded_key_len,
 	}
 
 	/*
-	 * Decode private key elements, and complete private key.
+	 * Decode secret key elements, and complete secret key.
 	 */
 	n = MKN(logn);
 	f = (int8_t *)tmp;
@@ -369,7 +369,7 @@ hawk_expand_privkey(void *expanded_key, size_t expanded_key_len,
 	}
 
 	/*
-	 * Expand private key.
+	 * Expand secret key.
 	 */
 	*(uint8_t *)expanded_key = logn;
 	expkey = align_fpr((uint8_t *)expanded_key + 1);
@@ -381,39 +381,93 @@ hawk_expand_privkey(void *expanded_key, size_t expanded_key_len,
 	return 0;
 }
 
+/* ========================================================================= */
+
 /* see hawk.h */
 int
-hawk_sign_start(shake256_context *rng, void *salt, const void *obj, shake256_context *hash_data)
+hawk_uncompressed_sign(shake256_context *rng, void *sig, size_t *sig_len, int sig_type,
+	const void *seckey, size_t seckey_len, const void *data, size_t data_len,
+	void *tmp, size_t tmp_len)
 {
-	unsigned logn, salt_len;
+	shake256_context hd;
+	uint8_t salt[40];
 
-	logn = *(const uint8_t *)obj & 0x0F;
-	if (logn < 1 || logn > 9) {
-		return HAWK_ERR_FORMAT;
-	}
-	salt_len = HAWK_SALT_SIZE(logn);
+	hawk_sign_start(&hd);
+	shake256_inject(&hd, data, data_len);
+	return hawk_uncompressed_sign_finish(rng, sig, sig_len, sig_type,
+		seckey, seckey_len, &hd, salt, tmp, tmp_len);
+}
 
-	shake256_extract(rng, salt, salt_len);
+/* see hawk.h */
+int
+hawk_sign(shake256_context *rng, void *sig, size_t *sig_len, int sig_type,
+	const void *expanded_key, const void *data, size_t data_len, void *tmp,
+	size_t tmp_len)
+{
+	shake256_context hd;
+	uint8_t salt[40];
+
+	hawk_sign_start(&hd);
+	shake256_inject(&hd, data, data_len);
+	return hawk_sign_finish(rng, sig, sig_len, sig_type,
+		expanded_key, &hd, salt, tmp, tmp_len);
+}
+
+/* see hawk.h */
+int
+hawk_sign_dyn(shake256_context *rng, void *sig, size_t *sig_len, int sig_type,
+	const void *seckey, size_t seckey_len, const void *data, size_t data_len,
+	void *tmp, size_t tmp_len)
+{
+	shake256_context hd;
+	uint8_t salt[40];
+
+	hawk_sign_start(&hd);
+	shake256_inject(&hd, data, data_len);
+	return hawk_sign_dyn_finish(rng, sig, sig_len, sig_type,
+		seckey, seckey_len, &hd, salt, tmp, tmp_len);
+}
+
+
+/* see hawk.h */
+int
+hawk_sign_NTT(shake256_context *rng, void *sig, size_t *sig_len, int sig_type,
+	const void *seckey, size_t seckey_len, const void *data, size_t data_len,
+	void *tmp, size_t tmp_len)
+{
+	shake256_context hd;
+	uint8_t salt[40];
+
+	hawk_sign_start(&hd);
+	shake256_inject(&hd, data, data_len);
+	return hawk_sign_NTT_finish(rng, sig, sig_len, sig_type,
+		seckey, seckey_len, &hd, salt, tmp, tmp_len);
+}
+
+/* ========================================================================= */
+
+/* see hawk.h */
+void
+hawk_sign_start(shake256_context *hash_data)
+{
 	shake256_init(hash_data);
-	shake256_inject(hash_data, salt, salt_len);
-	return 0;
 }
 
 /* see hawk.h */
 int
 hawk_sign_finish(shake256_context *rng, void *sig, size_t *sig_len,
 	int sig_type, const void *expanded_key, shake256_context *hash_data,
-	const void *salt, void *tmp, size_t tmp_len)
+	void *salt, void *tmp, size_t tmp_len)
 {
 	unsigned logn, oldcw;
 	uint8_t *es, *hm, *atmp;
 	const fpr *expkey;
 	int16_t *sv;
 	size_t u, v, n, es_len;
+	inner_shake256_context hash_state;
 
 	/*
-	 * Get degree from private key header byte, and check
-	 * parameters.
+	 * Get degree from secret key header byte, and check parameters.
 	 */
 	logn = *(const uint8_t *)expanded_key;
 	if (logn < 1 || logn > 9) {
@@ -426,14 +480,15 @@ hawk_sign_finish(shake256_context *rng, void *sig, size_t *sig_len,
 	if (es_len < 1 + HAWK_SALT_SIZE(logn)) {
 		return HAWK_ERR_SIZE;
 	}
-	expkey = (const fpr *)align_fpr((uint8_t *)expanded_key + 1);
+
 	switch (sig_type) {
-	case HAWK_SIG_COMPRESSED:
+	case HAWK_SIG_COMPACT:
 		break;
 	case HAWK_SIG_PADDED:
 		if (es_len < HAWK_SIG_PADDED_SIZE(logn)) {
 			return HAWK_ERR_SIZE;
 		}
+		es_len = HAWK_SIG_PADDED_SIZE(logn);
 		break;
 	default:
 		return HAWK_ERR_BADARG;
@@ -444,96 +499,86 @@ hawk_sign_finish(shake256_context *rng, void *sig, size_t *sig_len,
 	sv = align_i16(hm + HAWK_HASH_SIZE(logn));
 	atmp = (uint8_t *)align_fpr(sv + n);
 
-	/*
-	 * Hash message to a point.
-	 */
-	shake256_flip(hash_data);
-	inner_shake256_extract((inner_shake256_context *)hash_data, hm,
-		HAWK_HASH_SIZE(logn));
+	expkey = (const fpr *)align_fpr((uint8_t *)expanded_key + 1);
 
 	/*
-	 * Fix the first byte (containing logn) and the bytes for the salt first.
+	 * Fix the first byte (containing logn).
 	 */
 	es = sig;
 	es[0] = 0x30 + logn;
-	memcpy(es + 1, salt, HAWK_SALT_SIZE(logn));
 	u = 1 + HAWK_SALT_SIZE(logn);
 
-	if (sig_type == HAWK_SIG_COMPRESSED) {
+	for (;;) {
+		/*
+		 * Make a copy of the current state of hash_data, as we add a salt
+		 * perhaps multiple times in case signing fails. Add the salt, flip the
+		 * state and then hash salt + message to a point.
+		 */
+		memcpy(&hash_state, (inner_shake256_context *)hash_data, sizeof *hash_data);
+		shake256_extract(rng, salt, HAWK_SALT_SIZE(logn));
+		inner_shake256_inject(&hash_state, salt, HAWK_SALT_SIZE(logn));
+		inner_shake256_flip(&hash_state);
+		inner_shake256_extract(&hash_state, hm, HAWK_HASH_SIZE(logn));
+
 		oldcw = set_fpu_cw(2);
-		Zf(sign)((inner_shake256_context *)rng, sv, expkey, hm, logn, atmp);
+		if (!Zf(sign)((inner_shake256_context *)rng,
+				sv, expkey, hm, logn, atmp)) {
+			/*
+			 * Signature generation failed, so restart. Note: this does not
+			 * break constant-time discipline, since we discard this signature.
+			 */
+			set_fpu_cw(oldcw);
+			continue;
+		}
 		set_fpu_cw(oldcw);
 
+		/*
+		 * Fix the bytes for the salt.
+		 */
+		memcpy(es + 1, salt, HAWK_SALT_SIZE(logn));
+
 		v = Zf(encode_sig)(es + u, es_len - u, sv, logn, SIG_LOBITS(logn));
-		if (v == 0) {
-			return HAWK_ERR_SIZE;
+		if (sig_type == HAWK_SIG_COMPACT) {
+			if (v == 0) {
+				return HAWK_ERR_SIZE;
+			} else {
+				*sig_len = u + v;
+				return 0;
+			}
 		} else {
-			*sig_len = u + v;
+			/*
+			 * sig_type == HAWK_SIG_PADDED
+			 */
+			if (v == 0) {
+				continue;
+			}
+			if (u + v < es_len) {
+				/*
+				 * Pad with zeros
+				 */
+				memset(es + u + v, 0, es_len - (u + v));
+			}
+			*sig_len = es_len;
 			return 0;
 		}
 	}
-
-	/*
-	 * Now, sig_type is HAWK_SIG_PADDED.
-	 * Compute the signature until one is found that is encodable.
-	 */
-	es_len = HAWK_SIG_PADDED_SIZE(logn);
-
-	do {
-		oldcw = set_fpu_cw(2);
-		Zf(sign)((inner_shake256_context *)rng, sv, expkey, hm, logn, atmp);
-		set_fpu_cw(oldcw);
-
-		v = Zf(encode_sig)(es + u, es_len - u, sv, logn, SIG_LOBITS(logn));
-		/*
-		 * If v = 0, the signature does not fit and loop.
-		 */
-	} while (v == 0);
-
-	if (u + v < es_len) {
-		/*
-		 * Pad with zeros
-		 */
-		memset(es + u + v, 0, es_len - (u + v));
-	}
-	*sig_len = es_len;
-	return 0;
 }
 
 /* see hawk.h */
 int
-hawk_sign(shake256_context *rng, void *sig, size_t *sig_len, int sig_type,
-	const void *expanded_key, const void *data, size_t data_len, void *tmp,
-	size_t tmp_len)
-{
-	shake256_context hd;
-	uint8_t salt[40];
-	int r;
-
-	r = hawk_sign_start(rng, salt, expanded_key, &hd);
-	if (r != 0) {
-		return r;
-	}
-	shake256_inject(&hd, data, data_len);
-	return hawk_sign_finish(rng, sig, sig_len, sig_type, expanded_key, &hd,
-		salt, tmp, tmp_len);
-}
-
-/* see hawk.h */
-int
-hawk_sign_simple_finish(shake256_context *rng, void *sig, size_t *sig_len,
+hawk_uncompressed_sign_finish(shake256_context *rng, void *sig, size_t *sig_len,
 	int sig_type, const void *seckey, size_t seckey_len,
-	shake256_context *hash_data, const void *salt, void *tmp, size_t tmp_len)
+	shake256_context *hash_data, void *salt, void *tmp, size_t tmp_len)
 {
 	unsigned logn, oldcw;
 	size_t n, u, v, es_len;
 	int8_t *f, *g, *F;
 	uint8_t header_byte, *es, *hm, *atmp;
 	int16_t *s0, *s1;
+	inner_shake256_context hash_state;
 
 	/*
-	 * Get degree from private key header byte, and check
-	 * parameters.
+	 * Get degree from secret key header byte, and check parameters.
 	 */
 	if (seckey_len == 0) {
 		return HAWK_ERR_FORMAT;
@@ -546,7 +591,7 @@ hawk_sign_simple_finish(shake256_context *rng, void *sig, size_t *sig_len,
 	if (logn < 1 || logn > 9 || seckey_len != HAWK_SECKEY_SIZE(logn)) {
 		return HAWK_ERR_FORMAT;
 	}
-	if (tmp_len < HAWK_TMPSIZE_SIGNSIMPLE(logn)) {
+	if (tmp_len < HAWK_TMPSIZE_UNCOMPRESSED_SIGN(logn)) {
 		return HAWK_ERR_SIZE;
 	}
 	es_len = *sig_len;
@@ -555,19 +600,20 @@ hawk_sign_simple_finish(shake256_context *rng, void *sig, size_t *sig_len,
 	}
 
 	switch (sig_type) {
-	case HAWK_SIG_COMPRESSED:
+	case HAWK_SIG_COMPACT:
 		break;
 	case HAWK_SIG_PADDED:
 		if (es_len < HAWK_SIG_PADDED_SIZE(logn)) {
 			return HAWK_ERR_SIZE;
 		}
+		es_len = HAWK_SIG_PADDED_SIZE(logn);
 		break;
 	default:
 		return HAWK_ERR_BADARG;
 	}
 
 	/*
-	 * Decode private key elements, and complete private key.
+	 * Decode secret key elements, and complete secret key.
 	 */
 	n = MKN(logn);
 	f = (int8_t *)tmp;
@@ -583,100 +629,84 @@ hawk_sign_simple_finish(shake256_context *rng, void *sig, size_t *sig_len,
 	}
 
 	/*
-	 * Hash message to a point.
-	 */
-	shake256_flip(hash_data);
-	inner_shake256_extract((inner_shake256_context *)hash_data, hm,
-		HAWK_HASH_SIZE(logn));
-
-	/*
-	 * Fix the first byte (containing logn) and the bytes for the salt first.
+	 * Fix the first byte (containing logn).
 	 */
 	es = sig;
 	es[0] = 0x30 + logn;
-	memcpy(es + 1, salt, HAWK_SALT_SIZE(logn));
 	u = 1 + HAWK_SALT_SIZE(logn);
 
-	if (sig_type == HAWK_SIG_COMPRESSED) {
+	for (;;) {
+		/*
+		 * Make a copy of the current state of hash_data, as we add a salt
+		 * perhaps multiple times in case signing fails. Add the salt, flip the
+		 * state and then hash salt + message to a point.
+		 */
+		memcpy(&hash_state, (inner_shake256_context *)hash_data, sizeof *hash_data);
+		shake256_extract(rng, salt, HAWK_SALT_SIZE(logn));
+		inner_shake256_inject(&hash_state, salt, HAWK_SALT_SIZE(logn));
+		inner_shake256_flip(&hash_state);
+		inner_shake256_extract(&hash_state, hm, HAWK_HASH_SIZE(logn));
+
 		oldcw = set_fpu_cw(2);
-		Zf(sign_simple)((inner_shake256_context *)rng, s0, s1, f, g, F, NULL,
-			hm, logn, atmp);
+		if (!Zf(uncompressed_sign)((inner_shake256_context *)rng,
+				s0, s1, f, g, F, NULL, hm, logn, atmp)) {
+			/*
+			 * Signature generation failed, so restart. Note: this does not
+			 * break constant-time discipline, since we discard this signature.
+			 */
+			set_fpu_cw(oldcw);
+			continue;
+		}
 		set_fpu_cw(oldcw);
 
+		/*
+		 * Fix the bytes for the salt.
+		 */
+		memcpy(es + 1, salt, HAWK_SALT_SIZE(logn));
+
 		v = Zf(encode_sig_simple)(es + u, es_len - u, s0, s1, logn,
-			SIG0_LOBITS(logn), SIG_LOBITS(logn));
-		if (v == 0) {
-			return HAWK_ERR_SIZE;
+				SIG0_LOBITS(logn), SIG_LOBITS(logn));
+		if (sig_type == HAWK_SIG_COMPACT) {
+			if (v == 0) {
+				return HAWK_ERR_SIZE;
+			} else {
+				*sig_len = u + v;
+				return 0;
+			}
 		} else {
-			*sig_len = u + v;
+			/*
+			 * sig_type == HAWK_SIG_PADDED
+			 */
+			if (v == 0) {
+				continue;
+			}
+			if (u + v < es_len) {
+				/*
+				 * Pad with zeros
+				 */
+				memset(es + u + v, 0, es_len - (u + v));
+			}
+			*sig_len = es_len;
 			return 0;
 		}
 	}
-
-	/*
-	 * Now, sig_type is HAWK_SIG_PADDED.
-	 * Compute the signature until one is found that is encodable.
-	 */
-	es_len = HAWK_SIG_PADDED_SIZE(logn);
-
-	do {
-		oldcw = set_fpu_cw(2);
-		Zf(sign_simple)((inner_shake256_context *)rng, s0, s1, f, g, F, NULL,
-			hm, logn, atmp);
-		set_fpu_cw(oldcw);
-
-		v = Zf(encode_sig_simple)(es + u, es_len - u, s0, s1, logn,
-			SIG0_LOBITS(logn), SIG_LOBITS(logn));
-		/*
-		 * If v = 0, the signature does not fit and loop.
-		 */
-	} while (v == 0);
-
-	if (u + v < es_len) {
-		/*
-		 * Pad with zeros
-		 */
-		memset(es + u + v, 0, es_len - (u + v));
-	}
-	*sig_len = es_len;
-	return 0;
 }
-
-/* see hawk.h */
-int
-hawk_sign_simple(shake256_context *rng, void *sig, size_t *sig_len, int sig_type,
-	const void *seckey, size_t seckey_len, const void *data, size_t data_len,
-	void *tmp, size_t tmp_len)
-{
-	shake256_context hd;
-	uint8_t salt[40];
-	int r;
-
-	r = hawk_sign_start(rng, salt, seckey, &hd);
-	if (r != 0) {
-		return r;
-	}
-	shake256_inject(&hd, data, data_len);
-	return hawk_sign_simple_finish(rng, sig, sig_len, sig_type,
-		seckey, seckey_len, &hd, salt, tmp, tmp_len);
-}
-
 
 /* see hawk.h */
 int
 hawk_sign_dyn_finish(shake256_context *rng, void *sig, size_t *sig_len,
 	int sig_type, const void *seckey, size_t seckey_len,
-	shake256_context *hash_data, const void *salt, void *tmp, size_t tmp_len)
+	shake256_context *hash_data, void *salt, void *tmp, size_t tmp_len)
 {
 	unsigned logn, oldcw;
 	size_t n, u, v, es_len;
 	int8_t *f, *g, *F;
 	uint8_t header_byte, *es, *hm, *atmp;
 	int16_t *sv;
+	inner_shake256_context hash_state;
 
 	/*
-	 * Get degree from private key header byte, and check
-	 * parameters.
+	 * Get degree from secret key header byte, and check parameters.
 	 */
 	if (seckey_len == 0) {
 		return HAWK_ERR_FORMAT;
@@ -698,19 +728,20 @@ hawk_sign_dyn_finish(shake256_context *rng, void *sig, size_t *sig_len,
 	}
 
 	switch (sig_type) {
-	case HAWK_SIG_COMPRESSED:
+	case HAWK_SIG_COMPACT:
 		break;
 	case HAWK_SIG_PADDED:
 		if (es_len < HAWK_SIG_PADDED_SIZE(logn)) {
 			return HAWK_ERR_SIZE;
 		}
+		es_len = HAWK_SIG_PADDED_SIZE(logn);
 		break;
 	default:
 		return HAWK_ERR_BADARG;
 	}
 
 	/*
-	 * Decode private key elements, and complete private key.
+	 * Decode secret key elements, and complete secret key.
 	 */
 	n = MKN(logn);
 	f = (int8_t *)tmp;
@@ -725,98 +756,83 @@ hawk_sign_dyn_finish(shake256_context *rng, void *sig, size_t *sig_len,
 	}
 
 	/*
-	 * Hash message to a point.
-	 */
-	shake256_flip(hash_data);
-	inner_shake256_extract((inner_shake256_context *)hash_data, hm,
-		HAWK_HASH_SIZE(logn));
-
-	/*
-	 * Fix the first byte (containing logn) and the bytes for the salt first.
+	 * Fix the first byte (containing logn).
 	 */
 	es = sig;
 	es[0] = 0x30 + logn;
-	memcpy(es + 1, salt, HAWK_SALT_SIZE(logn));
 	u = 1 + HAWK_SALT_SIZE(logn);
 
-	if (sig_type == HAWK_SIG_COMPRESSED) {
+	for (;;) {
+		/*
+		 * Make a copy of the current state of hash_data, as we add a salt
+		 * perhaps multiple times in case signing fails. Add the salt, flip the
+		 * state and then hash salt + message to a point.
+		 */
+		memcpy(&hash_state, (inner_shake256_context *)hash_data, sizeof *hash_data);
+		shake256_extract(rng, salt, HAWK_SALT_SIZE(logn));
+		inner_shake256_inject(&hash_state, salt, HAWK_SALT_SIZE(logn));
+		inner_shake256_flip(&hash_state);
+		inner_shake256_extract(&hash_state, hm, HAWK_HASH_SIZE(logn));
+
 		oldcw = set_fpu_cw(2);
-		Zf(sign_dyn)((inner_shake256_context *)rng, sv, f, g, F, NULL, hm,
-			logn, atmp);
+		if (!Zf(sign_dyn)((inner_shake256_context *)rng,
+				sv, f, g, F, NULL, hm, logn, atmp)) {
+			/*
+			 * Signature generation failed, so restart. Note: this does not
+			 * break constant-time discipline, since we discard this signature.
+			 */
+			set_fpu_cw(oldcw);
+			continue;
+		}
 		set_fpu_cw(oldcw);
 
+		/*
+		 * Fix the bytes for the salt.
+		 */
+		memcpy(es + 1, salt, HAWK_SALT_SIZE(logn));
+
 		v = Zf(encode_sig)(es + u, es_len - u, sv, logn, SIG_LOBITS(logn));
-		if (v == 0) {
-			return HAWK_ERR_SIZE;
+		if (sig_type == HAWK_SIG_COMPACT) {
+			if (v == 0) {
+				return HAWK_ERR_SIZE;
+			} else {
+				*sig_len = u + v;
+				return 0;
+			}
 		} else {
-			*sig_len = u + v;
+			/*
+			 * sig_type == HAWK_SIG_PADDED
+			 */
+			if (v == 0) {
+				continue;
+			}
+			if (u + v < es_len) {
+				/*
+				 * Pad with zeros
+				 */
+				memset(es + u + v, 0, es_len - (u + v));
+			}
+			*sig_len = es_len;
 			return 0;
 		}
 	}
-
-	/*
-	 * Now, sig_type is HAWK_SIG_PADDED.
-	 * Compute the signature until one is found that is encodable.
-	 */
-	es_len = HAWK_SIG_PADDED_SIZE(logn);
-
-	do {
-		oldcw = set_fpu_cw(2);
-		Zf(sign_dyn)((inner_shake256_context *)rng, sv, f, g, F, NULL, hm,
-			logn, atmp);
-		set_fpu_cw(oldcw);
-
-		v = Zf(encode_sig)(es + u, es_len - u, sv, logn, SIG_LOBITS(logn));
-		/*
-		 * If v = 0, the signature does not fit and loop.
-		 */
-	} while (v == 0);
-
-	if (u + v < es_len) {
-		/*
-		 * Pad with zeros
-		 */
-		memset(es + u + v, 0, es_len - (u + v));
-	}
-	*sig_len = es_len;
-	return 0;
 }
-
-/* see hawk.h */
-int
-hawk_sign_dyn(shake256_context *rng, void *sig, size_t *sig_len, int sig_type,
-	const void *seckey, size_t seckey_len, const void *data, size_t data_len,
-	void *tmp, size_t tmp_len)
-{
-	shake256_context hd;
-	uint8_t salt[40];
-	int r;
-
-	r = hawk_sign_start(rng, salt, seckey, &hd);
-	if (r != 0) {
-		return r;
-	}
-	shake256_inject(&hd, data, data_len);
-	return hawk_sign_dyn_finish(rng, sig, sig_len, sig_type,
-		seckey, seckey_len, &hd, salt, tmp, tmp_len);
-}
-
 
 /* see hawk.h */
 int
 hawk_sign_NTT_finish(shake256_context *rng, void *sig, size_t *sig_len,
 	int sig_type, const void *seckey, size_t seckey_len,
-	shake256_context *hash_data, const void *salt, void *tmp, size_t tmp_len)
+	shake256_context *hash_data, void *salt, void *tmp, size_t tmp_len)
 {
 	unsigned logn, oldcw;
 	size_t n, u, v, es_len;
 	int8_t *f, *g, *F;
 	uint8_t header_byte, *es, *hm, *atmp;
 	int16_t *sv;
+	inner_shake256_context hash_state;
 
 	/*
-	 * Get degree from private key header byte, and check
-	 * parameters.
+	 * Get degree from secret key header byte, and check parameters.
 	 */
 	if (seckey_len == 0) {
 		return HAWK_ERR_FORMAT;
@@ -838,19 +854,20 @@ hawk_sign_NTT_finish(shake256_context *rng, void *sig, size_t *sig_len,
 	}
 
 	switch (sig_type) {
-	case HAWK_SIG_COMPRESSED:
+	case HAWK_SIG_COMPACT:
 		break;
 	case HAWK_SIG_PADDED:
 		if (es_len < HAWK_SIG_PADDED_SIZE(logn)) {
 			return HAWK_ERR_SIZE;
 		}
+		es_len = HAWK_SIG_PADDED_SIZE(logn);
 		break;
 	default:
 		return HAWK_ERR_BADARG;
 	}
 
 	/*
-	 * Decode private key elements, and complete private key.
+	 * Decode secret key elements, and complete secret key.
 	 */
 	n = MKN(logn);
 	f = (int8_t *)tmp;
@@ -865,102 +882,101 @@ hawk_sign_NTT_finish(shake256_context *rng, void *sig, size_t *sig_len,
 	}
 
 	/*
-	 * Hash message to a point.
-	 */
-	shake256_flip(hash_data);
-	inner_shake256_extract((inner_shake256_context *)hash_data, hm,
-		HAWK_HASH_SIZE(logn));
-
-	/*
-	 * Fix the first byte (containing logn) and the bytes for the salt first.
+	 * Fix the first byte (containing logn).
 	 */
 	es = sig;
 	es[0] = 0x30 + logn;
-	memcpy(es + 1, salt, HAWK_SALT_SIZE(logn));
 	u = 1 + HAWK_SALT_SIZE(logn);
 
-	if (sig_type == HAWK_SIG_COMPRESSED) {
+	for (;;) {
+		/*
+		 * Make a copy of the current state of hash_data, as we add a salt
+		 * perhaps multiple times in case signing fails. Add the salt, flip the
+		 * state and then hash salt + message to a point.
+		 */
+		memcpy(&hash_state, (inner_shake256_context *)hash_data, sizeof *hash_data);
+		shake256_extract(rng, salt, HAWK_SALT_SIZE(logn));
+		inner_shake256_inject(&hash_state, salt, HAWK_SALT_SIZE(logn));
+		inner_shake256_flip(&hash_state);
+		inner_shake256_extract(&hash_state, hm, HAWK_HASH_SIZE(logn));
+
 		oldcw = set_fpu_cw(2);
-		Zf(sign_NTT)((inner_shake256_context *)rng, sv, f, g, F, NULL, hm,
-			logn, atmp);
+		if (!Zf(sign_NTT)((inner_shake256_context *)rng,
+				sv, f, g, F, NULL, hm, logn, atmp)) {
+			/*
+			 * Signature generation failed, so restart. Note: this does not
+			 * break constant-time discipline, since we discard this signature.
+			 */
+			set_fpu_cw(oldcw);
+			continue;
+		}
 		set_fpu_cw(oldcw);
 
+		/*
+		 * Fix the bytes for the salt.
+		 */
+		memcpy(es + 1, salt, HAWK_SALT_SIZE(logn));
+
 		v = Zf(encode_sig)(es + u, es_len - u, sv, logn, SIG_LOBITS(logn));
-		if (v == 0) {
-			return HAWK_ERR_SIZE;
+		if (sig_type == HAWK_SIG_COMPACT) {
+			if (v == 0) {
+				return HAWK_ERR_SIZE;
+			} else {
+				*sig_len = u + v;
+				return 0;
+			}
 		} else {
-			*sig_len = u + v;
+			/*
+			 * sig_type == HAWK_SIG_PADDED
+			 */
+			if (v == 0) {
+				continue;
+			}
+			if (u + v < es_len) {
+				/*
+				 * Pad with zeros
+				 */
+				memset(es + u + v, 0, es_len - (u + v));
+			}
+			*sig_len = es_len;
 			return 0;
 		}
 	}
-
-	/*
-	 * Now, sig_type is HAWK_SIG_PADDED.
-	 * Compute the signature until one is found that is encodable.
-	 */
-	es_len = HAWK_SIG_PADDED_SIZE(logn);
-
-	do {
-		oldcw = set_fpu_cw(2);
-		Zf(sign_NTT)((inner_shake256_context *)rng, sv, f, g, F, NULL, hm,
-			logn, atmp);
-		set_fpu_cw(oldcw);
-
-		v = Zf(encode_sig)(es + u, es_len - u, sv, logn, SIG_LOBITS(logn));
-		/*
-		 * If v = 0, the signature does not fit and loop.
-		 */
-	} while (v == 0);
-
-	if (u + v < es_len) {
-		/*
-		 * Pad with zeros
-		 */
-		memset(es + u + v, 0, es_len - (u + v));
-	}
-	*sig_len = es_len;
-	return 0;
 }
 
+/* ==========================================================================*/
 
 /* see hawk.h */
 int
-hawk_sign_NTT(shake256_context *rng, void *sig, size_t *sig_len, int sig_type,
-	const void *seckey, size_t seckey_len, const void *data, size_t data_len,
+hawk_verify(const void *sig, size_t sig_len, int sig_type, const void *pubkey,
+	size_t pubkey_len, const void *data, size_t data_len, void *tmp,
+	size_t tmp_len)
+{
+	shake256_context hd;
+	hawk_verify_start(&hd);
+	shake256_inject(&hd, data, data_len);
+	return hawk_verify_finish(sig, sig_len, sig_type,
+		pubkey, pubkey_len, &hd, tmp, tmp_len);
+}
+
+/* see hawk.h */
+int
+hawk_uncompressed_verify(const void *sig, size_t sig_len, int sig_type,
+	const void *pubkey, size_t pubkey_len, const void *data, size_t data_len,
 	void *tmp, size_t tmp_len)
 {
 	shake256_context hd;
-	uint8_t salt[40];
-	int r;
-
-	r = hawk_sign_start(rng, salt, seckey, &hd);
-	if (r != 0) {
-		return r;
-	}
+	hawk_verify_start(&hd);
 	shake256_inject(&hd, data, data_len);
-	return hawk_sign_NTT_finish(rng, sig, sig_len, sig_type,
-		seckey, seckey_len, &hd, salt, tmp, tmp_len);
+	return hawk_uncompressed_verify_finish(sig, sig_len, sig_type,
+		pubkey, pubkey_len, &hd, tmp, tmp_len);
 }
 
-
 /* see hawk.h */
-int
-hawk_verify_start(shake256_context *hash_data, const void *sig, size_t sig_len)
+void
+hawk_verify_start(shake256_context *hash_data)
 {
-	unsigned logn, salt_len;
-
-	logn = hawk_get_logn(sig, sig_len);
-	salt_len = HAWK_SALT_SIZE(logn);
-	if (sig_len < salt_len + 1) {
-		return HAWK_ERR_FORMAT;
-	}
-
 	shake256_init(hash_data);
-	/*
-	 * First inject the salt in the SHAKE context.
-	 */
-	shake256_inject(hash_data, (const uint8_t *)sig + 1, salt_len);
-	return 0;
 }
 
 /* see hawk.h */
@@ -1004,7 +1020,7 @@ hawk_verify_finish(const void *sig, size_t sig_len, int sig_type,
 
 	switch (sig_type) {
 	case 0:
-	case HAWK_SIG_COMPRESSED:
+	case HAWK_SIG_COMPACT:
 		break;
 	case HAWK_SIG_PADDED:
 		if (sig_len != HAWK_SIG_PADDED_SIZE(logn)) {
@@ -1071,8 +1087,9 @@ hawk_verify_finish(const void *sig, size_t sig_len, int sig_type,
 	}
 
 	/*
-	 * Hash message to point.
+	 * Add the salt, flip the state and then hash salt + message to a point.
 	 */
+	shake256_inject(hash_data, es + 1, salt_len);
 	shake256_flip(hash_data);
 	inner_shake256_extract((inner_shake256_context *)hash_data, hm,
 		HAWK_HASH_SIZE(logn));
@@ -1091,28 +1108,10 @@ hawk_verify_finish(const void *sig, size_t sig_len, int sig_type,
 	return 0;
 }
 
-/* see hawk.h */
-int
-hawk_verify(const void *sig, size_t sig_len, int sig_type, const void *pubkey,
-	size_t pubkey_len, const void *data, size_t data_len, void *tmp,
-	size_t tmp_len)
-{
-	shake256_context hd;
-	int r;
-
-	r = hawk_verify_start(&hd, sig, sig_len);
-	if (r < 0) {
-		return r;
-	}
-	shake256_inject(&hd, data, data_len);
-	return hawk_verify_finish(sig, sig_len, sig_type,
-		pubkey, pubkey_len, &hd, tmp, tmp_len);
-}
-
 
 /* see hawk.h */
 int
-hawk_verify_simple_finish(const void *sig, size_t sig_len, int sig_type,
+hawk_uncompressed_verify_finish(const void *sig, size_t sig_len, int sig_type,
 	const void *pubkey, size_t pubkey_len, shake256_context *hash_data,
 	void *tmp, size_t tmp_len)
 {
@@ -1150,10 +1149,10 @@ hawk_verify_simple_finish(const void *sig, size_t sig_len, int sig_type,
 
 	switch (sig_type) {
 	case 0:
-	case HAWK_SIG_COMPRESSED:
+	case HAWK_SIG_COMPACT:
 		break;
 	case HAWK_SIG_PADDED:
-		if (sig_len != HAWK_SIG_SIMPLE_PADDED_SIZE(logn)) {
+		if (sig_len != HAWK_UNCOMPRESSED_SIG_PADDED_SIZE(logn)) {
 			return HAWK_ERR_FORMAT;
 		}
 		break;
@@ -1164,7 +1163,7 @@ hawk_verify_simple_finish(const void *sig, size_t sig_len, int sig_type,
 	if (pubkey_len != HAWK_PUBKEY_SIZE[logn]) {
 		return HAWK_ERR_FORMAT;
 	}
-	if (tmp_len < HAWK_TMPSIZE_VERIFYSIMPLE(logn)) {
+	if (tmp_len < HAWK_TMPSIZE_UNCOMPRESSED_VERIFY(logn)) {
 		return HAWK_ERR_SIZE;
 	}
 
@@ -1215,8 +1214,9 @@ hawk_verify_simple_finish(const void *sig, size_t sig_len, int sig_type,
 	}
 
 	/*
-	 * Hash message to point.
+	 * Add the salt, flip the state and then hash salt + message to a point.
 	 */
+	shake256_inject(hash_data, es + 1, salt_len);
 	shake256_flip(hash_data);
 	inner_shake256_extract((inner_shake256_context *)hash_data, hm,
 		HAWK_HASH_SIZE(logn));
@@ -1224,26 +1224,8 @@ hawk_verify_simple_finish(const void *sig, size_t sig_len, int sig_type,
 	/*
 	 * Verify signature.
 	 */
-	if (!Zf(verify_simple_NTT)(hm, s0, s1, q00, q10, logn, atmp)) {
+	if (!Zf(uncompressed_verify_NTT)(hm, s0, s1, q00, q10, logn, atmp)) {
 		return HAWK_ERR_BADSIG;
 	}
 	return 0;
-}
-
-/* see hawk.h */
-int
-hawk_verify_simple(const void *sig, size_t sig_len, int sig_type, const void *pubkey,
-	size_t pubkey_len, const void *data, size_t data_len, void *tmp,
-	size_t tmp_len)
-{
-	shake256_context hd;
-	int r;
-
-	r = hawk_verify_start(&hd, sig, sig_len);
-	if (r < 0) {
-		return r;
-	}
-	shake256_inject(&hd, data, data_len);
-	return hawk_verify_simple_finish(sig, sig_len, sig_type,
-		pubkey, pubkey_len, &hd, tmp, tmp_len);
 }

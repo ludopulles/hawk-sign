@@ -39,7 +39,7 @@
 extern "C" {
 #endif
 
-/* ==================================================================== */
+/* ========================================================================= */
 /*
  * Hawk API Notes
  * ----------------
@@ -89,7 +89,7 @@ extern "C" {
  *    HAWK_TMPSIZE_MAKEPUB
  *    HAWK_TMPSIZE_VERIFY
  *    HAWK_TMPSIZE_KEYGEN
- *    HAWK_TMPSIZE_SIGNSIMPLE
+ *    HAWK_TMPSIZE_UNCOMPRESSED_SIGN
  *    HAWK_TMPSIZE_SIGN
  *    HAWK_TMPSIZE_EXPANDPRIV
  *    HAWK_TMPSIZE_SIGNDYN
@@ -120,8 +120,8 @@ extern "C" {
  *
  * FORMATS
  *
- * Public and private keys are exchanged as serialized sequences of bytes.
- * The private key sizes are fixed (for a given degree).
+ * Public and secret keys are exchanged as serialized sequences of bytes.
+ * The secret key sizes are fixed (for a given degree).
  * The public key sizes (for a given degree) follow a distribution that is
  * close to a normal distribution.
  *
@@ -158,11 +158,11 @@ extern "C" {
  *
  * There are two formats for signatures:
  *
- *   - COMPRESSED: this is the default format, which yields the shortest
+ *   - COMPACT: this is the default format, which yields the shortest
  *     signatures on average. However, the size is variable (see below)
  *     though within a limited range.
  *
- *   - PADDED: this is the compressed format, but with extra padding bytes
+ *   - PADDED: this is the compact format, but with extra padding bytes
  *     to obtain a fixed size known at compile-time. The size depends only
  *     on the degree; the HAWK_SIG_PADDED_SIZE macro computes it. The
  *     signature process enforces that size by restarting the process
@@ -176,10 +176,10 @@ extern "C" {
  * degree (100 random keys, 100 signatures per key):
  *
  * TODO: update table.
- * Hawk512 (simple):   1222.9 (+/- 7.2)
- * Hawk512 (efficient): 541.5 (+/- 4.3)
+ * uncompressed Hawk512 : 1222.9 (+/- 7.2)
+ *              Hawk512 : 541.5 (+/- 4.3)
  *
- * degree     ct   padded  compressed (with std. dev)  comp_max
+ * degree     ct   padded   compact (with std. dev)  comp_max
  *     2      44      44       44.00 (+/- 0.00)            44
  *     4      47      47       46.03 (+/- 0.17)            47
  *     8      52      52       50.97 (+/- 0.26)            52
@@ -193,23 +193,23 @@ extern "C" {
  * with:
  *   degree = Hawk degree = 2^logn
  *   padded = HAWK_SIG_PADDED_SIZE(logn)  (size of a PADDED signature)
- *   compressed = measured average length of a COMPRESSED signature
- *   v_max = HAWK_SIG_COMPRESSED_MAXSIZE(logn)  (maximum theoretical
- *           size of a COMPRESSED signature)
+ *   compact = measured average length of a COMPACT signature
+ *   v_max = HAWK_SIG_COMPACT_MAXSIZE(logn)  (maximum theoretical
+ *           size of a COMPACT signature)
  * All lengths are in bytes.
  *
- * A private key, in its encoded format, can be used as parameter to
- * hawk_sign_dyn(). An "expanded private key" is computed with
- * hawk_expand_privkey(), to be used with hawk_sign(). The
- * expanded private key is much larger than the encoded private key, and
+ * A secret key, in its encoded format, can be used as parameter to
+ * hawk_sign_dyn(). An "expanded secret key" is computed with
+ * hawk_expand_seckey(), to be used with hawk_sign(). The
+ * expanded secret key is much larger than the encoded secret key, and
  * its format is not portable. Its size (in bytes) is provided by
  * HAWK_EXPANDEDKEY_SIZE. There are no specific alignment requirements
  * on expanded keys, except that the alignment of a given expanded key
  * must not change (i.e. if an expanded key is moved from address addr1
  * to address addr2, then it must hold that addr1 = addr2 mod 8).
- * Expanded private keys are meant to be used when several signatures are
- * to be computed with the same private key: amortized cost per signature
- * is about halved when using expanded private keys (for short messages,
+ * Expanded secret keys are meant to be used when several signatures are
+ * to be computed with the same secret key: amortized cost per signature
+ * is about halved when using expanded secret keys (for short messages,
  * and depending on underlying architecture and implementation choices).
  *
  *
@@ -232,7 +232,7 @@ extern "C" {
  *    the caller then performs the hashing externally.
  */
 
-/* ==================================================================== */
+/* ========================================================================= */
 /*
  * Error codes.
  *
@@ -257,7 +257,7 @@ extern "C" {
 
 /*
  * HAWK_ERR_FORMAT is returned when decoding of an external object
- * (public key, private key, signature) fails.
+ * (public key, secret key, signature) fails.
  */
 #define HAWK_ERR_FORMAT     -3
 
@@ -279,7 +279,7 @@ extern "C" {
  */
 #define HAWK_ERR_INTERNAL   -6
 
-/* ==================================================================== */
+/* ========================================================================= */
 /*
  * Signature formats.
  */
@@ -287,13 +287,13 @@ extern "C" {
 /*
  * Variable-size signature. This format produces the most compact
  * signatures on average, but the signature size may vary depending
- * on private key, signed data, and random seed.
+ * on secret key, signed data, and random seed.
  */
-#define HAWK_SIG_COMPRESSED   1
+#define HAWK_SIG_COMPACT   1
 
 /*
  * Fixed-size signature. This format produces is equivalent to the
- * "compressed" format, but includes padding to a known fixed size
+ * "compact" format, but includes padding to a known fixed size
  * (specified by HAWK_SIG_PADDED_SIZE). With this format, the
  * signature generation loops until an appropriate signature size is
  * achieved (such looping is uncommon) and adds the padding bytes;
@@ -302,7 +302,7 @@ extern "C" {
  */
 #define HAWK_SIG_PADDED       2
 
-/* ==================================================================== */
+/* ========================================================================= */
 /*
  * Sizes.
  *
@@ -336,37 +336,37 @@ extern const size_t HAWK_PUBKEY_SIZE[10];
 /*
  * Currently, only the signature sizes for logn = 9 are determined, as these
  * are determined by simulations in each case, giving an average size and
- * standard deviation. Currently the compressed maxsize is avg + 12 stdddev,
+ * standard deviation. Currently the compact maxsize is avg + 12 stdddev,
  * while the padded size is avg + 6 stddev.
  *
  * The padded signature is therefore expected to fail with probability at most
  * 2 10^{-9} times and if this fails, signing is restarted (while reusing the
  * old hash).
  *
- * The compressed signature may fail with probability at most 10^{-32} assuming
+ * The compact signature may fail with probability at most 10^{-32} assuming
  * the sizes are normally distributed with the found average and standard
  * deviation.
  */
 
 /*
- * Maximum practical signature size (in bytes) when using the COMPRESSED format
- * and the simple scheme.
+ * Maximum practical signature size (in bytes) when using the compact format
+ * and the uncompressed scheme.
  */
-#define HAWK_SIG_SIMPLE_COMPRESSED_MAXSIZE(logn) \
+#define HAWK_UNCOMPRESSED_SIG_COMPACT_MAXSIZE(logn) \
 	(1309u)
 
 /*
- * Signature size (in bytes) when using the PADDED format and the simple
+ * Signature size (in bytes) when using the PADDED format and the uncompressed
  * scheme. The size is exact.
  */
-#define HAWK_SIG_SIMPLE_PADDED_SIZE(logn) \
+#define HAWK_UNCOMPRESSED_SIG_PADDED_SIZE(logn) \
 	(1266u)
 
 /*
- * Maximum practical signature size (in bytes) when using the COMPRESSED
+ * Maximum practical signature size (in bytes) when using the COMPACT
  * format.
  */
-#define HAWK_SIG_COMPRESSED_MAXSIZE(logn) \
+#define HAWK_SIG_COMPACT_MAXSIZE(logn) \
 	(593u)
 
 /*
@@ -382,7 +382,7 @@ extern const size_t HAWK_PUBKEY_SIZE[10];
 	((44u << (logn)) + (22u << (logn)) + 7)
 
 /*
- * Temporary buffer size for computing the public key from the private key.
+ * Temporary buffer size for computing the public key from the secret key.
  */
 #define HAWK_TMPSIZE_MAKEPUB(logn) \
 	((6u << (logn)) + 1)
@@ -391,7 +391,9 @@ extern const size_t HAWK_PUBKEY_SIZE[10];
  * The number of bytes that are required for the salt that gets prepended to a
  * message before hashing.
  *
- * From GPV08, having \lambda security bits and a transcript size of Q_s, having k = \lambda + \log_2(Q_s) salt bits gives a hash collision of message to happen with probability at most 2^-k.
+ * From GPV08, having \lambda security bits and a transcript size of Q_s,
+ * having k = \lambda + \log_2(Q_s) salt bits gives a hash collision of message
+ * to happen with probability at most 2^-k.
  * So for n = 512, take k = 192 and for n = 1024, take k = 320.
  */
 #define HAWK_SALT_SIZE(logn) ((logn) <= 9 ? 24u : 40u)
@@ -406,7 +408,7 @@ extern const size_t HAWK_PUBKEY_SIZE[10];
 /*
  * Temporary buffer size for generating a signature ("dynamic" variant).
  */
-#define HAWK_TMPSIZE_SIGNSIMPLE(logn) \
+#define HAWK_TMPSIZE_UNCOMPRESSED_SIGN(logn) \
 	(HAWK_HASH_SIZE(logn) + (15u << (logn)) + 1)
 
 /*
@@ -428,20 +430,20 @@ extern const size_t HAWK_PUBKEY_SIZE[10];
 	(HAWK_HASH_SIZE(logn) + (2u << (logn)) + (26u << (logn)) + 7)
 
 /*
- * Temporary buffer size for expanding a private key.
+ * Temporary buffer size for expanding a secret key.
  */
 #define HAWK_TMPSIZE_EXPANDPRIV(logn) \
 	(3u << (logn))
 
 /*
- * Size of an expanded private key.
+ * Size of an expanded secret key.
  */
 #define HAWK_EXPANDEDKEY_SIZE(logn) \
 	((32u << (logn)) + 8)
 
 /*
  * When performing decompression checks, one also needs 1/q00 as part of the
- * expanded private key, giving the following size:
+ * expanded secret key, giving the following size:
  *
  * #define HAWK_EXPANDEDKEY_SIZE(logn) ((36u << (logn)) + 8)
  */
@@ -453,12 +455,12 @@ extern const size_t HAWK_PUBKEY_SIZE[10];
 	(HAWK_HASH_SIZE(logn) + (42u << (logn)))
 
 /*
- * Temporary buffer size for verifying a simple signature with NTT.
+ * Temporary buffer size for verifying an uncompressed signature with NTT.
  */
-#define HAWK_TMPSIZE_VERIFYSIMPLE(logn) \
+#define HAWK_TMPSIZE_UNCOMPRESSED_VERIFY(logn) \
 	(HAWK_HASH_SIZE(logn) + (40u << (logn)))
 
-/* ==================================================================== */
+/* ========================================================================= */
 /*
  * SHAKE256.
  */
@@ -524,7 +526,7 @@ void shake256_init_prng_from_seed(shake256_context *sc, const void *seed,
  */
 int shake256_init_prng_from_system(shake256_context *sc);
 
-/* ==================================================================== */
+/* ========================================================================= */
 /*
  * Key pair generation.
  */
@@ -541,10 +543,10 @@ int shake256_init_prng_from_system(shake256_context *sc);
  * must have been already initialized, seeded, and set to output mode (see
  * shake256_init_prng_from_seed() and shake256_init_prng_from_system()).
  *
- * The new private key is written in the buffer pointed to by privkey.
- * The size of that buffer must be specified in privkey_len; if that
+ * The new secret key is written in the buffer pointed to by seckey.
+ * The size of that buffer must be specified in seckey_len; if that
  * size is too low, then this function fails with HAWK_ERR_SIZE. The
- * actual private key length can be obtained from the HAWK_SECKEY_SIZE()
+ * actual secret key length can be obtained from the HAWK_SECKEY_SIZE()
  * macro.
  *
  * If pubkey is not NULL, then the new public key is written in the buffer
@@ -553,26 +555,26 @@ int shake256_init_prng_from_system(shake256_context *sc);
  * HAWK_ERR_SIZE. The actual public key length can be obtained from the
  * HAWK_PUBKEY_SIZE() macro.
  *
- * If pubkey is NULL then pubkey_len is ignored; the private key will
- * still be generated and written to privkey[], but the public key
+ * If pubkey is NULL then pubkey_len is ignored; the secret key will
+ * still be generated and written to seckey[], but the public key
  * won't be written anywhere. The public key can be recomputed later on
- * from the private key with hawk_make_public().
+ * from the secret key with hawk_make_public().
  *
  * The tmp[] buffer is used to hold temporary values. Its size tmp_len
  * MUST be at least HAWK_TMPSIZE_KEYGEN(logn) bytes.
  *
  * Returned value: 0 on success, or a negative error code.
  */
-int hawk_keygen_make(shake256_context *rng, unsigned logn, void *privkey,
-	size_t privkey_len, void *pubkey, size_t pubkey_len, void *tmp,
+int hawk_keygen_make(shake256_context *rng, unsigned logn, void *seckey,
+	size_t seckey_len, void *pubkey, size_t pubkey_len, void *tmp,
 	size_t tmp_len);
 
 /*
- * Recompute the public key from the private key.
+ * Recompute the public key from the secret key.
  *
- * The private key is provided encoded. This function decodes the
- * private key and verifies that its length (in bytes) is exactly
- * the provided value privkey_len (trailing extra bytes are not
+ * The secret key is provided encoded. This function decodes the
+ * secret key and verifies that its length (in bytes) is exactly
+ * the provided value seckey_len (trailing extra bytes are not
  * tolerated).
  *
  * The public key is written in the buffer pointed to by pubkey. The
@@ -586,373 +588,217 @@ int hawk_keygen_make(shake256_context *rng, unsigned logn, void *privkey,
  *
  * Returned value: 0 on success, or a negative error code.
  */
-int hawk_make_public(void *pubkey, size_t pubkey_len, const void *privkey,
-	size_t privkey_len, void *tmp, size_t tmp_len);
+int hawk_make_public(void *pubkey, size_t pubkey_len, const void *seckey,
+	size_t seckey_len, void *tmp, size_t tmp_len);
 
 /*
- * Get the Hawk degree from an encoded private key, public key or
+ * Get the Hawk degree from an encoded secret key, public key or
  * signature. Returned value is the logarithm of the degree (1 to 9),
  * or a negative error code.
  */
 int hawk_get_logn(const void *obj, size_t len);
 
-/* ==================================================================== */
+/* ========================================================================= */
 /*
  * Signature generation.
  */
 
 /*
- * Sign the data provided in buffer data[] (of length data_len bytes),
- * using the private key held in privkey[] (of length privkey_len bytes).
- * Note: This signing function does *not* use floating point arithmetic, but
- * returns a signature for the simple scheme, i.e. returns the whole signature
- * (s0, s1) instead of only s1.
+ * Expand a secret key. The provided Hawk secret key (seckey, of size
+ * seckey_len bytes) is decoded and expanded into expanded_key[].
  *
- * The source of randomness is the provided SHAKE256 context *rng, which
- * must have been already initialized, seeded, and set to output mode (see
- * shake256_init_prng_from_seed() and shake256_init_prng_from_system()).
+ * The expanded_key[] buffer has size expanded_key_len, which MUST be at least
+ * HAWK_EXPANDEDKEY_SIZE(logn) bytes (where 'logn' qualifies the Hawk degree
+ * encoded in the secret key and can be obtained with hawk_get_logn()).
+ * Expanded key contents have an internal, implementation-specific format.
+ * Expanded keys may be moved in RAM only if their 8-byte alignment remains
+ * unchanged.
  *
- * The signature is written in sig[]. The caller must set *sig_len to
- * the maximum size of sig[]; if the signature computation is
- * successful, then *sig_len will be set to the actual length of the
- * signature. The signature length depends on the signature type,
- * which is specified with the sig_type parameter to one of the three
- * defined values HAWK_SIG_COMPRESSED or HAWK_SIG_PADDED; for the latter, the
- * signature length is fixed (for a given Hawk degree).
- *
- * Regardless of the signature type, the process is constant-time with regard
- * to the private key.
- *
- * The tmp[] buffer is used to hold temporary values. Its size tmp_len
- * MUST be at least HAWK_TMPSIZE_SIGNSIMPLE(logn) bytes.
+ * The tmp[] buffer is used to hold temporary values. Its size tmp_len MUST be
+ * at least HAWK_TMPSIZE_EXPANDPRIV(logn) bytes.
  *
  * Returned value: 0 on success, or a negative error code.
  */
-int hawk_sign_simple(shake256_context *rng, void *sig, size_t *sig_len,
-	int sig_type, const void *privkey, size_t privkey_len, const void *data,
+int hawk_expand_seckey(void *expanded_key, size_t expanded_key_len,
+	const void *seckey, size_t seckey_len, void *tmp, size_t tmp_len);
+
+/* Helper for hawk_uncompressed_sign_finish */
+int hawk_uncompressed_sign(shake256_context *rng, void *sig, size_t *sig_len,
+	int sig_type, const void *seckey, size_t seckey_len, const void *data,
 	size_t data_len, void *tmp, size_t tmp_len);
 
-/*
- * Sign the data provided in buffer data[] (of length data_len bytes),
- * using the private key held in privkey[] (of length privkey_len bytes).
- *
- * The source of randomness is the provided SHAKE256 context *rng, which
- * must have been already initialized, seeded, and set to output mode (see
- * shake256_init_prng_from_seed() and shake256_init_prng_from_system()).
- *
- * The signature is written in sig[]. The caller must set *sig_len to
- * the maximum size of sig[]; if the signature computation is
- * successful, then *sig_len will be set to the actual length of the
- * signature. The signature length depends on the signature type,
- * which is specified with the sig_type parameter to one of the three
- * defined values HAWK_SIG_COMPRESSED or HAWK_SIG_PADDED; for the latter, the
- * signature length is fixed (for a given Hawk degree).
- *
- * Regardless of the signature type, the process is constant-time with regard
- * to the private key.
- *
- * The tmp[] buffer is used to hold temporary values. Its size tmp_len
- * MUST be at least HAWK_TMPSIZE_SIGNDYN(logn) bytes.
- *
- * Returned value: 0 on success, or a negative error code.
- */
+/* Helper for hawk_sign_dyn_finish */
 int hawk_sign_dyn(shake256_context *rng, void *sig, size_t *sig_len,
-	int sig_type, const void *privkey, size_t privkey_len, const void *data,
+	int sig_type, const void *seckey, size_t seckey_len, const void *data,
 	size_t data_len, void *tmp, size_t tmp_len);
 
-/*
- * Sign the data provided in buffer data[] (of length data_len bytes),
- * using the private key held in privkey[] (of length privkey_len bytes).
- * Note: This signing function does *not* use floating point arithmetic.
- *
- * The source of randomness is the provided SHAKE256 context *rng, which
- * must have been already initialized, seeded, and set to output mode (see
- * shake256_init_prng_from_seed() and shake256_init_prng_from_system()).
- *
- * The signature is written in sig[]. The caller must set *sig_len to
- * the maximum size of sig[]; if the signature computation is
- * successful, then *sig_len will be set to the actual length of the
- * signature. The signature length depends on the signature type,
- * which is specified with the sig_type parameter to one of the three
- * defined values HAWK_SIG_COMPRESSED or HAWK_SIG_PADDED; for the latter, the
- * signature length is fixed (for a given Hawk degree).
- *
- * Regardless of the signature type, the process is constant-time with regard
- * to the private key.
- *
- * The tmp[] buffer is used to hold temporary values. Its size tmp_len
- * MUST be at least HAWK_TMPSIZE_SIGNNTT(logn) bytes.
- *
- * Returned value: 0 on success, or a negative error code.
- */
+/* Helper for hawk_sign_NTT_finish */
 int hawk_sign_NTT(shake256_context *rng, void *sig, size_t *sig_len,
-	int sig_type, const void *privkey, size_t privkey_len, const void *data,
+	int sig_type, const void *seckey, size_t seckey_len, const void *data,
 	size_t data_len, void *tmp, size_t tmp_len);
 
-
-/*
- * Expand a private key. The provided Hawk private key (privkey, of
- * size privkey_len bytes) is decoded and expanded into expanded_key[].
- *
- * The expanded_key[] buffer has size expanded_key_len, which MUST be at
- * least HAWK_EXPANDEDKEY_SIZE(logn) bytes (where 'logn' qualifies the
- * Hawk degree encoded in the private key and can be obtained with
- * hawk_get_logn()). Expanded key contents have an internal,
- * implementation-specific format. Expanded keys may be moved in RAM
- * only if their 8-byte alignment remains unchanged.
- *
- * The tmp[] buffer is used to hold temporary values. Its size tmp_len
- * MUST be at least HAWK_TMPSIZE_EXPANDPRIV(logn) bytes.
- *
- * Returned value: 0 on success, or a negative error code.
- */
-int hawk_expand_privkey(void *expanded_key, size_t expanded_key_len,
-	const void *privkey, size_t privkey_len, void *tmp, size_t tmp_len);
-
-/*
- * Sign the data provided in buffer data[] (of length data_len bytes),
- * using the expanded private key held in expanded_key[], as generated
- * by hawk_expand_privkey().
- *
- * The source of randomness is the provided SHAKE256 context *rng, which
- * must have been already initialized, seeded, and set to output mode (see
- * shake256_init_prng_from_seed() and shake256_init_prng_from_system()).
- *
- * The signature is written in sig[]. The caller must set *sig_len to
- * the maximum size of sig[]; if the signature computation is
- * successful, then *sig_len will be set to the actual length of the
- * signature. The signature length depends on the signature type,
- * which is specified with the sig_type parameter to one of the three
- * defined values HAWK_SIG_COMPRESSED or HAWK_SIG_PADDED; for the latter, the
- * signature length is fixed (for a given Hawk degree).
- *
- * Regardless of the signature type, the process is constant-time with
- * regard to the private key.
- *
- * The tmp[] buffer is used to hold temporary values. Its size tmp_len
- * MUST be at least HAWK_TMPSIZE_SIGN(logn) bytes.
- *
- * Returned value: 0 on success, or a negative error code.
- */
+/* Helper for hawk_sign_finish */
 int hawk_sign(shake256_context *rng, void *sig, size_t *sig_len,
 	int sig_type, const void *expanded_key, const void *data, size_t data_len,
 	void *tmp, size_t tmp_len);
 
-/* ==================================================================== */
+/* ========================================================================= */
 /*
  * Signature generation, streamed API.
  *
- * In the streamed API, the caller performs the data hashing externally.
- * An initialization function (hawk_sign_start()) is first called; it
- * generates and returns a random 40-byte salt value; it also initializes
- * a SHAKE256 context and injects the salt value in that context. The
- * caller must then inject the data to sign in the SHAKE256 context, and
- * finally call hawk_sign_dyn_finish() or hawk_sign_finish() to
- * finalize the signature generation.
+ * In the streamed API, the caller performs the data hashing externally. An
+ * initialization function (hawk_sign_start()) is first called; it initializes
+ * the SHAKE256 context. The caller must then inject the data to sign in the
+ * SHAKE256 context, and finally call one of the hawk_sign_XXX_finish()
+ * functions to finalize the signature generation.
  */
 
 /*
- * Start a signature generation context.
- *
- * A (24 or 40)-byte salt is generated and written in salt[]. The *hash_data
- * context is also initialized, and the salt is injected in that context.
+ * Start a signature generation context: the *hash_data context is initialized.
+ */
+void hawk_sign_start(shake256_context *hash_data);
+
+/*
+ * Finish a signature generation operation, using the secret key held in
+ * seckey[] of length seckey_len bytes. The hashed message is provided as the
+ * SHAKE256 context *hash_data, which must still be in input mode (i.e. not yet
+ * flipped to output mode). During signing, a salt is generated, written in
+ * salt[] and added to (a copy of) *hash_data, after which output is taken from
+ * it. The salt length is 24 or 40 bytes, see the HAWK_SALT_SIZE macro.
  *
  * The source of randomness is the provided SHAKE256 context *rng, which
  * must have been already initialized, seeded, and set to output mode (see
  * shake256_init_prng_from_seed() and shake256_init_prng_from_system()).
- * Also the private key (or expanded private key) has to be provided to
- * determine if salt is 24 bytes (for <=128 security bits) or 40 bytes
- * (256 security bits).
+ *
+ * The signature is written in sig[]. The caller must set *sig_len to the
+ * maximum size of sig[]; if the signature computation is successful, then
+ * *sig_len will be set to the actual length of the signature. The signature
+ * length depends on the signature type, which is specified with the sig_type
+ * parameter to one of the three defined values HAWK_SIG_COMPACT or
+ * HAWK_SIG_PADDED; for the latter, the signature length is fixed (for a given
+ * Hawk degree).
+ * This returns a signature for *uncompressed* HAWK.
+ *
+ * Regardless of the signature type, the process is constant-time with regard
+ * to the secret key.
+ *
+ * The tmp[] buffer is used to hold temporary values. Its size tmp_len MUST be
+ * at least HAWK_TMPSIZE_UNCOMPRESSED_SIGN(logn) bytes.
  *
  * Returned value: 0 on success, or a negative error code.
  */
-int hawk_sign_start(shake256_context *rng, void *salt, const void *obj,
-	shake256_context *hash_data);
+int hawk_uncompressed_sign_finish(shake256_context *rng, void *sig,
+	size_t *sig_len, int sig_type, const void *seckey, size_t seckey_len,
+	shake256_context *hash_data, void *salt, void *tmp, size_t tmp_len);
 
 /*
- * Finish a signature generation operation, using the private key held
- * in privkey[] (of length privkey_len bytes). The hashed salt + message
- * is provided as the SHAKE256 context *hash_data, which must still be
- * in input mode (i.e. not yet flipped to output mode). That context is
- * modified in the process.
- * Note: This signing function does *not* use floating point arithmetic.
- *
- * The salt value (which was used at the start of the hashing process,
- * usually as part of a hawk_sign_start() call) must be provided again,
- * because it is encoded into the signature. The salt length is 40 bytes.
+ * Finish a signature generation operation, using the secret key held in
+ * seckey[] of length seckey_len bytes. The hashed message is provided as the
+ * SHAKE256 context *hash_data, which must still be in input mode (i.e. not yet
+ * flipped to output mode). During signing, a salt is generated, written in
+ * salt[] and added to (a copy of) *hash_data, after which output is taken from
+ * it. The salt length is 24 or 40 bytes, see the HAWK_SALT_SIZE macro.
  *
  * The source of randomness is the provided SHAKE256 context *rng, which
  * must have been already initialized, seeded, and set to output mode (see
  * shake256_init_prng_from_seed() and shake256_init_prng_from_system()).
  *
- * The signature is written in sig[]. The caller must set *sig_len to
- * the maximum size of sig[]; if the signature computation is
- * successful, then *sig_len will be set to the actual length of the
- * signature. The signature length depends on the signature type,
- * which is specified with the sig_type parameter to one of the three
- * defined values HAWK_SIG_COMPRESSED or HAWK_SIG_PADDED; for the latter, the
- * signature length is fixed (for a given Hawk degree).
+ * The signature is written in sig[]. The caller must set *sig_len to the
+ * maximum size of sig[]; if the signature computation is successful, then
+ * *sig_len will be set to the actual length of the signature. The signature
+ * length depends on the signature type, which is specified with the sig_type
+ * parameter to one of the three defined values HAWK_SIG_COMPACT or
+ * HAWK_SIG_PADDED; for the latter, the signature length is fixed (for a given
+ * Hawk degree).
  *
- * Regardless of the signature type, the process is constant-time with
- * regard to the private key.
+ * Regardless of the signature type, the process is constant-time with regard
+ * to the secret key.
  *
- * The tmp[] buffer is used to hold temporary values. Its size tmp_len
- * MUST be at least HAWK_TMPSIZE_SIGNSIMPLE(logn) bytes.
- *
- * Returned value: 0 on success, or a negative error code.
- */
-int hawk_sign_simple_finish(shake256_context *rng, void *sig, size_t *sig_len,
-	int sig_type, const void *privkey, size_t privkey_len,
-	shake256_context *hash_data, const void *salt, void *tmp, size_t tmp_len);
-
-/*
- * Finish a signature generation operation, using the private key held
- * in privkey[] (of length privkey_len bytes). The hashed salt + message
- * is provided as the SHAKE256 context *hash_data, which must still be
- * in input mode (i.e. not yet flipped to output mode). That context is
- * modified in the process.
- *
- * The salt value (which was used at the start of the hashing process,
- * usually as part of a hawk_sign_start() call) must be provided again,
- * because it is encoded into the signature. The salt length is 40 bytes.
- *
- * The source of randomness is the provided SHAKE256 context *rng, which
- * must have been already initialized, seeded, and set to output mode (see
- * shake256_init_prng_from_seed() and shake256_init_prng_from_system()).
- *
- * The signature is written in sig[]. The caller must set *sig_len to
- * the maximum size of sig[]; if the signature computation is
- * successful, then *sig_len will be set to the actual length of the
- * signature. The signature length depends on the signature type,
- * which is specified with the sig_type parameter to one of the three
- * defined values HAWK_SIG_COMPRESSED or HAWK_SIG_PADDED; for the latter, the
- * signature length is fixed (for a given Hawk degree).
- *
- * Regardless of the signature type, the process is constant-time with
- * regard to the private key.
- *
- * The tmp[] buffer is used to hold temporary values. Its size tmp_len
- * MUST be at least HAWK_TMPSIZE_SIGNDYN(logn) bytes.
+ * The tmp[] buffer is used to hold temporary values. Its size tmp_len MUST be
+ * at least HAWK_TMPSIZE_SIGNDYN(logn) bytes.
  *
  * Returned value: 0 on success, or a negative error code.
  */
 int hawk_sign_dyn_finish(shake256_context *rng, void *sig, size_t *sig_len,
-	int sig_type, const void *privkey, size_t privkey_len,
-	shake256_context *hash_data, const void *salt, void *tmp, size_t tmp_len);
+	int sig_type, const void *seckey, size_t seckey_len,
+	shake256_context *hash_data, void *salt, void *tmp, size_t tmp_len);
 
 /*
- * Finish a signature generation operation, using the private key held
- * in privkey[] (of length privkey_len bytes). The hashed salt + message
- * is provided as the SHAKE256 context *hash_data, which must still be
- * in input mode (i.e. not yet flipped to output mode). That context is
- * modified in the process.
- * Note: This signing function does *not* use floating point arithmetic.
- *
- * The salt value (which was used at the start of the hashing process,
- * usually as part of a hawk_sign_start() call) must be provided again,
- * because it is encoded into the signature. The salt length is 40 bytes.
+ * Finish a signature generation operation, using the secret key held in
+ * seckey[] of length seckey_len bytes. The hashed message is provided as the
+ * SHAKE256 context *hash_data, which must still be in input mode (i.e. not yet
+ * flipped to output mode). During signing, a salt is generated, written in
+ * salt[] and added to (a copy of) *hash_data, after which output is taken from
+ * it. The salt length is 24 or 40 bytes, see the HAWK_SALT_SIZE macro.
  *
  * The source of randomness is the provided SHAKE256 context *rng, which
  * must have been already initialized, seeded, and set to output mode (see
  * shake256_init_prng_from_seed() and shake256_init_prng_from_system()).
  *
- * The signature is written in sig[]. The caller must set *sig_len to
- * the maximum size of sig[]; if the signature computation is
- * successful, then *sig_len will be set to the actual length of the
- * signature. The signature length depends on the signature type,
- * which is specified with the sig_type parameter to one of the three
- * defined values HAWK_SIG_COMPRESSED or HAWK_SIG_PADDED; for the latter, the
- * signature length is fixed (for a given Hawk degree).
+ * The signature is written in sig[]. The caller must set *sig_len to the
+ * maximum size of sig[]; if the signature computation is successful, then
+ * *sig_len will be set to the actual length of the signature. The signature
+ * length depends on the signature type, which is specified with the sig_type
+ * parameter to one of the three defined values HAWK_SIG_COMPACT or
+ * HAWK_SIG_PADDED; for the latter, the signature length is fixed (for a given
+ * Hawk degree).
  *
  * Regardless of the signature type, the process is constant-time with regard
- * to the private key.
+ * to the secret key.
  *
- * The tmp[] buffer is used to hold temporary values. Its size tmp_len
- * MUST be at least HAWK_TMPSIZE_SIGNNTT(logn) bytes.
+ * The tmp[] buffer is used to hold temporary values. Its size tmp_len MUST be
+ * at least HAWK_TMPSIZE_SIGNNTT(logn) bytes.
  *
  * Returned value: 0 on success, or a negative error code.
  */
 int hawk_sign_NTT_finish(shake256_context *rng, void *sig, size_t *sig_len,
-	int sig_type, const void *privkey, size_t privkey_len,
-	shake256_context *hash_data, const void *salt, void *tmp, size_t tmp_len);
+	int sig_type, const void *seckey, size_t seckey_len,
+	shake256_context *hash_data, void *salt, void *tmp, size_t tmp_len);
 
 /*
- * Finish a signature generation operation, using the expanded private
- * key held in expanded_key[] (as obtained from
- * hawk_expand_privkey()). The hashed salt + message is provided as
- * the SHAKE256 context *hash_data, which must still be in input mode
- * (i.e. not yet flipped to output mode). That context is modified in
- * the process.
+ * Finish a signature generation operation, using the expanded secret key held
+ * in expanded_key[] (as obtained from hawk_expand_seckey()). The hashed
+ * message is provided as the SHAKE256 context *hash_data, which must still be
+ * in input mode (i.e. not yet flipped to output mode). During signing, a salt
+ * is generated, written in salt[] and added to (a copy of) *hash_data, after
+ * which output is taken from it. The salt length is 24 or 40 bytes, see the
+ * HAWK_SALT_SIZE macro.
  *
- * The salt value (which was used at the start of the hashing process,
- * usually as part of a hawk_sign_start() call) must be provided again,
- * because it is encoded into the signature. The salt length is 40 bytes.
- *
- * The source of randomness is the provided SHAKE256 context *rng, which
- * must have been already initialized, seeded, and set to output mode (see
+ * The source of randomness is the provided SHAKE256 context *rng, which must
+ * have been already initialized, seeded, and set to output mode (see
  * shake256_init_prng_from_seed() and shake256_init_prng_from_system()).
  *
- * The signature is written in sig[]. The caller must set *sig_len to
- * the maximum size of sig[]; if the signature computation is
- * successful, then *sig_len will be set to the actual length of the
- * signature. The signature length depends on the signature type,
- * which is specified with the sig_type parameter to one of the three
- * defined values HAWK_SIG_COMPRESSED or HAWK_SIG_PADDED; for the latter, the
- * signature length is fixed (for a given Hawk degree).
+ * The signature is written in sig[]. The caller must set *sig_len to the
+ * maximum size of sig[]; if the signature computation is successful, then
+ * *sig_len will be set to the actual length of the signature. The signature
+ * length depends on the signature type, which is specified with the sig_type
+ * parameter to one of the three defined values HAWK_SIG_COMPACT or
+ * HAWK_SIG_PADDED; for the latter, the signature length is fixed (for a given
+ * Hawk degree).
  *
  * Regardless of the signature type, the process is constant-time with regard
- * to the private key.
+ * to the secret key.
  *
- * The tmp[] buffer is used to hold temporary values. Its size tmp_len
- * MUST be at least HAWK_TMPSIZE_SIGN(logn) bytes.
+ * The tmp[] buffer is used to hold temporary values. Its size tmp_len MUST be
+ * at least HAWK_TMPSIZE_SIGN(logn) bytes.
  *
  * Returned value: 0 on success, or a negative error code.
  */
 int hawk_sign_finish(shake256_context *rng, void *sig, size_t *sig_len,
 	int sig_type, const void *expanded_key, shake256_context *hash_data,
-	const void *salt, void *tmp, size_t tmp_len);
+	void *salt, void *tmp, size_t tmp_len);
 
-/* ==================================================================== */
+/* ========================================================================= */
 /*
  * Signature verification.
  */
 
-/*
- * Verify the signature sig[] (of length sig_len bytes) with regards to the
- * provided public key pubkey[] (of length pubkey_len bytes) and the message
- * data[] (of length data_len bytes).
- *
- * The sig_type parameter must be zero, or one of HAWK_SIG_COMPRESSED or
- * HAWK_SIG_PADDED. The function verifies that the provided signature has the
- * correct format. If sig_type is zero, then the signature format is inferred
- * from the signature header byte; note that in that case, the signature is
- * malleable (since a signature value can be transcoded to other formats).
- *
- * The tmp[] buffer is used to hold temporary values. Its size tmp_len MUST be
- * at least HAWK_TMPSIZE_VERIFYSIMPLE(logn) bytes.
- *
- * Returned value: 0 on success, or a negative error code.
- */
-int hawk_verify_simple(const void *sig, size_t sig_len, int sig_type,
+/* Helper for hawk_uncompressed_verify_finish */
+int hawk_uncompressed_verify(const void *sig, size_t sig_len, int sig_type,
 	const void *pubkey, size_t pubkey_len, const void *data, size_t data_len,
 	void *tmp, size_t tmp_len);
 
-/*
- * Verify the signature sig[] (of length sig_len bytes) with regards to the
- * provided public key pubkey[] (of length pubkey_len bytes) and the message
- * data[] (of length data_len bytes).
- *
- * The sig_type parameter must be zero, or one of HAWK_SIG_COMPRESSED or
- * HAWK_SIG_PADDED. The function verifies that the provided signature has the
- * correct format. If sig_type is zero, then the signature format is inferred
- * from the signature header byte; note that in that case, the signature is
- * malleable (since a signature value can be transcoded to other formats).
- *
- * The tmp[] buffer is used to hold temporary values. Its size tmp_len MUST be
- * at least HAWK_TMPSIZE_VERIFY(logn) bytes.
- *
- * Returned value: 0 on success, or a negative error code.
- */
+/* Helper for hawk_verify_finish */
 int hawk_verify(const void *sig, size_t sig_len, int sig_type,
 	const void *pubkey, size_t pubkey_len, const void *data, size_t data_len,
 	void *tmp, size_t tmp_len);
@@ -960,52 +806,46 @@ int hawk_verify(const void *sig, size_t sig_len, int sig_type,
 
 /*
  * Start a streamed signature verification. The provided SHAKE256 context
- * *hash_data is initialized, and the salt value (extracted from the
- * signature) is injected into it. The caller shall then inject the
- * message data into the SHAKE256 context, and finally call
- * hawk_verify_finish().
- *
- * Returned value: 0 on success, or a negative error code.
+ * *hash_data is initialized. The caller shall then inject the message data
+ * into the SHAKE256 context, and finally call hawk_verify_finish() or
+ * hawk_uncompressed_verify_finish().
  */
-int hawk_verify_start(shake256_context *hash_data, const void *sig,
-	size_t sig_len);
+void hawk_verify_start(shake256_context *hash_data);
 
 /*
  * Finish a streamed signature verification. The signature sig[] (of length
  * sig_len bytes) is verified against the provided public key pubkey[] (of
  * length pubkey_len bytes) and the hashed message. The hashed message is
  * provided as a SHAKE256 context *hash_data; that context must have received
- * the salt and the message itself (usually, the context is initialized and the
- * salt injected as part of a hawk_verify_start() call), and still be in input
- * mode (not yet flipped to output mode). *hash_data is modified by the
- * verification process.
+ * the message itself, and still be in input mode (not yet flipped to output
+ * mode). *hash_data is modified by the verification process, as salt is added
+ * from the signature.
  *
- * The sig_type parameter must be zero, or one of HAWK_SIG_COMPRESSED or
+ * The sig_type parameter must be zero, or one of HAWK_SIG_COMPACT or
  * HAWK_SIG_PADDED. The function verifies that the provided signature has the
  * correct format. If sig_type is zero, then the signature format is inferred
  * from the signature header byte; note that in that case, the signature is
  * malleable (since a signature value can be transcoded to other formats).
  *
  * The tmp[] buffer is used to hold temporary values. Its size tmp_len MUST be
- * at least HAWK_TMPSIZE_VERIFYSIMPLE(logn) bytes.
+ * at least HAWK_TMPSIZE_UNCOMPRESSED_VERIFY(logn) bytes.
  *
  * Returned value: 0 on success, or a negative error code.
  */
-int hawk_verify_simple_finish(const void *sig, size_t sig_len, int sig_type,
-	const void *pubkey, size_t pubkey_len, shake256_context *hash_data,
-	void *tmp, size_t tmp_len);
+int hawk_uncompressed_verify_finish(const void *sig, size_t sig_len,
+	int sig_type, const void *pubkey, size_t pubkey_len,
+	shake256_context *hash_data, void *tmp, size_t tmp_len);
 
 /*
  * Finish a streamed signature verification. The signature sig[] (of length
  * sig_len bytes) is verified against the provided public key pubkey[] (of
  * length pubkey_len bytes) and the hashed message. The hashed message is
  * provided as a SHAKE256 context *hash_data; that context must have received
- * the salt and the message itself (usually, the context is initialized and the
- * salt injected as part of a hawk_verify_start() call), and still be in input
- * mode (not yet flipped to output mode). *hash_data is modified by the
- * verification process.
+ * the message itself, and still be in input mode (not yet flipped to output
+ * mode). *hash_data is modified by the verification process, as salt is added
+ * from the signature.
  *
- * The sig_type parameter must be zero, or one of HAWK_SIG_COMPRESSED or
+ * The sig_type parameter must be zero, or one of HAWK_SIG_COMPACT or
  * HAWK_SIG_PADDED. The function verifies that the provided signature has the
  * correct format. If sig_type is zero, then the signature format is inferred
  * from the signature header byte; note that in that case, the signature is
@@ -1020,7 +860,7 @@ int hawk_verify_finish(const void *sig, size_t sig_len, int sig_type,
 	const void *pubkey, size_t pubkey_len, shake256_context *hash_data,
 	void *tmp, size_t tmp_len);
 
-/* ==================================================================== */
+/* ========================================================================= */
 
 #ifdef __cplusplus
 }

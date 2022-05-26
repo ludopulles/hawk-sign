@@ -356,16 +356,22 @@ sample_short(prng *rng, fpr *restrict x0, fpr *restrict x1,
 	return (uint32_t)norm <= Zf(l2bound)[logn];
 }
 
+
 /*
- * The following are helper functions for the sign-functions. If a lattice
- * point is generated that is too far away from (h0, h1) / 2, s0 and s1 are
- * untouched and 0 is returned; the caller should then try again. Otherwise, 1
- * is returned and (s0, s1) contain a valid signature for (h0, h1).
+ * The following are different sign functions for uncompressed HAWK or HAWK.
+ * If a lattice point is generated that is too far away from (h0, h1) / 2, s0
+ * and s1 are untouched and 0 is returned; the caller should then try again.
+ * Otherwise, 1 is returned and (s0, s1) contains a valid signature for (h0,
+ * h1), except for a miniscule probability in HAWK that decompression gives a
+ * different s0.
+ *
+ * All signing functions use a fast PRNG for gaussian sampling during signing,
+ * that is seeded with the SHAKE256 context.
  */
 
-/* helper for Zf(sign_dyn) */
-static int
-do_sign_dyn(prng *rng, int16_t *restrict s1,
+/* see inner.h */
+int
+Zf(sign_dyn)(inner_shake256_context *rng, int16_t *restrict s1,
 	const int8_t *restrict f, const int8_t *restrict g,
 	const int8_t *restrict F, const int8_t *restrict G,
 	const uint8_t *restrict h, unsigned logn, uint8_t *restrict tmp)
@@ -374,6 +380,7 @@ do_sign_dyn(prng *rng, int16_t *restrict s1,
 	fpr *x0, *x1, *bf, *bg, *bF, *bG;
 	uint16_t flag;
 	int norm_okay;
+	prng p;
 
 	n = MKN(logn);
 	bf = (fpr *)tmp;
@@ -383,9 +390,11 @@ do_sign_dyn(prng *rng, int16_t *restrict s1,
 	x0 = bG + n;
 	x1 = x0 + n;
 
+	Zf(prng_init)(&p, rng);
+
 	construct_basis(f, g, F, G, bf, bg, bF, bG, logn);
 
-	norm_okay = sample_short(rng, x0, x1, bf, bg, bF, bG, h, logn);
+	norm_okay = sample_short(&p, x0, x1, bf, bg, bF, bG, h, logn);
 
 	/*
 	 * Compute *twice* the rounding error, which is given by:
@@ -428,9 +437,9 @@ do_sign_dyn(prng *rng, int16_t *restrict s1,
 	return norm_okay;
 }
 
-/* helper for Zf(sign) */
-static int
-do_sign(prng *rng, int16_t *restrict s1,
+/* see inner.h */
+int
+Zf(sign)(inner_shake256_context *rng, int16_t *restrict s1,
 	const fpr *restrict expanded_seckey, const uint8_t *restrict h,
 	unsigned logn, uint8_t *restrict tmp)
 {
@@ -439,6 +448,7 @@ do_sign(prng *rng, int16_t *restrict s1,
 	fpr *x0, *x1, *res;
 	uint16_t flag;
 	int norm_okay;
+	prng p;
 
 	n = MKN(logn);
 
@@ -451,7 +461,9 @@ do_sign(prng *rng, int16_t *restrict s1,
 	x1 = x0 + n;
 	res = x1 + n;
 
-	norm_okay = sample_short(rng, x0, x1, bf, bg, bF, bG, h, logn);
+	Zf(prng_init)(&p, rng);
+
+	norm_okay = sample_short(&p, x0, x1, bf, bg, bF, bG, h, logn);
 
 	/*
 	 * Compute *twice* the rounding error, which is given by:
@@ -508,9 +520,9 @@ int8_to_ntt(uint16_t *restrict p, const int8_t *restrict f, unsigned logn)
 	Zf(mq_NTT)(p, logn);
 }
 
-/* helper for Zf(sign_simple) */
-static int
-do_sign_simple(prng *rng,
+/* see inner.h */
+int
+Zf(uncompressed_sign)(inner_shake256_context *rng,
 	int16_t *restrict s0, int16_t *restrict s1,
 	const int8_t *restrict f, const int8_t *restrict g,
 	const int8_t *restrict F, const int8_t *restrict G,
@@ -520,6 +532,7 @@ do_sign_simple(prng *rng,
 	uint8_t h0, h1;
 	uint16_t flag, *bf, *bg, *bF, *bG, *x0, *x1;
 	int32_t norm, z;
+	prng p;
 
 	n = MKN(logn);
 	norm = 0;
@@ -530,6 +543,8 @@ do_sign_simple(prng *rng,
 	bG = bF + n;
 	x0 = (uint16_t *)s0;
 	x1 = (uint16_t *)s1;
+
+	Zf(prng_init)(&p, rng);
 
 	int8_to_ntt(bf, f, logn);
 	int8_to_ntt(bg, g, logn);
@@ -601,13 +616,13 @@ do_sign_simple(prng *rng,
 
 	for (u = 0; u < n; u ++) {
 		z = Zf(mq_conv_signed)(x0[u]);
-		z = mkgauss_sign(rng, z & 1);
+		z = mkgauss_sign(&p, z & 1);
 		x0[u] = Zf(mq_conv_small)(z);
 		norm += z*z;
 	}
 	for (u = 0; u < n; u ++) {
 		z = Zf(mq_conv_signed)(x1[u]);
-		z = mkgauss_sign(rng, z & 1);
+		z = mkgauss_sign(&p, z & 1);
 		x1[u] = Zf(mq_conv_small)(z);
 		norm += z*z;
 	}
@@ -674,9 +689,9 @@ do_sign_simple(prng *rng,
 	return (uint32_t)norm <= Zf(l2bound)[logn];
 }
 
-/* helper for Zf(sign_NTT) */
-static int
-do_sign_NTT(prng *rng, int16_t *restrict s1,
+/* see inner.h */
+int
+Zf(sign_NTT)(inner_shake256_context *rng, int16_t *restrict s1,
 	const int8_t *restrict f, const int8_t *restrict g,
 	const int8_t *restrict F, const int8_t *restrict G,
 	const uint8_t *restrict h, unsigned logn, uint8_t *restrict tmp)
@@ -685,6 +700,7 @@ do_sign_NTT(prng *rng, int16_t *restrict s1,
 	uint8_t h0, h1;
 	uint16_t flag, *bf, *bg, *bF, *bG, *x0, *x1;
 	int32_t norm, z;
+	prng p;
 
 	n = MKN(logn);
 	norm = 0;
@@ -695,6 +711,8 @@ do_sign_NTT(prng *rng, int16_t *restrict s1,
 	bG = bF + n;
 	x0 = bG + n;
 	x1 = (uint16_t *)s1;
+
+	Zf(prng_init)(&p, rng);
 
 	int8_to_ntt(bf, f, logn);
 	int8_to_ntt(bg, g, logn);
@@ -766,13 +784,13 @@ do_sign_NTT(prng *rng, int16_t *restrict s1,
 
 	for (u = 0; u < n; u ++) {
 		z = Zf(mq_conv_signed)(x0[u]);
-		z = mkgauss_sign(rng, z & 1);
+		z = mkgauss_sign(&p, z & 1);
 		x0[u] = Zf(mq_conv_small)(z);
 		norm += z*z;
 	}
 	for (u = 0; u < n; u ++) {
 		z = Zf(mq_conv_signed)(x1[u]);
-		z = mkgauss_sign(rng, z & 1);
+		z = mkgauss_sign(&p, z & 1);
 		x1[u] = Zf(mq_conv_small)(z);
 		norm += z*z;
 	}
@@ -841,7 +859,7 @@ Zf(expand_seckey)(fpr *restrict expanded_seckey,
 	bG = bF + n;
 
 	/*
-	 * We load the private key elements directly into the 2x2 matrix B.
+	 * We load the secret key elements directly into the 2x2 matrix B.
 	 */
 	construct_basis(f, g, F, NULL, bf, bg, bF, bG, logn);
 
@@ -852,60 +870,3 @@ Zf(expand_seckey)(fpr *restrict expanded_seckey,
 	 * Zf(poly_invnorm2_fft)(invq00, bf, bg, logn);
 	 */
 }
-
-/*
- * Use a fast PRNG for gaussian sampling during signing.
- */
-
-/* see inner.h */
-void
-Zf(sign_dyn)(inner_shake256_context *rng, int16_t *restrict sig,
-	const int8_t *restrict f, const int8_t *restrict g,
-	const int8_t *restrict F, const int8_t *restrict G,
-	const uint8_t *restrict h, unsigned logn, uint8_t *restrict tmp)
-{
-	prng p;
-	do {
-		Zf(prng_init)(&p, rng);
-	} while (!do_sign_dyn(&p, sig, f, g, F, G, h, logn, tmp));
-}
-
-/* see inner.h */
-void
-Zf(sign_NTT)(inner_shake256_context *rng, int16_t *restrict sig,
-	const int8_t *restrict f, const int8_t *restrict g,
-	const int8_t *restrict F, const int8_t *restrict G,
-	const uint8_t *restrict h, unsigned logn, uint8_t *restrict tmp)
-{
-	prng p;
-	do {
-		Zf(prng_init)(&p, rng);
-	} while (!do_sign_NTT(&p, sig, f, g, F, G, h, logn, tmp));
-}
-
-/* see inner.h */
-void
-Zf(sign_simple)(inner_shake256_context *rng,
-	int16_t *restrict s0, int16_t *restrict s1,
-	const int8_t *restrict f, const int8_t *restrict g,
-	const int8_t *restrict F, const int8_t *restrict G,
-	const uint8_t *restrict h, unsigned logn, uint8_t *restrict tmp)
-{
-	prng p;
-	do {
-		Zf(prng_init)(&p, rng);
-	} while (!do_sign_simple(&p, s0, s1, f, g, F, G, h, logn, tmp));
-}
-
-/* see inner.h */
-void
-Zf(sign)(inner_shake256_context *rng, int16_t *restrict sig,
-	const fpr *restrict expanded_seckey, const uint8_t *restrict h,
-	unsigned logn, uint8_t *restrict tmp)
-{
-	prng p;
-	do {
-		Zf(prng_init)(&p, rng);
-	} while (!do_sign(&p, sig, expanded_seckey, h, logn, tmp));
-}
-

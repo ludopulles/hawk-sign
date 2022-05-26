@@ -164,13 +164,13 @@ bench_keygen(void *ctx, unsigned long num)
 }
 
 static int
-bench_expand_privkey(void *ctx, unsigned long num)
+bench_expand_seckey(void *ctx, unsigned long num)
 {
 	bench_context *bc;
 
 	bc = ctx;
 	while (num -- > 0) {
-		CC(hawk_expand_privkey(
+		CC(hawk_expand_seckey(
 			bc->esk, HAWK_EXPANDEDKEY_SIZE(bc->logn),
 			bc->sk, HAWK_SECKEY_SIZE(bc->logn),
 			bc->tmp, bc->tmp_len));
@@ -185,9 +185,9 @@ bench_sign_simple(void *ctx, unsigned long num)
 
 	bc = ctx;
 	while (num -- > 0) {
-		bc->sigsimple_len = HAWK_SIG_SIMPLE_COMPRESSED_MAXSIZE(bc->logn);
-		CC(hawk_sign_simple(&bc->rng,
-			bc->sigsimple, &bc->sigsimple_len, HAWK_SIG_COMPRESSED,
+		bc->sigsimple_len = HAWK_UNCOMPRESSED_SIG_COMPACT_MAXSIZE(bc->logn);
+		CC(hawk_uncompressed_sign(&bc->rng,
+			bc->sigsimple, &bc->sigsimple_len, HAWK_SIG_COMPACT,
 			bc->sk, HAWK_SECKEY_SIZE(bc->logn),
 			"data", 4, bc->tmp, bc->tmp_len));
 	}
@@ -201,9 +201,9 @@ bench_sign_NTT(void *ctx, unsigned long num)
 
 	bc = ctx;
 	while (num -- > 0) {
-		bc->sig_len = HAWK_SIG_COMPRESSED_MAXSIZE(bc->logn);
+		bc->sig_len = HAWK_SIG_COMPACT_MAXSIZE(bc->logn);
 		CC(hawk_sign_NTT(&bc->rng,
-			bc->sig, &bc->sig_len, HAWK_SIG_COMPRESSED,
+			bc->sig, &bc->sig_len, HAWK_SIG_COMPACT,
 			bc->sk, HAWK_SECKEY_SIZE(bc->logn),
 			"data", 4, bc->tmp, bc->tmp_len));
 	}
@@ -217,9 +217,9 @@ bench_sign_dyn(void *ctx, unsigned long num)
 
 	bc = ctx;
 	while (num -- > 0) {
-		bc->sig_len = HAWK_SIG_COMPRESSED_MAXSIZE(bc->logn);
+		bc->sig_len = HAWK_SIG_COMPACT_MAXSIZE(bc->logn);
 		CC(hawk_sign_dyn(&bc->rng,
-			bc->sig, &bc->sig_len, HAWK_SIG_COMPRESSED,
+			bc->sig, &bc->sig_len, HAWK_SIG_COMPACT,
 			bc->sk, HAWK_SECKEY_SIZE(bc->logn),
 			"data", 4, bc->tmp, bc->tmp_len));
 	}
@@ -233,9 +233,9 @@ bench_sign(void *ctx, unsigned long num)
 
 	bc = ctx;
 	while (num -- > 0) {
-		bc->sig_len = HAWK_SIG_COMPRESSED_MAXSIZE(bc->logn);
+		bc->sig_len = HAWK_SIG_COMPACT_MAXSIZE(bc->logn);
 		CC(hawk_sign(&bc->rng,
-			bc->sig, &bc->sig_len, HAWK_SIG_COMPRESSED,
+			bc->sig, &bc->sig_len, HAWK_SIG_COMPACT,
 			bc->esk,
 			"data", 4, bc->tmp, bc->tmp_len));
 	}
@@ -249,8 +249,8 @@ bench_verify_simple(void *ctx, unsigned long num)
 
 	bc = ctx;
 	while (num -- > 0) {
-		CC(hawk_verify_simple(
-			bc->sigsimple, bc->sigsimple_len, HAWK_SIG_COMPRESSED,
+		CC(hawk_uncompressed_verify(
+			bc->sigsimple, bc->sigsimple_len, HAWK_SIG_COMPACT,
 			bc->pk, HAWK_PUBKEY_SIZE[bc->logn],
 			"data", 4, bc->tmp, bc->tmp_len));
 	}
@@ -265,7 +265,7 @@ bench_verify(void *ctx, unsigned long num)
 	bc = ctx;
 	while (num -- > 0) {
 		CC(hawk_verify(
-			bc->sig, bc->sig_len, HAWK_SIG_COMPRESSED,
+			bc->sig, bc->sig_len, HAWK_SIG_COMPACT,
 			bc->pk, HAWK_PUBKEY_SIZE[bc->logn],
 			"data", 4, bc->tmp, bc->tmp_len));
 	}
@@ -287,26 +287,26 @@ test_speed_hawk(unsigned logn, double threshold)
 		exit(EXIT_FAILURE);
 	}
 	len = HAWK_TMPSIZE_KEYGEN(logn);
-	len = maxsz(len, HAWK_TMPSIZE_SIGNSIMPLE(logn));
+	len = maxsz(len, HAWK_TMPSIZE_UNCOMPRESSED_SIGN(logn));
 	len = maxsz(len, HAWK_TMPSIZE_SIGNDYN(logn));
 	len = maxsz(len, HAWK_TMPSIZE_SIGNNTT(logn));
 	len = maxsz(len, HAWK_TMPSIZE_SIGN(logn));
 	len = maxsz(len, HAWK_TMPSIZE_EXPANDPRIV(logn));
-	len = maxsz(len, HAWK_TMPSIZE_VERIFYSIMPLE(logn));
+	len = maxsz(len, HAWK_TMPSIZE_UNCOMPRESSED_VERIFY(logn));
 	len = maxsz(len, HAWK_TMPSIZE_VERIFY(logn));
 	bc.tmp = xmalloc(len);
 	bc.tmp_len = len;
 	bc.sk = xmalloc(HAWK_SECKEY_SIZE(logn));
 	bc.pk = xmalloc(HAWK_PUBKEY_SIZE[logn]);
 	bc.esk = xmalloc(HAWK_EXPANDEDKEY_SIZE(logn));
-	bc.sigsimple = xmalloc(HAWK_SIG_SIMPLE_COMPRESSED_MAXSIZE(logn));
+	bc.sigsimple = xmalloc(HAWK_UNCOMPRESSED_SIG_COMPACT_MAXSIZE(logn));
 	bc.sigsimple_len = 0;
-	bc.sig = xmalloc(HAWK_SIG_COMPRESSED_MAXSIZE(logn));
+	bc.sig = xmalloc(HAWK_SIG_COMPACT_MAXSIZE(logn));
 	bc.sig_len = 0;
 
 	printf(" %8.2f", do_bench(&bench_keygen, &bc, threshold) / 1000000.0);
 	fflush(stdout);
-	printf(" %8.2f", do_bench(&bench_expand_privkey, &bc, threshold) / 1000.0);
+	printf(" %8.2f", do_bench(&bench_expand_seckey, &bc, threshold) / 1000.0);
 	fflush(stdout);
 	printf(" %8.2f", do_bench(&bench_sign_simple, &bc, threshold) / 1000.0);
 	fflush(stdout);

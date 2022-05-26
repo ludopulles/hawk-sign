@@ -194,7 +194,7 @@ WorkerResult measure_signatures(unsigned logn) {
 		inner_shake256_extract(&sc, h, sizeof h);
 
 		// Compute the signature.
-		Zf(sign_simple)(&sc, s0, s1, f, g, F, G, h, logn, b);
+		while (!Zf(uncompressed_sign)(&sc, s0, s1, f, g, F, G, h, logn, b)) {}
 
 		for (size_t u = 0; u < n; u++) {
 			result.sum_s0 += s0[u];

@@ -91,7 +91,7 @@ verify_nearest_plane_tree(const fpr *restrict tree,
 	Zf(ffNearestPlane_tree)(t1, tree, t0, logn, t1 + n);
 	Zf(fft_to_int16)(s0, t1, logn);
 
-	return Zf(verify_simple)(h, s0, s1, q00, q10, q11, logn, tmp);
+	return Zf(uncompressed_verify)(h, s0, s1, q00, q10, q11, logn, tmp);
 }
 
 // =============================================================================
@@ -134,7 +134,7 @@ void measure_sign_speed()
 	// Also pregenerate all signatures
 	gettimeofday(&t0, NULL);
 	for (int rep = 0; rep < num_samples; rep++) {
-		Zf(sign_simple)(&sc, pregen_s0[rep], pregen_s1[rep], f, g, F, G, pregen_h[rep], logn, b);
+		Zf(uncompressed_sign)(&sc, pregen_s0[rep], pregen_s1[rep], f, g, F, G, pregen_h[rep], logn, b);
 	}
 	gettimeofday(&t1, NULL);
 	ll cs_us = time_diff(&t0, &t1);
@@ -153,7 +153,7 @@ void measure_sign_speed()
 	gettimeofday(&t1, NULL);
 	ll ss_us = time_diff(&t0, &t1);
 
-	printf("sign_simple: %.1f us/sign\n", (double)cs_us / num_samples);
+	printf("uncomp_sign: %.1f us/sign\n", (double)cs_us / num_samples);
 	printf("   sign_dyn: %.1f us/sign\n", (double)sd_us / num_samples);
 	printf("       sign: %.1f us/sign\n", (double)ss_us / num_samples);
 
@@ -161,7 +161,7 @@ void measure_sign_speed()
 	int nr_cor = 0;
 	gettimeofday(&t0, NULL);
 	for (int rep = 0; rep < num_samples; rep++)
-		nr_cor += Zf(verify_simple)(pregen_h[rep], pregen_s0[rep], pregen_s1[rep], q00, q10, q11, logn, b);
+		nr_cor += Zf(uncompressed_verify)(pregen_h[rep], pregen_s0[rep], pregen_s1[rep], q00, q10, q11, logn, b);
 	gettimeofday(&t1, NULL);
 	printf("# correct = %d\n", nr_cor);
 	ll cv_us = time_diff(&t0, &t1);

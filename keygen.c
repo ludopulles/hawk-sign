@@ -4022,7 +4022,7 @@ Zf(keygen)(inner_shake256_context *rng,
 		/*
 		 * If the l2-norm of (f, g) is shorter than sigma_sec^2 * 2n, BKZ may
 		 * return a shortest vector when given the public key much faster than
-		 * other instances, so this private key is not secure to use.
+		 * other instances, so this secret key is not secure to use.
 		 * Thus, set fg_okay to 0 when ||(f, g)||^2 < Zf(l2bound)[logn]/4.
 		 */
 		norm = 0;

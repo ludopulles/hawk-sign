@@ -36,7 +36,7 @@ void test_simple_forgeries(unsigned logn)
 		inner_shake256_extract(&sc, h, sizeof h);
 
 		// Compute the signature.
-		Zf(sign)(&sc, sig, exp_sk, h, logn, tmp.b);
+		while (!Zf(sign)(&sc, sig, exp_sk, h, logn, tmp.b)) {}
 
 		assert(Zf(verify_simple_rounding_fft)(h, sig, q00, q10, q11, logn, tmp.b));
 		for (size_t u = 0; u < n; u ++)
@@ -59,10 +59,12 @@ int main() {
 	 * certain hash, but we claim no security for them anyway.
 	 */
 	for (unsigned logn = 6; logn <= 9; logn++) {
+		printf("%d", logn);
+		fflush(stdout);
 		test_simple_forgeries(logn);
 	}
 
-	printf("No simple forgeries were possible.\n");
+	printf("\nNo simple forgeries were possible.\n");
 
 	return 0;
 }

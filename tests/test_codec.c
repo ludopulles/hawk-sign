@@ -86,7 +86,7 @@ void test_encode_decode(unsigned logn) {
 		// Test complete signature encoding and decoding
 		inner_shake256_extract(&sc, h, n <= 8 ? 2 : n / 4);
 
-		Zf(sign_simple)(&sc, s0, s1, f, g, F, G, h, logn, b);
+		while (!Zf(uncompressed_sign)(&sc, s0, s1, f, g, F, G, h, logn, b)) {}
 		size_t sig_len = Zf(encode_sig_simple)(outbuf, BUFLEN, s0, s1,
 			logn, 8, 5);
 		assert(sig_len != 0);
@@ -97,7 +97,7 @@ void test_encode_decode(unsigned logn) {
 		assert(poly16_eq(s1, _s1, logn));
 
 		// Test (compressed) signature encoding and decoding
-		Zf(sign_dyn)(&sc, s1, f, g, F, G, h, logn, b);
+		while (!Zf(sign_dyn)(&sc, s1, f, g, F, G, h, logn, b)) {}
 		sig_len = Zf(encode_sig)(outbuf, BUFLEN, s1, logn, 5);
 		assert(sig_len != 0);
 		assert(sig_len == Zf(decode_sig)(_s1, outbuf, sig_len, logn, 5));
@@ -115,8 +115,10 @@ int main() {
 	inner_shake256_flip(&sc);
 
 	for (unsigned logn = 1; logn <= LOGN; logn++) {
-		printf("Testing logn = %u\n", logn);
+		printf("%u", logn);
+		fflush(stdout);
 		test_encode_decode(logn);
 	}
+	printf("\n");
 	return 0;
 }
