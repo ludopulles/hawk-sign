@@ -526,8 +526,8 @@ void Zf(int8_to_fft)(fpr *p, const int8_t *x, unsigned logn);
 void Zf(fft_to_int16)(int16_t *x, fpr *p, unsigned logn);
 
 /*
- * On input s and h both of length 2^logn, find the first position i for which
- * h_i != 2 s_i holds and return whether we have h_i - 2 s_i > 0 here.
+ * With input s and h both of length 2^logn, let e = h - 2s.
+ * Return whether e != 0 and the first nonzero coefficient is positive.
  *
  * One needs to do this check on the second half of a signature during signing
  * and verification, as otherwise given a valid signature (s_0, s_1) for a hash

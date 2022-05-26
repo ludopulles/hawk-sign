@@ -45,6 +45,11 @@ Zf(in_positive_half)(const int16_t *s, const uint8_t *h, unsigned logn)
 	uint8_t hash;
 
 	n = MKN(logn);
+	/*
+	 * flag:   indicates whether a nonzero entry is seen yet,
+	 * result: indicates whether the error vector e = h - 2s is valid so far,
+	 * set:    indicates if the current value is nonzero.
+	 */
 	flag = 0;
 	result = 1;
 
@@ -59,7 +64,7 @@ Zf(in_positive_half)(const int16_t *s, const uint8_t *h, unsigned logn)
 		for (u = 0; u < n; ) {
 			hash = *h++;
 			for (v = 0; v < 8; v ++, u ++) {
-				value = (uint32_t)(hash & 1u) - 2u * (int32_t) s[u];
+				value = (uint32_t)(hash & 1u) - 2u * (uint32_t) s[u];
 				/*
 				 * set = (value != 0);
 				 * if (flag == 0 && set == 1) {
@@ -78,5 +83,8 @@ Zf(in_positive_half)(const int16_t *s, const uint8_t *h, unsigned logn)
 			}
 		}
 	}
-	return (int) result;
+	/*
+	 * Both flag must be set and result must still be equal to 1.
+	 */
+	return (int) flag & result;
 }
