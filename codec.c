@@ -437,10 +437,6 @@ static const size_t low_bits_q10[10] = {
 	0 /* unused */, 1, 2, 3, 4, 5, 6, 7, 8, 9
 };
 
-static const size_t low_bits_FG[10] = {
-	0 /* unused */, 0, 0, 0, 0, 0, 1, 1, 2, 2
-}; 
-
 /* see inner.h */
 size_t
 Zf(encode_pubkey)(void *out, size_t max_out_len,
@@ -1152,86 +1148,65 @@ Zf(decode_sig)(int16_t *x, const void *in, size_t max_in_len, unsigned logn,
 }
 
 /*
- * Optimal choice for sigma_pk = 1.425 is lo_bits_fg = 0, lo_bits_FG = 2
- * Results in |sk| = 1037.2 ± 10.7 bytes, for n=512.
+ * Encode f, g with 5 bits and F with 8 bits.
  * Note: G can be recalculated from fG - gF = 1 so do not encode it.
  */
 size_t
-Zf(encode_seckey)(void *out, size_t max_out_len,
+Zf(encode_seckey)(uint8_t *out, size_t max_out_len,
 	const int8_t *f, const int8_t *g, const int8_t *F, unsigned logn)
 {
-	uint8_t *buf, w;
-	uint64_t acc;
-	size_t n, u, v, acc_len, lo_bits;
+	uint16_t acc;
+	size_t n, u, out_len, acc_len;
 
 	n = MKN(logn);
-	buf = (uint8_t *)out;
 	acc = 0;
 	acc_len = 0;
-	v = 0;
+	out_len = ((n * 18) + 7) >> 3;
 
-#define POLY_ENC(x)                                                           \
-	for (u = 0; u < n; u ++) {                                                \
-		/* Push sign bit */                                                   \
-		w = (uint8_t) x[u];                                                   \
-		acc = (acc << 1) | (w >> 7);                                          \
-		w ^= -(w >> 7);                                                       \
-		/*
-		 * Push the lowest `lo_bits` bits of |x[u]|'.
-		 */                                                                   \
-		acc <<= lo_bits;                                                      \
-		acc |= w & ((1U << lo_bits) - 1);                                     \
-		w >>= lo_bits;                                                        \
-		acc_len += lo_bits + 1;                                               \
-		/*
-		 * Push as many zeros as necessary, then a one. If this means the data
-		 * cannot be stored in the buffer acc, return 0 which implies that the
-		 * secret key must be rejected. The lo_bits are tuned such that this
-		 * almost never happens.
-		 */                                                                   \
-		acc_len += w + 1;                                                     \
-		if (acc_len > 64) return 0;                                           \
-		acc = (acc << (w + 1)) | 1;                                           \
-		/* Produce all full bytes. */                                         \
-		while (acc_len >= 8) {                                                \
-			acc_len -= 8;                                                     \
-			if (buf != NULL) {                                                \
-				if (v >= max_out_len) return 0;                               \
-				buf[v] = (uint8_t)(acc >> acc_len);                           \
-			}                                                                 \
-			v ++;                                                             \
-		}                                                                     \
+	for (u = 0; u < n; u++) {
+		if (f[u] < -16 || f[u] >= 16 || g[u] < -16 || g[u] >= 16) {
+			return 0;
+		}
+	}
+
+	if (out == NULL) {
+		return out_len;
+	} else if (out_len > max_out_len) {
+		return 0;
 	}
 
 	/*
-	 * Always output f, g in unary since the standard deviation is so small.
+	 * First write F literally as it is.
 	 */
-	lo_bits = 0;
-	POLY_ENC(f);
-	POLY_ENC(g);
+	for (u = 0; u < n; u++) {
+		*out ++ = (uint8_t)F[u];
+	}
 
 	/*
-	 * Since the coefficient sizes of F, G can be somewhat larger than those of
-	 * f, g, do output the least significant two bits of F, G and then output
-	 * the remainder in unary. Note that G can be reconstructed from f, g and F
-	 * since fG - gF = 1.
+	 * Now write f, g with 5 bits each.
 	 */
-	lo_bits = low_bits_FG[logn];
-	POLY_ENC(F);
+#define POLY_ENC(x)                                                           \
+	for (u = 0; u < n; u ++) {                                                \
+		/* Push exactly len bits */                                           \
+		acc = (acc << 5) | ((uint8_t) x[u] & 31u);                            \
+		acc_len += 5;                                                         \
+		/* Produce all full bytes. */                                         \
+		if (acc_len >= 8) {                                                   \
+			acc_len -= 8;                                                     \
+			*out ++ = (uint8_t)(acc >> acc_len);                              \
+		}                                                                     \
+	}
+
+	POLY_ENC(f);
+	POLY_ENC(g);
 
 	/*
 	 * Flush remaining bits (if any).
 	 */
 	if (acc_len > 0) {
-		if (buf != NULL) {
-			if (v >= max_out_len) {
-				return 0;
-			}
-			buf[v] = (uint8_t)(acc << (8 - acc_len));
-		}
-		v ++;
+		*out ++ = (uint8_t)(acc << (8 - acc_len));
 	}
-	return v;
+	return out_len;
 #undef POLY_ENC
 }
 
@@ -1242,67 +1217,55 @@ Zf(encode_seckey)(void *out, size_t max_out_len,
  */
 size_t
 Zf(decode_seckey)(int8_t *f, int8_t *g, int8_t *F,
-	const void *in, size_t max_in_len, unsigned logn)
+	const uint8_t *in, size_t max_in_len, unsigned logn)
 {
-	const uint8_t *buf;
-	uint16_t acc, s, w;
-	size_t n, u, v, lo_bits, acc_len;
+	uint8_t w;
+	uint16_t acc;
+	size_t n, u, in_len, acc_len;
 
 	n = MKN(logn);
-	buf = (const uint8_t *)in;
 	acc = 0;
 	acc_len = 0;
-	v = 0;
+	in_len = ((n * 18) + 7) >> 3;
 
-#define ENSUREBIT()                                                           \
-	if (acc_len == 0) {                                                       \
-		if (v >= max_in_len) return 0; /* not enough bits */                  \
-		acc = buf[v++];                                                       \
-		acc_len = 8;                                                          \
+	if (in_len > max_in_len) {
+		return 0;
 	}
 
-#define GETBIT() ((acc >> (--(acc_len))) & 1)
+	/*
+	 * First read F literally as it is.
+	 */
+	for (u = 0; u < n; u++) {
+		F[u] = (int8_t) (*in ++);
+	}
 
+	/*
+	 * Now read f, g with 5 bits each.
+	 */
 #define POLY_DEC(x)                                                           \
 	for (u = 0; u < n; u ++) {                                                \
-		/* Get sign of the current coefficient */                             \
-		ENSUREBIT();                                                          \
-		s = GETBIT();                                                         \
-		/* Get lo_bits least significant bits of w. */                        \
-		if (acc_len < lo_bits) {                                              \
-			if (v >= max_in_len) return 0;                                    \
-			acc = (acc << 8) | buf[v ++];                                     \
+		/* Fill the accumulator if needed */                                  \
+		if (acc_len < 5) {                                                    \
+			acc = (acc << 8) | (uint16_t)(*in ++);                            \
 			acc_len += 8;                                                     \
 		}                                                                     \
-		w = (acc >> (acc_len -= lo_bits)) & ((1U << lo_bits) - 1);            \
-		/*
-		 * Recover the most significant bits of w: count number of consecutive
-		 * zeros up to the first 1 and add 2^lo_bits to w for each one you see.
-		 */                                                                   \
-		for (;;) {                                                            \
-			ENSUREBIT();                                                      \
-			if (GETBIT() != 0) break;                                         \
-			w += (1U << lo_bits);                                             \
-			/* Value does not fit into a int8_t (signed single byte). */      \
-			if (w >= 128) return 0;                                           \
-		}                                                                     \
-		x[u] = w ^ -s;                                                        \
+		/* Take 5 bits from the accumulator */                                \
+		w = (uint8_t)(acc >> (acc_len -= 5)) & 31u;                           \
+		/* Let bits 7..5 match (sign) bit 4 */                                \
+		w -= (w & 16) << 1;                                                   \
+		x[u] = (int8_t)w;                                                     \
 	}
 
-	lo_bits = 0;
 	POLY_DEC(f);
 	POLY_DEC(g);
 
-	lo_bits = low_bits_FG[logn];
-	POLY_DEC(F);
-
 	/*
-	 * Unused bits in the last byte must be zero.
+	 * Extra bits in the last byte must be zero.
 	 */
 	if ((acc & ((1u << acc_len) - 1u)) != 0) {
 		return 0;
 	}
-	return v;
+	return in_len;
 #undef ENSUREBIT
 #undef GETBIT
 #undef POLY_DEC

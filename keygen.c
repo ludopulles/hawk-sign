@@ -3755,6 +3755,7 @@ solve_NTRU_binary_depth0(unsigned logn,
 	/*
 	 * Babai (F, G) with respect to the GSO of (f, g) using Ducas-Prest's Fast
 	 * Fourier Orthogonalization ffNP routine.
+	 * Comment out if you don't want to perform ffNP.
 	 */
 	Zf(ffNearestPlane_dyn)(rt3, rt2, logn, rt3 + n);
 

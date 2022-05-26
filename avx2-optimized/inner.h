@@ -538,14 +538,14 @@ int Zf(in_positive_half)(const int16_t *s, const uint8_t *h, unsigned logn);
 
 /* ==================================================================== */
 /*
- * Coding & decoding (compress.c)
+ * Coding & decoding (codec.c)
  */
 
 /*
- * Encodes the NTRU-basis which is the private key of the signature scheme,
- * with an efficient encoding. The smallest private key is obtained by storing
- * the seed for the key generation, while the largest is storing the basis as
- * 16bit integers. Here, a middle-way is chosen.
+ * Encodes the NTRU-basis which is the secret key of the signature scheme, with
+ * an efficient encoding. The smallest secret key is obtained by storing the
+ * seed for the key generation, while the largest is storing the basis as 16bit
+ * integers. Here, a middle-way is chosen.
  */
 size_t Zf(encode_seckey)(void *out, size_t max_out_len,
 	const int8_t *f, const int8_t *g, const int8_t *F, unsigned logn);

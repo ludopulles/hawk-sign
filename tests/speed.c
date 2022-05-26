@@ -156,7 +156,7 @@ bench_keygen(void *ctx, unsigned long num)
 	bc = ctx;
 	while (num -- > 0) {
 		CC(hawk_keygen_make(&bc->rng, bc->logn,
-			bc->sk, HAWK_SECKEY_SIZE[bc->logn],
+			bc->sk, HAWK_SECKEY_SIZE(bc->logn),
 			bc->pk, HAWK_PUBKEY_SIZE[bc->logn],
 			bc->tmp, bc->tmp_len));
 	}
@@ -172,7 +172,7 @@ bench_expand_privkey(void *ctx, unsigned long num)
 	while (num -- > 0) {
 		CC(hawk_expand_privkey(
 			bc->esk, HAWK_EXPANDEDKEY_SIZE(bc->logn),
-			bc->sk, HAWK_SECKEY_SIZE[bc->logn],
+			bc->sk, HAWK_SECKEY_SIZE(bc->logn),
 			bc->tmp, bc->tmp_len));
 	}
 	return 0;
@@ -188,7 +188,7 @@ bench_sign_simple(void *ctx, unsigned long num)
 		bc->sigsimple_len = HAWK_SIG_SIMPLE_COMPRESSED_MAXSIZE(bc->logn);
 		CC(hawk_sign_simple(&bc->rng,
 			bc->sigsimple, &bc->sigsimple_len, HAWK_SIG_COMPRESSED,
-			bc->sk, HAWK_SECKEY_SIZE[bc->logn],
+			bc->sk, HAWK_SECKEY_SIZE(bc->logn),
 			"data", 4, bc->tmp, bc->tmp_len));
 	}
 	return 0;
@@ -204,7 +204,7 @@ bench_sign_NTT(void *ctx, unsigned long num)
 		bc->sig_len = HAWK_SIG_COMPRESSED_MAXSIZE(bc->logn);
 		CC(hawk_sign_NTT(&bc->rng,
 			bc->sig, &bc->sig_len, HAWK_SIG_COMPRESSED,
-			bc->sk, HAWK_SECKEY_SIZE[bc->logn],
+			bc->sk, HAWK_SECKEY_SIZE(bc->logn),
 			"data", 4, bc->tmp, bc->tmp_len));
 	}
 	return 0;
@@ -220,7 +220,7 @@ bench_sign_dyn(void *ctx, unsigned long num)
 		bc->sig_len = HAWK_SIG_COMPRESSED_MAXSIZE(bc->logn);
 		CC(hawk_sign_dyn(&bc->rng,
 			bc->sig, &bc->sig_len, HAWK_SIG_COMPRESSED,
-			bc->sk, HAWK_SECKEY_SIZE[bc->logn],
+			bc->sk, HAWK_SECKEY_SIZE(bc->logn),
 			"data", 4, bc->tmp, bc->tmp_len));
 	}
 	return 0;
@@ -296,8 +296,8 @@ test_speed_hawk(unsigned logn, double threshold)
 	len = maxsz(len, HAWK_TMPSIZE_VERIFY(logn));
 	bc.tmp = xmalloc(len);
 	bc.tmp_len = len;
+	bc.sk = xmalloc(HAWK_SECKEY_SIZE(logn));
 	bc.pk = xmalloc(HAWK_PUBKEY_SIZE[logn]);
-	bc.sk = xmalloc(HAWK_SECKEY_SIZE[logn]);
 	bc.esk = xmalloc(HAWK_EXPANDEDKEY_SIZE(logn));
 	bc.sigsimple = xmalloc(HAWK_SIG_SIMPLE_COMPRESSED_MAXSIZE(logn));
 	bc.sigsimple_len = 0;
@@ -360,7 +360,7 @@ main(int argc, char *argv[])
 	fflush(stdout);
 
 	for (unsigned logn = 1; logn <= 9; logn++) {
-		test_speed_hawk(logn, logn <= 7 ? 0.001 : threshold);
+		test_speed_hawk(logn, logn <= 8 ? 0.001 : threshold);
 	}
 
 	return 0;

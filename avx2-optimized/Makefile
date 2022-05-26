@@ -9,7 +9,7 @@ LIBS = -lpthread -lm
 CXX = g++
 CXXFLAGS = --std=c++17 $(CFLAGS)
 
-OBJ = build/common.o build/compress.o build/fft.o build/ffo.o build/fpr.o build/keygen.o build/ntt.o build/rng.o build/shake.o build/sign.o build/vrfy.o
+OBJ = build/common.o build/codec.o build/fft.o build/ffo.o build/fpr.o build/keygen.o build/ntt.o build/rng.o build/shake.o build/sign.o build/vrfy.o
 PROGS = bin/test_keygen bin/test_sign bin/config_fg bin/config_FG bin/test_babai bin/test_enum bin/signature_size bin/speed bin/test_decompress_sig bin/skpk_size
 
 HEAD = fpr.h inner.h
@@ -53,8 +53,8 @@ bin/test_decompress_sig: tests/test_decompress_sig.cpp $(OBJ)
 # Object files:
 build/common.o: common.c $(HEAD)
 	$(CC) $(CFLAGS) -c -o build/common.o common.c
-build/compress.o: compress.c $(HEAD)
-	$(CC) $(CFLAGS) -c -o build/compress.o compress.c
+build/codec.o: codec.c $(HEAD)
+	$(CC) $(CFLAGS) -c -o build/codec.o codec.c
 build/fft.o: fft.c $(HEAD)
 	$(CC) $(CFLAGS) -c -o build/fft.o fft.c
 build/ffo.o: ffo.c $(HEAD)

@@ -120,9 +120,10 @@ extern "C" {
  *
  * FORMATS
  *
- * Public and private keys are exchanged using a compressed Gaussian encoding,
- * part of compress.c. Their respective sizes (for a given degree) follow a
- * distribution that is close to a normal distribution.
+ * Public and private keys are exchanged as serialized sequences of bytes.
+ * The private key sizes are fixed (for a given degree).
+ * The public key sizes (for a given degree) follow a distribution that is
+ * close to a normal distribution.
  *
  * The HAWK_SECKEY_SIZE and HAWK_PUBKEY_SIZE arrays contain the number of bytes
  * required for an encoded secret and public key respectively, including
@@ -133,7 +134,6 @@ extern "C" {
  * add -,+5 std.dev. to the average and round to the average.
  *
  * TODO: run code for 10'000 samples.
-
  * logn | Average +/- stddev | min  | max
  * -----+- Secret key -------+------+-----
  *    1 |    3.40 +/-   0.49 |    3 |    5
@@ -306,21 +306,31 @@ extern "C" {
 /*
  * Sizes.
  *
- * The sizes are expressed in bytes. Each size depends on the Hawk
- * degree, which is provided logarithmically: use logn=9 for Hawk-512. Valid
- * values for logn range from 1 to 9 (values 1 to 8 correspond to reduced
- * variants of Hawk that do not provided adequate security and are meant for
- * research purposes only).
+ * The sizes are expressed in bytes. Each size depends on the Hawk degree,
+ * which is provided logarithmically: use logn=9 for Hawk-512. Valid values for
+ * logn range from 1 to 9 (values 1 to 8 correspond to reduced variants of Hawk
+ * that do not provided adequate security and are meant for research purposes
+ * only).
  *
- * The sizes are provided as macros that evaluate to constant
- * expressions, as long as the 'logn' parameter is itself a constant
- * expression. Moreover, all sizes are monotonic (for each size category,
- * increasing logn cannot result in a shorter length).
+ * The sizes are provided as macros that evaluate to constant expressions, as
+ * long as the 'logn' parameter is itself a constant expression. Moreover, all
+ * sizes are monotonic (for each size category, increasing logn cannot result
+ * in a shorter length).
  *
  * Note: each macro may evaluate its argument 'logn' several times.
- * TODO: turn this into a macro
  */
-extern const size_t HAWK_SECKEY_SIZE[10];
+
+/*
+ * Secret key size (in bytes). The size is exact.
+ */
+#define HAWK_SECKEY_SIZE(logn) \
+	((logn) <= 1 ? 6u : (1u + (9u << ((logn) - 2))))
+
+/*
+ * Public key size (in bytes). The size is an upper bound on the allowed size,
+ * the average is lower than this.
+ * TODO: make this into a macro.
+ */
 extern const size_t HAWK_PUBKEY_SIZE[10];
 
 /*

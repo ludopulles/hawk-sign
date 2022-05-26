@@ -33,16 +33,11 @@
 #include "inner.h"
 
 /* see hawk.h */
-const size_t HAWK_SECKEY_SIZE[10] = {
-	0 /* unused */, 6, 11, 22, 37, 70, 120, 228, 395, 712
-};
-
-/* see hawk.h */
 const size_t HAWK_PUBKEY_SIZE[10] = {
 	0 /* unused */, 7, 13, 23, 41, 77, 143, 276, 528, 1026
 };
 
-// TODO: set 5 in the compress.c code (depending on logn!).
+// TODO: set 5 in the codec.c code (depending on logn!).
 #define SIG0_LOBITS(logn) (8)
 #define SIG_LOBITS(logn) (5)
 
@@ -139,8 +134,8 @@ align_fpr(void *tmp)
 
 /* see hawk.h */
 int
-hawk_keygen_make(shake256_context *rng, unsigned logn, void *privkey,
-	size_t privkey_len, void *pubkey, size_t pubkey_len, void *tmp,
+hawk_keygen_make(shake256_context *rng, unsigned logn, void *seckey,
+	size_t seckey_len, void *pubkey, size_t pubkey_len, void *tmp,
 	size_t tmp_len)
 {
 	int8_t *f, *g, *F, *G;
@@ -161,7 +156,7 @@ hawk_keygen_make(shake256_context *rng, unsigned logn, void *privkey,
 	 * Check that the seckey and pubkey buffers are at least as large as the
 	 * allowed encoded sizes, and check the temporary buffer size.
 	 */
-	if (privkey_len < HAWK_SECKEY_SIZE[logn]
+	if (seckey_len < HAWK_SECKEY_SIZE(logn)
 		|| (pubkey != NULL && pubkey_len < HAWK_PUBKEY_SIZE[logn])
 		|| tmp_len < HAWK_TMPSIZE_KEYGEN(logn)) {
 		return HAWK_ERR_SIZE;
@@ -189,7 +184,7 @@ hawk_keygen_make(shake256_context *rng, unsigned logn, void *privkey,
 	/*
 	 * Fix the first byte of secret key and private key.
 	 */
-	sk = privkey;
+	sk = seckey;
 	sk[0] = 0x50 + logn;
 
 	pk = pubkey;
@@ -203,7 +198,7 @@ hawk_keygen_make(shake256_context *rng, unsigned logn, void *privkey,
 			logn, atmp);
 		set_fpu_cw(oldcw);
 
-		sk_len = Zf(encode_seckey)(sk + 1, HAWK_SECKEY_SIZE[logn] - 1, f, g, F, logn);
+		sk_len = Zf(encode_seckey)(sk + 1, HAWK_SECKEY_SIZE(logn) - 1, f, g, F, logn);
 
 		/*
 		 * Destroy the private key basis [[f,g], [F,G]] to store q00, q10.
@@ -223,7 +218,7 @@ hawk_keygen_make(shake256_context *rng, unsigned logn, void *privkey,
 	 * Do not forgot that there is one header byte in sk and pk. Pad the secret
 	 * and private key with zeros up to the key size.
 	 */
-	for (u = 1; u < HAWK_SECKEY_SIZE[logn]; u ++) {
+	for (u = 1; u < HAWK_SECKEY_SIZE(logn); u ++) {
 		// if (u >= 1 + sk_len) sk[u] = 0;
 		sk[u] &= -(uint8_t)(u < 1 + sk_len);
 	}
@@ -239,8 +234,8 @@ hawk_keygen_make(shake256_context *rng, unsigned logn, void *privkey,
 
 /* see hawk.h */
 int
-hawk_make_public(void *pubkey, size_t pubkey_len, const void *privkey,
-	size_t privkey_len, void *tmp, size_t tmp_len)
+hawk_make_public(void *pubkey, size_t pubkey_len, const void *seckey,
+	size_t seckey_len, void *tmp, size_t tmp_len)
 {
 	uint8_t *pk, *atmp;
 	const uint8_t *sk;
@@ -254,15 +249,15 @@ hawk_make_public(void *pubkey, size_t pubkey_len, const void *privkey,
 	 * Get degree from private key header byte, and check
 	 * parameters.
 	 */
-	if (privkey_len == 0) {
+	if (seckey_len == 0) {
 		return HAWK_ERR_FORMAT;
 	}
-	sk = privkey;
+	sk = seckey;
 	if ((sk[0] & 0xF0) != 0x50) {
 		return HAWK_ERR_FORMAT;
 	}
 	logn = sk[0] & 0x0F;
-	if (logn < 1 || logn > 9 || privkey_len != HAWK_SECKEY_SIZE[logn]) {
+	if (logn < 1 || logn > 9 || seckey_len != HAWK_SECKEY_SIZE(logn)) {
 		return HAWK_ERR_FORMAT;
 	}
 	if (pubkey_len != HAWK_PUBKEY_SIZE[logn]
@@ -278,7 +273,7 @@ hawk_make_public(void *pubkey, size_t pubkey_len, const void *privkey,
 	g = f + n;
 	F = g + n;
 
-	if (Zf(decode_seckey)(f, g, F, privkey + 1, privkey_len - 1, logn) == 0) {
+	if (Zf(decode_seckey)(f, g, F, seckey + 1, seckey_len - 1, logn) == 0) {
 		return HAWK_ERR_FORMAT;
 	}
 
@@ -332,7 +327,7 @@ hawk_get_logn(const void *obj, size_t len)
 /* see hawk.h */
 int
 hawk_expand_privkey(void *expanded_key, size_t expanded_key_len,
-	const void *privkey, size_t privkey_len, void *tmp, size_t tmp_len)
+	const void *seckey, size_t seckey_len, void *tmp, size_t tmp_len)
 {
 	unsigned logn, oldcw;
 	const uint8_t *sk;
@@ -344,15 +339,15 @@ hawk_expand_privkey(void *expanded_key, size_t expanded_key_len,
 	 * Get degree from private key header byte, and check
 	 * parameters.
 	 */
-	if (privkey_len == 0) {
+	if (seckey_len == 0) {
 		return HAWK_ERR_FORMAT;
 	}
-	sk = privkey;
+	sk = seckey;
 	if ((sk[0] & 0xF0) != 0x50) {
 		return HAWK_ERR_FORMAT;
 	}
 	logn = sk[0] & 0x0F;
-	if (logn < 1 || logn > 9 || privkey_len != HAWK_SECKEY_SIZE[logn]) {
+	if (logn < 1 || logn > 9 || seckey_len != HAWK_SECKEY_SIZE(logn)) {
 		return HAWK_ERR_FORMAT;
 	}
 	if (expanded_key_len < HAWK_EXPANDEDKEY_SIZE(logn)
@@ -369,7 +364,7 @@ hawk_expand_privkey(void *expanded_key, size_t expanded_key_len,
 	g = f + n;
 	F = g + n;
 
-	if (Zf(decode_seckey)(f, g, F, sk + 1, privkey_len - 1, logn) == 0) {
+	if (Zf(decode_seckey)(f, g, F, sk + 1, seckey_len - 1, logn) == 0) {
 		return HAWK_ERR_FORMAT;
 	}
 
@@ -527,7 +522,7 @@ hawk_sign(shake256_context *rng, void *sig, size_t *sig_len, int sig_type,
 /* see hawk.h */
 int
 hawk_sign_simple_finish(shake256_context *rng, void *sig, size_t *sig_len,
-	int sig_type, const void *privkey, size_t privkey_len,
+	int sig_type, const void *seckey, size_t seckey_len,
 	shake256_context *hash_data, const void *salt, void *tmp, size_t tmp_len)
 {
 	unsigned logn, oldcw;
@@ -540,15 +535,15 @@ hawk_sign_simple_finish(shake256_context *rng, void *sig, size_t *sig_len,
 	 * Get degree from private key header byte, and check
 	 * parameters.
 	 */
-	if (privkey_len == 0) {
+	if (seckey_len == 0) {
 		return HAWK_ERR_FORMAT;
 	}
-	header_byte = ((uint8_t *)privkey)[0];
+	header_byte = ((uint8_t *)seckey)[0];
 	if ((header_byte & 0xF0) != 0x50) {
 		return HAWK_ERR_FORMAT;
 	}
 	logn = header_byte & 0x0F;
-	if (logn < 1 || logn > 9 || privkey_len != HAWK_SECKEY_SIZE[logn]) {
+	if (logn < 1 || logn > 9 || seckey_len != HAWK_SECKEY_SIZE(logn)) {
 		return HAWK_ERR_FORMAT;
 	}
 	if (tmp_len < HAWK_TMPSIZE_SIGNSIMPLE(logn)) {
@@ -583,7 +578,7 @@ hawk_sign_simple_finish(shake256_context *rng, void *sig, size_t *sig_len,
 	s1 = s0 + n;
 	atmp = (uint8_t *)(s1 + n);
 
-	if (Zf(decode_seckey)(f, g, F, privkey + 1, privkey_len - 1, logn) == 0) {
+	if (Zf(decode_seckey)(f, g, F, seckey + 1, seckey_len - 1, logn) == 0) {
 		return HAWK_ERR_FORMAT;
 	}
 
@@ -650,27 +645,27 @@ hawk_sign_simple_finish(shake256_context *rng, void *sig, size_t *sig_len,
 /* see hawk.h */
 int
 hawk_sign_simple(shake256_context *rng, void *sig, size_t *sig_len, int sig_type,
-	const void *privkey, size_t privkey_len, const void *data, size_t data_len,
+	const void *seckey, size_t seckey_len, const void *data, size_t data_len,
 	void *tmp, size_t tmp_len)
 {
 	shake256_context hd;
 	uint8_t salt[40];
 	int r;
 
-	r = hawk_sign_start(rng, salt, privkey, &hd);
+	r = hawk_sign_start(rng, salt, seckey, &hd);
 	if (r != 0) {
 		return r;
 	}
 	shake256_inject(&hd, data, data_len);
 	return hawk_sign_simple_finish(rng, sig, sig_len, sig_type,
-		privkey, privkey_len, &hd, salt, tmp, tmp_len);
+		seckey, seckey_len, &hd, salt, tmp, tmp_len);
 }
 
 
 /* see hawk.h */
 int
 hawk_sign_dyn_finish(shake256_context *rng, void *sig, size_t *sig_len,
-	int sig_type, const void *privkey, size_t privkey_len,
+	int sig_type, const void *seckey, size_t seckey_len,
 	shake256_context *hash_data, const void *salt, void *tmp, size_t tmp_len)
 {
 	unsigned logn, oldcw;
@@ -683,15 +678,15 @@ hawk_sign_dyn_finish(shake256_context *rng, void *sig, size_t *sig_len,
 	 * Get degree from private key header byte, and check
 	 * parameters.
 	 */
-	if (privkey_len == 0) {
+	if (seckey_len == 0) {
 		return HAWK_ERR_FORMAT;
 	}
-	header_byte = ((uint8_t *)privkey)[0];
+	header_byte = ((uint8_t *)seckey)[0];
 	if ((header_byte & 0xF0) != 0x50) {
 		return HAWK_ERR_FORMAT;
 	}
 	logn = header_byte & 0x0F;
-	if (logn < 1 || logn > 9 || privkey_len != HAWK_SECKEY_SIZE[logn]) {
+	if (logn < 1 || logn > 9 || seckey_len != HAWK_SECKEY_SIZE(logn)) {
 		return HAWK_ERR_FORMAT;
 	}
 	if (tmp_len < HAWK_TMPSIZE_SIGNDYN(logn)) {
@@ -725,7 +720,7 @@ hawk_sign_dyn_finish(shake256_context *rng, void *sig, size_t *sig_len,
 	sv = align_i16(hm + HAWK_HASH_SIZE(logn));
 	atmp = (uint8_t *)align_fpr(sv + n);
 
-	if (Zf(decode_seckey)(f, g, F, privkey + 1, privkey_len - 1, logn) == 0) {
+	if (Zf(decode_seckey)(f, g, F, seckey + 1, seckey_len - 1, logn) == 0) {
 		return HAWK_ERR_FORMAT;
 	}
 
@@ -790,27 +785,27 @@ hawk_sign_dyn_finish(shake256_context *rng, void *sig, size_t *sig_len,
 /* see hawk.h */
 int
 hawk_sign_dyn(shake256_context *rng, void *sig, size_t *sig_len, int sig_type,
-	const void *privkey, size_t privkey_len, const void *data, size_t data_len,
+	const void *seckey, size_t seckey_len, const void *data, size_t data_len,
 	void *tmp, size_t tmp_len)
 {
 	shake256_context hd;
 	uint8_t salt[40];
 	int r;
 
-	r = hawk_sign_start(rng, salt, privkey, &hd);
+	r = hawk_sign_start(rng, salt, seckey, &hd);
 	if (r != 0) {
 		return r;
 	}
 	shake256_inject(&hd, data, data_len);
 	return hawk_sign_dyn_finish(rng, sig, sig_len, sig_type,
-		privkey, privkey_len, &hd, salt, tmp, tmp_len);
+		seckey, seckey_len, &hd, salt, tmp, tmp_len);
 }
 
 
 /* see hawk.h */
 int
 hawk_sign_NTT_finish(shake256_context *rng, void *sig, size_t *sig_len,
-	int sig_type, const void *privkey, size_t privkey_len,
+	int sig_type, const void *seckey, size_t seckey_len,
 	shake256_context *hash_data, const void *salt, void *tmp, size_t tmp_len)
 {
 	unsigned logn, oldcw;
@@ -823,15 +818,15 @@ hawk_sign_NTT_finish(shake256_context *rng, void *sig, size_t *sig_len,
 	 * Get degree from private key header byte, and check
 	 * parameters.
 	 */
-	if (privkey_len == 0) {
+	if (seckey_len == 0) {
 		return HAWK_ERR_FORMAT;
 	}
-	header_byte = ((uint8_t *)privkey)[0];
+	header_byte = ((uint8_t *)seckey)[0];
 	if ((header_byte & 0xF0) != 0x50) {
 		return HAWK_ERR_FORMAT;
 	}
 	logn = header_byte & 0x0F;
-	if (logn < 1 || logn > 9 || privkey_len != HAWK_SECKEY_SIZE[logn]) {
+	if (logn < 1 || logn > 9 || seckey_len != HAWK_SECKEY_SIZE(logn)) {
 		return HAWK_ERR_FORMAT;
 	}
 	if (tmp_len < HAWK_TMPSIZE_SIGNNTT(logn)) {
@@ -865,7 +860,7 @@ hawk_sign_NTT_finish(shake256_context *rng, void *sig, size_t *sig_len,
 	sv = align_i16(hm + HAWK_HASH_SIZE(logn));
 	atmp = (uint8_t *)(sv + n);
 
-	if (Zf(decode_seckey)(f, g, F, privkey + 1, privkey_len - 1, logn) == 0) {
+	if (Zf(decode_seckey)(f, g, F, seckey + 1, seckey_len - 1, logn) == 0) {
 		return HAWK_ERR_FORMAT;
 	}
 
@@ -931,20 +926,20 @@ hawk_sign_NTT_finish(shake256_context *rng, void *sig, size_t *sig_len,
 /* see hawk.h */
 int
 hawk_sign_NTT(shake256_context *rng, void *sig, size_t *sig_len, int sig_type,
-	const void *privkey, size_t privkey_len, const void *data, size_t data_len,
+	const void *seckey, size_t seckey_len, const void *data, size_t data_len,
 	void *tmp, size_t tmp_len)
 {
 	shake256_context hd;
 	uint8_t salt[40];
 	int r;
 
-	r = hawk_sign_start(rng, salt, privkey, &hd);
+	r = hawk_sign_start(rng, salt, seckey, &hd);
 	if (r != 0) {
 		return r;
 	}
 	shake256_inject(&hd, data, data_len);
 	return hawk_sign_NTT_finish(rng, sig, sig_len, sig_type,
-		privkey, privkey_len, &hd, salt, tmp, tmp_len);
+		seckey, seckey_len, &hd, salt, tmp, tmp_len);
 }
 
 
