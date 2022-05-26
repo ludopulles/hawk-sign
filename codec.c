@@ -1236,7 +1236,7 @@ Zf(decode_seckey)(int8_t *f, int8_t *g, int8_t *F,
 	 * First read F literally as it is.
 	 */
 	for (u = 0; u < n; u++) {
-		F[u] = (int8_t) (*in ++);
+		F[u] = (int8_t)(*in ++);
 	}
 
 	/*
@@ -1266,7 +1266,5 @@ Zf(decode_seckey)(int8_t *f, int8_t *g, int8_t *F,
 		return 0;
 	}
 	return in_len;
-#undef ENSUREBIT
-#undef GETBIT
 #undef POLY_DEC
 }
