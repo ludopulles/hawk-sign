@@ -988,7 +988,9 @@ hawk_verify_finish(const void *sig, size_t sig_len, int sig_type,
 	unsigned logn, salt_len;
 	uint8_t *hm, *atmp;
 	int16_t *iq00, *iq10;
+#ifdef TARGET_AVX2
 	fpr *q00, *q10, *q11;
+#endif
 	const uint8_t *pk, *es;
 	size_t u, v, n;
 	int16_t *sv;
@@ -1045,11 +1047,6 @@ hawk_verify_finish(const void *sig, size_t sig_len, int sig_type,
 	iq00 = sv + n;
 	iq10 = iq00 + n;
 
-	q00 = (fpr *)align_fpr(sv + n);
-	q10 = q00 + n;
-	q11 = q10 + n;
-	atmp = (uint8_t *)(q11 + n);
-
 	/*
 	 * Decode public key.
 	 */
@@ -1094,6 +1091,12 @@ hawk_verify_finish(const void *sig, size_t sig_len, int sig_type,
 	inner_shake256_extract((inner_shake256_context *)hash_data, hm,
 		HAWK_HASH_SIZE(logn));
 
+#ifdef TARGET_AVX2
+	q00 = (fpr *)align_fpr(sv + n);
+	q10 = q00 + n;
+	q11 = q10 + n;
+	atmp = (uint8_t *)(q11 + n);
+
 	/*
 	 * Construct full public key.
 	 */
@@ -1105,6 +1108,16 @@ hawk_verify_finish(const void *sig, size_t sig_len, int sig_type,
 	if (!Zf(verify_simple_rounding_fft)(hm, sv, q00, q10, q11, logn, atmp)) {
 		return HAWK_ERR_BADSIG;
 	}
+#else
+	atmp = (uint8_t *)align_fpr(iq10 + n);
+
+	/*
+	 * Verify signature.
+	 */
+	if (!Zf(verify_NTT)(hm, sv, iq00, iq10, logn, atmp)) {
+		return HAWK_ERR_BADSIG;
+	}
+#endif
 	return 0;
 }
 
@@ -1117,7 +1130,15 @@ hawk_uncompressed_verify_finish(const void *sig, size_t sig_len, int sig_type,
 {
 	unsigned logn, salt_len;
 	uint8_t *hm, *atmp;
+
+#ifdef TARGET_AVX2
+	// TODO: we need different RAM size for AVX2 version
+	fpr *q00, *q10, *q11;
+	int16_t *iq00, *iq10;
+#else
 	int16_t *q00, *q10;
+#endif
+
 	const uint8_t *pk, *es;
 	size_t u, v, n;
 	int16_t *s0, *s1;
@@ -1172,17 +1193,35 @@ hawk_uncompressed_verify_finish(const void *sig, size_t sig_len, int sig_type,
 	s0 = align_i16(hm + HAWK_HASH_SIZE(logn));
 	s1 = s0 + n;
 
+#ifdef TARGET_AVX2
+	q00 = align_fpr(s1 + n);
+	q10 = q00 + n;
+	q11 = q10 + n;
+	atmp = (uint8_t *)align_i32(q11 + n);
+	iq00 = (int16_t *)q11;
+	iq10 = iq00 + n;
+#else
 	q00 = s1 + n;
 	q10 = q00 + n;
 	atmp = (uint8_t *)align_i32(q10 + n);
+#endif
 
 	/*
 	 * Decode public key.
 	 */
+#ifdef TARGET_AVX2
+	if (Zf(decode_pubkey)(iq00, iq10, pk + 1, pubkey_len - 1, logn) == 0)
+	{
+		return HAWK_ERR_FORMAT;
+	}
+
+	Zf(complete_pubkey)(iq00, iq10, q00, q10, q11, logn);
+#else
 	if (Zf(decode_pubkey)(q00, q10, pk + 1, pubkey_len - 1, logn) == 0)
 	{
 		return HAWK_ERR_FORMAT;
 	}
+#endif
 
 	/*
 	 * Decode signature value.
@@ -1224,8 +1263,14 @@ hawk_uncompressed_verify_finish(const void *sig, size_t sig_len, int sig_type,
 	/*
 	 * Verify signature.
 	 */
+#ifdef TARGET_AVX2
+	if (!Zf(uncompressed_verify)(hm, s0, s1, q00, q10, q11, logn, atmp)) {
+		return HAWK_ERR_BADSIG;
+	}
+#else
 	if (!Zf(uncompressed_verify_NTT)(hm, s0, s1, q00, q10, logn, atmp)) {
 		return HAWK_ERR_BADSIG;
 	}
+#endif
 	return 0;
 }

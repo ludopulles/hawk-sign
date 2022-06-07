@@ -62,15 +62,49 @@ size_t encoding_length(const vector<int> &table, int16_t *sig, unsigned logn)
 		uint16_t w = (uint16_t) sig[u];
 		// int abs_val = sig[u] < 0 ? (-sig[u] - 1) : sig[u];
 		w ^= -(w >> 15);
-		if (w >= table.size()) {
-			return 0; /* value too big */
-		} else {
-			res += 1 + table[w]; /* sign bit and encoding of w = |sig[u]|' */
-		}
+		if (w >= table.size()) return 0; /* value too big */
+		res += 1 + table[w]; /* sign bit and encoding of w = |sig[u]|' */
 	}
+	return (res + 7u) / 8;
+}
 
-	// return ceil(res / 8)
-	return (res + 7) / 8;
+
+/*
+ * Returns number of bytes for signature.
+ */
+size_t cost_golomb(const int16_t *x, unsigned logn, size_t lo_bits)
+{
+	size_t n = MKN(logn), u, nbits = 0;
+	for (u = 0; u < n; u ++) {
+		uint16_t w = (uint16_t) x[u];
+		w ^= -(w >> 15);
+		w >>= lo_bits;
+		nbits += (lo_bits + 1) + (w + 1);
+	}
+	return (nbits + 7u) / 8;
+}
+
+int lg2(int16_t x) { return x == 1 ? 0 : 1 + lg2(x >> 1); }
+int expGolombCost(size_t absx) {
+	// 0: 0, +-1: 10x, +-2: 1100x, +-3: 1101x, etc.
+	if (absx == 0) return 1;
+	return 2 * lg2(absx) + 3; // 1 -> 3; 2,3 -> 5; 4,5,6,7 -> 7; etc.
+	return 2 + absx; // Alternative: print unary & sign
+}
+
+/*
+ * Returns number of bytes for signature.
+ */
+size_t cost_expgolomb(const int16_t *x, unsigned logn, size_t lo_bits)
+{
+	size_t n = MKN(logn), u, nbits = 0;
+	for (u = 0; u < n; u ++) {
+		int16_t w;
+		w = ((x[u] >> (lo_bits - 1)) + 1) >> 1;
+		w = w < 0 ? -w : w;
+		nbits += lo_bits + expGolombCost(w);
+	}
+	return (nbits + 7u) / 8;
 }
 
 // =============================================================================
@@ -204,7 +238,8 @@ WorkerResult measure_signatures(unsigned logn) {
 		}
 
 		for (int lobits = 3; lobits < 10; lobits++) {
-			size_t sz = Zf(encode_sig)(NULL, 0, s1, logn, lobits);
+			// size_t sz = Zf(encode_sig)(NULL, 0, s1, logn, lobits);
+			size_t sz = cost_golomb(s1, logn, lobits);
 			result.add(sz, lobits);
 		}
 
@@ -218,7 +253,7 @@ WorkerResult measure_signatures(unsigned logn) {
 			result.huf_failed++;
 		}
 
-		for (int lobits = 7; lobits < 11; lobits++) {
+		for (int lobits = 5; lobits < 11; lobits++) {
 			size_t sz = Zf(encode_sig_simple)(NULL, 0, s0, s1, logn, lobits, 5U);
 			result.cadd(sz, lobits);
 		}
@@ -248,8 +283,8 @@ void work(unsigned logn) {
 }
 
 int main() {
-	huffman_s0 = generate_huffman_table(2048, 357.435);
-	huffman_s1 = generate_huffman_table(512,  62.051);
+	huffman_s0 = generate_huffman_table(2048, 354.900);
+	huffman_s1 = generate_huffman_table(512,  61.543);
 
 	const int nthreads = 4;
 	std::thread* pool[nthreads-1];

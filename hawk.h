@@ -451,8 +451,14 @@ extern const size_t HAWK_PUBKEY_SIZE[10];
 /*
  * Temporary buffer size for verifying a signature.
  */
+
+#ifdef TARGET_AVX2
 #define HAWK_TMPSIZE_VERIFY(logn) \
 	(HAWK_HASH_SIZE(logn) + (42u << (logn)))
+#else
+#define HAWK_TMPSIZE_VERIFY(logn) \
+	(HAWK_HASH_SIZE(logn) + (100u << (logn)))
+#endif
 
 /*
  * Temporary buffer size for verifying an uncompressed signature with NTT.

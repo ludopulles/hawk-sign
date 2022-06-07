@@ -1115,4 +1115,9 @@ int Zf(uncompressed_verify_NTT)(const uint8_t *restrict h,
 	const int16_t *restrict q00, const int16_t *restrict q10,
 	unsigned logn, uint8_t *restrict tmp);
 
+int Zf(verify_NTT)(const uint8_t *restrict h,
+	const int16_t *restrict s1,
+	const int16_t *restrict q00, const int16_t *restrict q10,
+	unsigned logn, uint8_t *restrict tmp);
+
 #endif

@@ -930,3 +930,127 @@ Zf(uncompressed_verify_NTT)(const uint8_t *restrict h,
 		&& (norm0 & (hn - 1)) == 0
 		&& (norm0 >> (logn - 1)) <= Zf(l2bound)[logn];
 }
+
+#define hashbit(h, idx) ((h[idx >> 3] >> (idx & 7)) & 1u)
+
+int Zf(verify_NTT)(const uint8_t *restrict h,
+	const int16_t *restrict s1,
+	const int16_t *restrict q00, const int16_t *restrict q10,
+	unsigned logn, uint8_t *restrict tmp)
+{
+	/*
+	 * Recover s0 with s0 = round(h0 / 2 + (h1 / 2 - s1) q10 / q00)
+	 * = round((h0 q00 + (h1 - 2 s1) q10) / (2q00)).
+	 * Put (t0, t1) = (h0 - 2 * s0, h1 - 2 * s1) in FFT representation.
+	 *
+	 * Use floats only here...
+	 */
+
+	size_t n, u, v, w;
+	int16_t *s0;
+	// uint32_t p, p0i, R2;
+	// uint32_t *gm, *igm, *q00_i32, *q10_i32, *e0_i32, *e1_i32;
+	// fpr *numerator, *denominator;
+	fpr *t0, *t1;
+	uint8_t h0;
+
+	n = MKN(logn);
+	s0 = (int16_t *)tmp;
+
+	t0 = (fpr *)tmp;
+	t1 = t0 + n;
+
+	hash_to_fft(t0, SECOND_HASH(h, logn), s1, logn);
+
+	for (u = 0; u < n; u++) t1[u] = fpr_of(q10[u]);
+	Zf(FFT)(t1, logn);
+	Zf(poly_mul_fft)(t0, t1, logn);
+
+	for (u = 0; u < n; u++) t1[u] = fpr_of(q00[u]);
+	Zf(FFT)(t1, logn);
+	Zf(poly_div_autoadj_fft)(t0, t1, logn);
+
+	Zf(iFFT)(t0, logn);
+
+	/*
+	 * Recover s0 with s0 = round(h0 / 2 + (h1 / 2 - s1) q10 / q00).
+	 * Put (t0, t1) = (h0 - 2 * s0, h1 - 2 * s1) in FFT representation.
+	 */
+	if (logn <= 3) {
+		h0 = h[0];
+		for (u = 0; u < n; u ++) {
+			s0[u] = fpr_rint(fpr_half(fpr_add(fpr_of(h0 & 1), t0[u])));
+			h0 >>= 1;
+		}
+	} else {
+		for (u = 0, w = 0; w < n; u ++) {
+			h0 = h[u];
+			for (v = 0; v < 8; v ++, w ++) {
+				s0[w] = fpr_rint(fpr_half(fpr_add(fpr_of(h0 & 1), t0[w])));
+				h0 >>= 1;
+			}
+		}
+	}
+
+/*
+	gm = (uint32_t *)(s0 + n);
+	igm = gm + n;
+	q00_i32 = igm + n;
+	q10_i32 = q00_i32 + n;
+	e0_i32 = q10_i32 + n;
+	e1_i32 = e0_i32 + n;
+	numerator = (fpr *)(e1_i32 + n);
+	denominator = (fpr *)(numerator + n);
+
+	p = PRIMES[0].p;
+	p0i = modp_ninv31(p);
+	R2 = modp_R2(p, p0i);
+	modp_mkgm2(gm, igm, logn, PRIMES[0].g, p, p0i);
+
+	for (u = 0; u < n; u++) {
+		q00_i32[u] = modp_set(q00[u], p);
+		q10_i32[u] = modp_set(q10[u], p);
+		e0_i32[u] = modp_set(hashbit(h, u), p);
+		e1_i32[u] = modp_set(hashbit(SECOND_HASH(h, logn), u) - 2 * s1[u], p);
+	}
+	modp_NTT2(q00_i32, gm, logn, p, p0i);
+	modp_NTT2(q10_i32, gm, logn, p, p0i);
+	modp_NTT2(e0_i32, gm, logn, p, p0i);
+	modp_NTT2(e1_i32, gm, logn, p, p0i);
+
+	for (u = 0; u < n; u++) {
+		e0_i32[u] = modp_montymul(q00_i32[u],
+			modp_montymul(e0_i32[u], R2, p, p0i), p, p0i);
+		e1_i32[u] = modp_montymul(q10_i32[u],
+			modp_montymul(e1_i32[u], R2, p, p0i), p, p0i);
+
+		e0_i32[u] = modp_sub(e0_i32[u], e1_i32[u], p);
+	}
+
+	modp_iNTT2(e0_i32, igm, logn, p, p0i);
+	printf("\n");
+	for (u = 0; u < n; u++) {
+		printf("%d ", modp_norm(e0_i32[u], p));
+	}
+	printf("\n");
+	for (u = 0; u < n; u ++) {
+		numerator[u] = fpr_half(fpr_of(modp_norm(e0_i32[u], p)));
+		denominator[u] = fpr_of(q00[u]);
+	}
+	Zf(FFT)(numerator, logn);
+	Zf(FFT)(denominator, logn);
+
+	Zf(poly_div_autoadj_fft)(numerator, denominator, logn);
+	Zf(iFFT)(numerator, logn);
+
+	for (u = 0; u < n; u ++) {
+		s0[u] = fpr_rint(numerator[u]);
+		printf("%d ", s0[u]);
+	}
+	printf("\n");
+*/
+
+	// return Zf(uncompressed_verify_NTT)(h, s0, s1, q00, q10, logn, (uint8_t *) gm);
+	// return 1;
+	return Zf(uncompressed_verify_NTT)(h, s0, s1, q00, q10, logn, (uint8_t *)(s0 + n));
+}
