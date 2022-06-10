@@ -5,9 +5,16 @@
 #include "inner.h"
 
 /* see inner.h */
-const uint32_t Zf(l2bound)[10] = {
+/* NIST-1: */
+const uint32_t Zf(l2bound_512)[10] = {
 	0u /* unused */, 32u, 64u, 129u, 259u, 519u, 1039u, 2079u, 4158u, 8317u
 };
+
+/* NIST-5: */
+const uint32_t Zf(l2bound_1024)[11] = {
+	0u /* unused */, 32u, 65u, 130u, 261u, 522u, 1045u, 2091u, 4182u, 8364u, 16728u
+};
+
 
 /* see inner.h */
 void

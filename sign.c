@@ -54,7 +54,7 @@
  *
  * To generate the values, run `sage code/renyi.sage`.
  */
-static const uint16_t gauss_hi[10] = {
+static const uint16_t gauss_hi_512[10] = {
 	0x580B, 0x35F9,
 	0x1D34, 0x0DD7,
 	0x05B7, 0x020C,
@@ -62,7 +62,7 @@ static const uint16_t gauss_hi[10] = {
 	0x000A, 0x0001,
 };
 
-static const uint64_t gauss_lo[26] = {
+static const uint64_t gauss_lo_512[26] = {
 	0x0C27920A04F8F267, 0x3C689D9213449DC9,
 	0x1C4FF17C204AA058, 0x7B908C81FCE3524F,
 	0x5E63263BE0098FFD, 0x4EBEFD8FF4F07378,
@@ -78,8 +78,32 @@ static const uint64_t gauss_lo[26] = {
 	0x0000000000000006, 0x0000000000000000,
 };
 
+static const uint16_t gauss_hi_1024[10] = {
+        0x58B0, 0x36FE,
+        0x1E3A, 0x0EA0,
+        0x0632, 0x024A,
+        0x00BC, 0x0034,
+        0x000C, 0x0002,
+};
+static const uint64_t gauss_lo_1024[26] = {
+        0x3AAA2EB76504E560, 0x01AE2B17728DF2DE,
+        0x70E1C03E49BB683D, 0x6A00B82C69624C93,
+        0x55CDA662EF2D1C47, 0x2685DB30348656A3,
+        0x31E874B355421BB5, 0x430192770E205502,
+        0x57C0676C029895A5, 0x5353BD4091AA96DA,
+        0x3D4D67696E51F81F, 0x09915A53D8667BED,
+        0x014A1A8A93F20737, 0x0026670030160D5F,
+        0x0003DAF47E8DFB20, 0x0000557CD1C5F796,
+        0x000006634617B3FE, 0x0000006965E15B13,
+        0x00000005DBEFB646, 0x0000000047E9AB38,
+        0x0000000002F93038, 0x00000000001B2445,
+        0x000000000000D5A7, 0x00000000000005AA,
+        0x0000000000000021, 0x0000000000000000,
+};
+
+
 static inline int8_t
-mkgauss_sign(prng *rng, uint8_t parity)
+mkgauss_sign_512(prng *rng, uint8_t parity)
 {
 	uint16_t r_hi, p_hi;
 	uint64_t r_lo, p_lo;
@@ -113,7 +137,7 @@ mkgauss_sign(prng *rng, uint8_t parity)
 		 * Constant-time for:
 		 *     p_lo = gauss_lo[k + parity];
 		 */
-		p_lo = (gauss_lo[k] & (parity - 1u)) | ((gauss_lo[k + 1] & -parity));
+		p_lo = (gauss_lo_512[k] & (parity - 1u)) | ((gauss_lo_512[k + 1] & -parity));
 
 		/*
 		 * Add 1 iff r_lo < p_lo.
@@ -130,11 +154,11 @@ mkgauss_sign(prng *rng, uint8_t parity)
 	for (k = 0; k < 10; k += 2) {
 		/*
 		 * Constant-time for:
-		 *     p_lo = gauss_lo[k + parity];
-		 *     p_hi = gauss_hi[k + parity];
+		 *     p_lo = gauss_lo_512[k + parity];
+		 *     p_hi = gauss_hi_512[k + parity];
 		 */
-		p_lo = (gauss_lo[k] & (parity - 1u)) | ((gauss_lo[k + 1] & -parity));
-		p_hi = (gauss_hi[k] & (parity - 1u)) | ((gauss_hi[k + 1] & -parity));
+		p_lo = (gauss_lo_512[k] & (parity - 1u)) | ((gauss_lo_512[k + 1] & -parity));
+		p_hi = (gauss_hi_512[k] & (parity - 1u)) | ((gauss_hi_512[k + 1] & -parity));
 
 		/*
 		 * c = [[ r_lo < p_lo ]]
@@ -163,7 +187,101 @@ mkgauss_sign(prng *rng, uint8_t parity)
 	 */
 	v = (v ^ -neg) + neg;
 	return *(int8_t *)&v;
+}
 
+static inline int8_t
+mkgauss_sign_1024(prng *rng, uint8_t parity)
+{
+	uint16_t r_hi, p_hi;
+	uint64_t r_lo, p_lo;
+	uint8_t c, v, k, neg;
+
+	/*
+	 * We use 80 random bits to determine the value, by looking in the
+	 * cumulative probability table. However, we only use 15 bits for r_hi so
+	 * we can check if r_hi < p_hi holds by computing (r_hi - p_hi) >> 15. This
+	 * way is better than doing a comparison to achieve constant-time
+	 * execution.
+	 */
+	prng_get_80_bits(rng, &r_hi, &r_lo);
+
+	/*
+	 * Get the sign bit out of the lowest part
+	 */
+	neg = (uint8_t)(r_lo >> 63);
+
+	/*
+	 * Unset the sign bits in the unsigned ints for convenience in comparisons
+	 * later on, as we can now use the highest bit of `a - b` to check if `a <
+	 * b` or not for numbers `a, b`.
+	 */
+	r_hi &= ~((uint16_t)1u << 15);
+	r_lo &= ~((uint64_t)1u << 63);
+
+	v = 0;
+	for (k = 10; k < 26; k += 2) {
+		/*
+		 * Constant-time for:
+		 *     p_lo = gauss_lo[k + parity];
+		 */
+		p_lo = (gauss_lo_1024[k] & (parity - 1u)) | ((gauss_lo_1024[k + 1] & -parity));
+
+		/*
+		 * Add 1 iff r_lo < p_lo.
+		 */
+		v += (uint8_t)((uint64_t)(r_lo - p_lo) >> 63);
+	}
+
+	/*
+	 * If r_hi > 0, set v to zero, otherwise leave v as is. This is a
+	 * micro-optimization as p_hi would be zero for all k >= 5.
+	 */
+	v = v & -((r_hi - 1) >> 15);
+
+	for (k = 0; k < 10; k += 2) {
+		/*
+		 * Constant-time for:
+		 *     p_lo = gauss_lo_1024[k + parity];
+		 *     p_hi = gauss_hi_1024[k + parity];
+		 */
+		p_lo = (gauss_lo_1024[k] & (parity - 1u)) | ((gauss_lo_1024[k + 1] & -parity));
+		p_hi = (gauss_hi_1024[k] & (parity - 1u)) | ((gauss_hi_1024[k + 1] & -parity));
+
+		/*
+		 * c = [[ r_lo < p_lo ]]
+		 */
+		c = (uint8_t)((uint64_t)(r_lo - p_lo) >> 63);
+
+		/*
+		 * Constant-time code to add 1 to v iff
+		 *     r_hi < p_hi or (r_hi == p_hi and c is true)
+		 * holds.
+		 */
+		c = (uint8_t)((uint16_t)(r_hi - p_hi - c) >> 15);
+		v += c;
+	}
+
+	/*
+	 * Multiply by two and apply the change in support:
+	 * If parity = 0, then v = 0,2,4,...
+	 * If parity = 1, then v = 1,3,5,...
+	 */
+	v = (v << 1) | parity;
+
+	/*
+	 * Apply the sign ('neg' flag). If neg = 0, this has no effect.
+	 * However, if neg = 1, this changes v into -v = (~v) + 1.
+	 */
+	v = (v ^ -neg) + neg;
+	return *(int8_t *)&v;
+}
+
+static inline int8_t
+mkgauss_sign(prng *rng, uint8_t parity, unsigned logn)
+{
+	return (logn == 10)
+		? mkgauss_sign_1024(rng, parity)
+		: mkgauss_sign_512(rng, parity);
 }
 
 // =============================================================================
@@ -332,13 +450,13 @@ sample_short(prng *rng, fpr *restrict x0, fpr *restrict x1,
 
 	for (u = 0; u < n; u ++) {
 		z = fpr_rint(x0[u]) & 1;
-		z = mkgauss_sign(rng, z);
+		z = mkgauss_sign(rng, z, logn);
 		x0[u] = fpr_of(z);
 		norm += z*z;
 	}
 	for (u = 0; u < n; u ++) {
 		z = fpr_rint(x1[u]) & 1;
-		z = mkgauss_sign(rng, z);
+		z = mkgauss_sign(rng, z, logn);
 		x1[u] = fpr_of(z);
 		norm += z*z;
 	}
@@ -353,7 +471,7 @@ sample_short(prng *rng, fpr *restrict x0, fpr *restrict x1,
 	 * For a large enough verification margin, it is unlikely that the
 	 * norm of the gaussian (x0, x1) is too large.
 	 */
-	return (uint32_t)norm <= Zf(l2bound)[logn];
+	return (uint32_t)norm <= L2BOUND(logn);
 }
 
 
@@ -616,13 +734,13 @@ Zf(uncompressed_sign)(inner_shake256_context *rng,
 
 	for (u = 0; u < n; u ++) {
 		z = Zf(mq_conv_signed)(x0[u]);
-		z = mkgauss_sign(&p, z & 1);
+		z = mkgauss_sign(&p, z & 1, logn);
 		x0[u] = Zf(mq_conv_small)(z);
 		norm += z*z;
 	}
 	for (u = 0; u < n; u ++) {
 		z = Zf(mq_conv_signed)(x1[u]);
-		z = mkgauss_sign(&p, z & 1);
+		z = mkgauss_sign(&p, z & 1, logn);
 		x1[u] = Zf(mq_conv_small)(z);
 		norm += z*z;
 	}
@@ -686,7 +804,7 @@ Zf(uncompressed_sign)(inner_shake256_context *rng,
 	conditional_flip(flag, s0, h, logn);
 	conditional_flip(flag, s1, SECOND_HASH(h, logn), logn);
 
-	return (uint32_t)norm <= Zf(l2bound)[logn];
+	return (uint32_t)norm <= L2BOUND(logn);
 }
 
 /* see inner.h */
@@ -784,13 +902,13 @@ Zf(sign_NTT)(inner_shake256_context *rng, int16_t *restrict s1,
 
 	for (u = 0; u < n; u ++) {
 		z = Zf(mq_conv_signed)(x0[u]);
-		z = mkgauss_sign(&p, z & 1);
+		z = mkgauss_sign(&p, z & 1, logn);
 		x0[u] = Zf(mq_conv_small)(z);
 		norm += z*z;
 	}
 	for (u = 0; u < n; u ++) {
 		z = Zf(mq_conv_signed)(x1[u]);
-		z = mkgauss_sign(&p, z & 1);
+		z = mkgauss_sign(&p, z & 1, logn);
 		x1[u] = Zf(mq_conv_small)(z);
 		norm += z*z;
 	}
@@ -839,7 +957,7 @@ Zf(sign_NTT)(inner_shake256_context *rng, int16_t *restrict s1,
 	flag = (uint16_t)Zf(in_positive_half)(s1, SECOND_HASH(h, logn), logn);
 	conditional_flip(flag, s1, SECOND_HASH(h, logn), logn);
 
-	return (uint32_t)norm <= Zf(l2bound)[logn];
+	return (uint32_t)norm <= L2BOUND(logn);
 }
 
 /* =================================================================== */

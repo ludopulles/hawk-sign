@@ -21,7 +21,7 @@ int poly16_eq(int16_t *p, int16_t *q, unsigned logn) {
 }
 
 
-#define LOGN (9)
+#define LOGN (10)
 #define N MKN(LOGN)
 #define BUFLEN (10240)
 
@@ -87,10 +87,10 @@ void test_encode_decode(unsigned logn) {
 		inner_shake256_extract(&sc, h, n <= 8 ? 2 : n / 4);
 
 		while (!Zf(uncompressed_sign)(&sc, s0, s1, f, g, F, G, h, logn, b)) {}
-		size_t sig_len = Zf(encode_sig_simple)(outbuf, BUFLEN, s0, s1,
+		size_t sig_len = Zf(encode_uncomp_sig)(outbuf, BUFLEN, s0, s1,
 			logn, 8, 5);
 		assert(sig_len != 0);
-		assert(sig_len == Zf(decode_sig_simple)(_s0, _s1, outbuf, sig_len,
+		assert(sig_len == Zf(decode_uncomp_sig)(_s0, _s1, outbuf, sig_len,
 			logn, 8, 5));
 
 		assert(poly16_eq(s0, _s0, logn));

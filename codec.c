@@ -423,18 +423,21 @@ Zf(encode_sig_huffman)(void *out, size_t max_out_len,
  * a Huffman table is not significant but makes the code more complex.
  */
 
-#define MAX_ALLOWED_Q00(logn) (1 << ((28-logn)/2))
-// n = 1,2: 2^13
-// n = 3,4: 2^12
-// n = 5,6: 2^11
-// n = 7,8: 2^10
-// n = 9: 2^9
+#define BOUND_S0(logn) ((logn) == 10 ? 8192 : 2048)
+#define BOUND_S1(logn) ((logn) == 10 ? 1024 : 512)
 
-static const size_t low_bits_q00[10] = {
-	0 /* unused */, 1, 2, 2, 3, 3, 4, 4, 5, 5
+static const int16_t bound_q00[11] = {
+	0, 0 /* unused */, 64, 64, 128, 128, 256, 256, 512, 512, 1024
 };
-static const size_t low_bits_q10[10] = {
-	0 /* unused */, 1, 2, 3, 4, 5, 6, 7, 8, 9
+static const int16_t bound_q10[11] = {
+	0 /* unused */, 32, 64, 128, 256, 256, 512, 1024, 2048, 4096, 16384
+};
+
+static const size_t low_bits_q00[11] = {
+	0 /* unused */, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6
+};
+static const size_t low_bits_q10[11] = {
+	0 /* unused */, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10
 };
 
 /* see inner.h */
@@ -453,20 +456,19 @@ Zf(encode_pubkey)(void *out, size_t max_out_len,
 	low_mask = (1U << low_bits_q00[logn]) - 1;
 
 	/*
-	 * Make sure coefficient 1 up to n/2 of q00 are within the -512..+511
-	 * range. Moreover, we silently assume q00 is self adjoint.
+	 * Make sure no coefficient is too large.
 	 */
 	for (u = 1; u < n/2; u ++) {
-		if (q00[u] < -MAX_ALLOWED_Q00(logn) || q00[u] >= MAX_ALLOWED_Q00(logn)) {
+		if (q00[u] < -bound_q00[logn] || q00[u] >= bound_q00[logn]) {
 			return 0;
 		}
 	}
 
 	/*
-	 * Make sure all coefficients of q10 are within the -4096..+4095 range.
+	 * Make sure no coefficient is too large.
 	 */
 	for (u = 0; u < n; u ++) {
-		if (q10[u] < -4096 || q10[u] >= 4096) {
+		if (q10[u] < -bound_q10[logn] || q10[u] >= bound_q10[logn]) {
 			return 0;
 		}
 	}
@@ -667,7 +669,7 @@ Zf(decode_pubkey)(int16_t *q00, int16_t *q10,
 				break;
 			}
 			w += high_inc;
-			if (w >= MAX_ALLOWED_Q00(logn)) {
+			if (w >= bound_q00[logn]) {
 				return 0;
 			}
 		}
@@ -732,7 +734,7 @@ Zf(decode_pubkey)(int16_t *q00, int16_t *q10,
 				break;
 			}
 			w += high_inc;
-			if (w >= 4096) {
+			if (w >= bound_q10[logn]) {
 				return 0;
 			}
 		}
@@ -754,7 +756,7 @@ Zf(decode_pubkey)(int16_t *q00, int16_t *q10,
 
 /* see inner.h */
 size_t
-Zf(encode_sig_simple)(void *out, size_t max_out_len,
+Zf(encode_uncomp_sig)(void *out, size_t max_out_len,
 	const int16_t *s0, const int16_t *s1, unsigned logn,
 	size_t lo_bits_s0, size_t lo_bits_s1)
 {
@@ -768,12 +770,12 @@ Zf(encode_sig_simple)(void *out, size_t max_out_len,
 	buf = (uint8_t *)out;
 
 	/*
-	 * Make sure that all values are within the -512..+511 range.
+	 * Make sure no coefficient is too large.
 	 */
-	for (u = 0; u < n; u ++)
-		if (s0[u] < -2048 || s0[u] >= 2048) return 0;
-	for (u = 0; u < n; u ++)
-		if (s1[u] < -512 || s1[u] >= 512) return 0;
+	for (u = 0; u < n; u ++) {
+		if (s0[u] < -BOUND_S0(logn) || s0[u] >= BOUND_S0(logn) ||
+			s1[u] < -BOUND_S1(logn) || s1[u] >= BOUND_S1(logn)) return 0;
+	}
 
 	acc = 0;
 	acc_len = 0;
@@ -874,7 +876,7 @@ Zf(encode_sig_simple)(void *out, size_t max_out_len,
 }
 
 size_t
-Zf(decode_sig_simple)(int16_t *s0, int16_t *s1,
+Zf(decode_uncomp_sig)(int16_t *s0, int16_t *s1,
 	const void *in, size_t max_in_len, unsigned logn,
 	size_t lo_bits_s0, size_t lo_bits_s1)
 {
@@ -914,6 +916,13 @@ Zf(decode_sig_simple)(int16_t *s0, int16_t *s1,
 			if (v >= max_in_len) return 0;
 			acc = (acc << 8) | buf[v ++];
 			acc_len += 8;
+
+			if (acc_len < lo_bits_s0) {
+				// should be true all the time
+				if (v >= max_in_len) return 0;
+				acc = (acc << 8) | buf[v ++];
+				acc_len += 8;
+			}
 		}
 
 		/*
@@ -929,7 +938,11 @@ Zf(decode_sig_simple)(int16_t *s0, int16_t *s1,
 			ENSUREBIT();
 			if (GETBIT() != 0) break;
 			w += (1U << lo_bits_s0);
-			if (w >= 2048) return 0;
+
+			/*
+			 * Make sure no coefficient is too large.
+			 */
+			if (w >= BOUND_S0(logn)) return 0;
 		}
 
 		s0[u] = w ^ -s;
@@ -965,7 +978,11 @@ Zf(decode_sig_simple)(int16_t *s0, int16_t *s1,
 			ENSUREBIT();
 			if (GETBIT() != 0) break;
 			w += (1U << lo_bits_s1);
-			if (w >= 512) return 0;
+
+			/*
+			 * Make sure no coefficient is too large.
+			 */
+			if (w >= BOUND_S1(logn)) return 0;
 		}
 
 		s1[u] = w ^ -s;
@@ -985,7 +1002,7 @@ Zf(decode_sig_simple)(int16_t *s0, int16_t *s1,
 
 /* see inner.h */
 size_t
-Zf(encode_sig)(void *out, size_t max_out_len, const int16_t *x, unsigned logn,
+Zf(encode_sig)(void *out, size_t max_out_len, const int16_t *s1, unsigned logn,
 	size_t lo_bits)
 {
 	uint8_t *buf;
@@ -997,10 +1014,12 @@ Zf(encode_sig)(void *out, size_t max_out_len, const int16_t *x, unsigned logn,
 	buf = (uint8_t *)out;
 
 	/*
-	 * Make sure that all values are within the -512..+511 range.
+	 * Make sure no coefficient is too large.
 	 */
-	for (u = 0; u < n; u ++)
-		if (x[u] < -512 || x[u] >= 512) return 0;
+	for (u = 0; u < n; u ++) {
+		if (s1[u] < -BOUND_S1(logn) || s1[u] >= BOUND_S1(logn)) return 0;
+	}
+
 
 	acc = 0;
 	acc_len = 0;
@@ -1011,7 +1030,7 @@ Zf(encode_sig)(void *out, size_t max_out_len, const int16_t *x, unsigned logn,
 		/*
 		 * Push sign bit
 		 */
-		w = (uint16_t) x[u];
+		w = (uint16_t) s1[u];
 		acc = (acc << 1) | (w >> 15);
 		w ^= -(w >> 15);
 
@@ -1070,7 +1089,7 @@ Zf(encode_sig)(void *out, size_t max_out_len, const int16_t *x, unsigned logn,
 }
 
 size_t
-Zf(decode_sig)(int16_t *x, const void *in, size_t max_in_len, unsigned logn,
+Zf(decode_sig)(int16_t *s1, const void *in, size_t max_in_len, unsigned logn,
 	size_t lo_bits)
 {
 	const uint8_t *buf;
@@ -1127,12 +1146,14 @@ Zf(decode_sig)(int16_t *x, const void *in, size_t max_in_len, unsigned logn,
 				break;
 			}
 			w += (1U << lo_bits);
-			if (w >= 512) {
-				return 0;
-			}
+
+			/*
+			 * Make sure no coefficient is too large.
+			 */
+			if (w >= BOUND_S1(logn)) return 0;
 		}
 
-		x[u] = w ^ -s;
+		s1[u] = w ^ -s;
 	}
 
 	/*
@@ -1155,19 +1176,23 @@ size_t
 Zf(encode_seckey)(uint8_t *out, size_t max_out_len,
 	const int8_t *f, const int8_t *g, const int8_t *F, unsigned logn)
 {
-	uint16_t acc;
-	size_t n, u, out_len, acc_len;
+	uint16_t acc, mask;
+	size_t n, u, out_len, acc_len, lobits;
 
 	n = MKN(logn);
 	acc = 0;
 	acc_len = 0;
-	out_len = ((n * 18) + 7) >> 3;
 
+	lobits = logn == 10 ? 6 : 5;
+	mask = 1u << (lobits - 1);
 	for (u = 0; u < n; u++) {
-		if (f[u] < -16 || f[u] >= 16 || g[u] < -16 || g[u] >= 16) {
+		if (f[u] < -mask || f[u] >= mask || g[u] < -mask || g[u] >= mask) {
 			return 0;
 		}
 	}
+
+	out_len = ((n * (8 + 2 * lobits)) + 7) >> 3;
+	mask = (1u << lobits) - 1;
 
 	if (out == NULL) {
 		return out_len;
@@ -1188,8 +1213,8 @@ Zf(encode_seckey)(uint8_t *out, size_t max_out_len,
 #define POLY_ENC(x)                                                           \
 	for (u = 0; u < n; u ++) {                                                \
 		/* Push exactly len bits */                                           \
-		acc = (acc << 5) | ((uint8_t) x[u] & 31u);                            \
-		acc_len += 5;                                                         \
+		acc = (acc << lobits) | ((uint8_t) x[u] & mask);                      \
+		acc_len += lobits;                                                    \
 		/* Produce all full bytes. */                                         \
 		if (acc_len >= 8) {                                                   \
 			acc_len -= 8;                                                     \
@@ -1220,13 +1245,16 @@ Zf(decode_seckey)(int8_t *f, int8_t *g, int8_t *F,
 	const uint8_t *in, size_t max_in_len, unsigned logn)
 {
 	uint8_t w;
-	uint16_t acc;
-	size_t n, u, in_len, acc_len;
+	uint16_t acc, mask;
+	size_t n, u, in_len, acc_len, lobits;
 
 	n = MKN(logn);
 	acc = 0;
 	acc_len = 0;
-	in_len = ((n * 18) + 7) >> 3;
+
+	lobits = logn == 10 ? 6 : 5;
+	in_len = ((n * (8 +  2 * lobits)) + 7) >> 3;
+	mask = (1u << lobits) - 1;
 
 	if (in_len > max_in_len) {
 		return 0;
@@ -1245,14 +1273,14 @@ Zf(decode_seckey)(int8_t *f, int8_t *g, int8_t *F,
 #define POLY_DEC(x)                                                           \
 	for (u = 0; u < n; u ++) {                                                \
 		/* Fill the accumulator if needed */                                  \
-		if (acc_len < 5) {                                                    \
+		if (acc_len < lobits) {                                               \
 			acc = (acc << 8) | (uint16_t)(*in ++);                            \
 			acc_len += 8;                                                     \
 		}                                                                     \
 		/* Take 5 bits from the accumulator */                                \
-		w = (uint8_t)(acc >> (acc_len -= 5)) & 31u;                           \
+		w = (uint8_t)(acc >> (acc_len -= lobits)) & mask;                     \
 		/* Let bits 7..5 match (sign) bit 4 */                                \
-		w -= (w & 16) << 1;                                                   \
+		w -= (w << 1) & (mask + 1);                                           \
 		x[u] = (int8_t)w;                                                     \
 	}
 

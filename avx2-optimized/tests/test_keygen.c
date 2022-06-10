@@ -26,12 +26,14 @@ void poly_output(fpr *p, size_t logn) {
 }
 
 
-#define MAX_Q00 (512) // ~6*sigma
-#define MAXLEN_Q00 (52) // max path in the tree
-// #define MAX_Q10 (2048) // sufficient enough
-// #define MAXLEN_Q10 (21) // max path in the tree
-#define MAX_Q10 (4096)
-#define MAXLEN_Q10 (56)
+// #define MAX_Q00 (512) // ~6*sigma
+// #define MAXLEN_Q00 (52) // max path in the tree
+// #define MAX_Q10 (4096)
+// #define MAXLEN_Q10 (56)
+#define MAX_Q00 (1024) // ~6*sigma
+#define MAXLEN_Q00 (30) // max path in the tree
+#define MAX_Q10 (16384)
+#define MAXLEN_Q10 (54)
 
 struct {
 	uint16_t a[MAX_Q00][2]; // { left child, right child }
@@ -72,8 +74,10 @@ void init_huffman_trees() {
 	assert(len[1] <= L && "Longest codeword is too long!");              \
 	if (len[1] != L) printf("Longest codeword has length %d\n", len[1]) // ;
 
-	BUILD_TREE(huffman_tree_q00, MAX_Q00, MAXLEN_Q00, 64.0);
-	BUILD_TREE(huffman_tree_q10, MAX_Q10, MAXLEN_Q10, 512.0);
+	// BUILD_TREE(huffman_tree_q00, MAX_Q00, MAXLEN_Q00, 72.0);
+	// BUILD_TREE(huffman_tree_q10, MAX_Q10, MAXLEN_Q10, 600.0);
+	BUILD_TREE(huffman_tree_q00, MAX_Q00, MAXLEN_Q00, 182.0);
+	BUILD_TREE(huffman_tree_q10, MAX_Q10, MAXLEN_Q10, 2145.0);
 
 #define DEBUG_TREE(T, N, L) \
 	for (uint16_t x = 0; x < N; x++) { \
@@ -459,8 +463,10 @@ keygen_count_fails(inner_shake256_context *rng,
 		 * We require that N(f) and N(g) are both odd (the binary GCD in the
 		 * NTRU solver requires it), so we require (fg_okay & 1) == 1.
 		 */
-		fg_okay = poly_small_mkgauss(&p, f, logn)
-			& poly_small_mkgauss(&p, g, logn) & 1u;
+		// fg_okay = poly_small_mkgauss(&p, f, logn) & poly_small_mkgauss(&p, g, logn) & 1u;
+		while (!poly_small_mkgauss(&p, f, logn)) {};
+		while (!poly_small_mkgauss(&p, g, logn)) {};
+		fg_okay = 1u;
 
 		if (fg_okay == 0u) {
 			(*normfg_even_fails)++;
@@ -474,12 +480,24 @@ keygen_count_fails(inner_shake256_context *rng,
 
 		if (logn == 9) {
 			/*
-			 * For n = 512, we reject a key pair if cst(1/q00) >= 0.001, as the
+			 * For n = 512, we reject a key pair if cst(1/q00) >= 1/1000, as the
 			 * failure probability of decompressing a signature is bounded from
 			 * above by 1.9e-32 < 2^{-105}.  Experimentally this fails with
 			 * probability of 9%.
 			 */
 			fg_okay &= fpr_lt(rt1[0], fpr_inv(fpr_of(1000)));
+			if (fg_okay == 0u) {
+				(*norminvq00_fails)++;
+				continue;
+			}
+		} else if (logn == 10) {
+			/*
+			 * For n = 1024, we reject a key pair if cst(1/q00) >= 1/3000, as
+			 * the failure probability of decompressing a signature is bounded
+			 * from above by 1.2e-95 < 2^{-315}. Experimentally this fails
+			 * with probability of 0.9%.
+			 */
+			fg_okay &= fpr_lt(rt1[0], fpr_inv(fpr_of(3000)));
 			if (fg_okay == 0u) {
 				(*norminvq00_fails)++;
 				continue;
@@ -497,7 +515,13 @@ keygen_count_fails(inner_shake256_context *rng,
 			norm += (int32_t)f[u] * (int32_t)f[u];
 			norm += (int32_t)g[u] * (int32_t)g[u];
 		}
-		norm -= (int32_t)(Zf(l2bound)[logn] >> 2);
+
+		if (logn == 10) {
+			norm -= l2bound_ssec_1024[logn];
+		} else {
+			norm -= (int32_t)(Zf(l2bound_512)[logn] >> 2);
+		}
+
 		fg_okay &= ((uint32_t) -norm) >> 31;
 
 		if (fg_okay == 0u) {
@@ -529,7 +553,7 @@ keygen_count_fails(inner_shake256_context *rng,
 // =============================================================================
 // | TESTING CODE                                                              |
 // =============================================================================
-const size_t logn = 9, n = MKN(logn);
+const size_t logn = 10, n = MKN(logn);
 
 void measure_keygen() {
 	uint8_t b[48 << logn];
@@ -540,7 +564,7 @@ void measure_keygen() {
 	inner_shake256_context sc;
 
 	struct timeval t0, t1;
-	const int n_repetitions = 1000;
+	const int n_repetitions = 100;
 
 	// Initialize a RNG.
 	Zf(get_seed)(seed, sizeof seed);
@@ -550,10 +574,8 @@ void measure_keygen() {
 
 	gettimeofday(&t0, NULL);
 
-	size_t tot_h00 = 0, tot_c00 = 0;
-	size_t tot_h10 = 0, tot_c10 = 0;
-	size_t sq_h00 = 0, sq_c00 = 0;
-	size_t sq_h10 = 0, sq_c10 = 0;
+	size_t tot_h00 = 0, tot_h10 = 0, tot_enc = 0;
+	size_t sq_h00 = 0, sq_h10 = 0, sq_enc = 0;
 
 	int normfg_even_fails = 0, normfg_fails = 0;
 	int norminvq00_fails = 0, NTRU_fails = 0;
@@ -567,22 +589,19 @@ void measure_keygen() {
 
 		size_t pubkey_sz_hq00 = Zf(huffman_encode_q00)(NULL, 0, q00n, logn);
 		size_t pubkey_sz_hq10 = Zf(huffman_encode_q10)(NULL, 0, q10n, logn);
-		size_t pubkey_sz_cq00 = Zf(comp_encode_q00)(NULL, 0, q00n, logn);
-		size_t pubkey_sz_cq10 = Zf(comp_encode_q10)(NULL, 0, q10n, logn);
+		size_t pubkey_sz_enc = Zf(encode_pubkey)(NULL, 0, q00n, q10n, logn);
 
-		if (!pubkey_sz_hq00 || !pubkey_sz_hq10 || !pubkey_sz_cq00 ||!pubkey_sz_cq10) {
+		if (!pubkey_sz_hq00 || !pubkey_sz_hq10 || !pubkey_sz_enc) {
 			printf("Encoding failed at step %d\n", i);
 			i--; continue;
 		}
 
 		tot_h00 += pubkey_sz_hq00;
-		tot_c00 += pubkey_sz_cq00;
 		tot_h10 += pubkey_sz_hq10;
-		tot_c10 += pubkey_sz_cq10;
+		tot_enc += pubkey_sz_enc;
 		sq_h00 += pubkey_sz_hq00*pubkey_sz_hq00;
-		sq_c00 += pubkey_sz_cq00*pubkey_sz_cq00;
 		sq_h10 += pubkey_sz_hq10*pubkey_sz_hq10;
-		sq_c10 += pubkey_sz_cq10*pubkey_sz_cq10;
+		sq_enc += pubkey_sz_enc*pubkey_sz_enc;
 	}
 
 	gettimeofday(&t1, NULL);
@@ -607,29 +626,26 @@ void measure_keygen() {
 	printf("Pr[ keygen works            ] = %.2f%%\n",
 		100.0 * n_repetitions / samples);
 
-	double avg, std;
+	double avg0, avg1, std0, std1;
 	printf("\nType | |pk| (#bytes) (h = huffman, c = falcon-compression)\n");
 
-	avg = (double) tot_h00 / n_repetitions;
-	std = sqrt( (double) sq_h00 / n_repetitions - avg*avg );
-	printf("hq00 | %.1f (%.1f)\n", avg, std);
-	avg = (double) tot_h10 / n_repetitions;
-	std = sqrt( (double) sq_h10 / n_repetitions - avg*avg );
-	printf("hq10 | %.1f (%.1f)\n", avg, std);
+	avg0 = (double) tot_h00 / n_repetitions;
+	std0 = sqrt( (double) sq_h00 / n_repetitions - avg0*avg0 );
+	avg1 = (double) tot_h10 / n_repetitions;
+	std1 = sqrt( (double) sq_h10 / n_repetitions - avg1*avg1 );
 
-	avg = (double) tot_c00 / n_repetitions;
-	std = sqrt( (double) sq_c00 / n_repetitions - avg*avg );
-	printf("cq00 | %.1f (%.1f)\n", avg, std);
-	avg = (double) tot_c10 / n_repetitions;
-	std = sqrt( (double) sq_c10 / n_repetitions - avg*avg );
-	printf("cq10 | %.1f (%.1f)\n", avg, std);
+	printf("huffman | %.1f (%.1f)\n", avg0 + avg1, sqrt(std0*std0 + std1*std1));
+
+	avg0 = (double) tot_enc / n_repetitions;
+	std0 = sqrt( (double) sq_enc / n_repetitions - avg0*avg0 );
+	printf("encode  | %.1f (%.1f)\n", avg0, std0);
 }
 
 void report_invq00_fail_prob() {
 	const int n_repetitions = 100 * 1000;
 
 	int8_t f[n], g[n];
-	fpr rt1[n], rt2[n], rt3[n];
+	fpr rt1[n], rt2[n], rt3[n], avg_invq00 = fpr_zero;
 	unsigned char seed[48];
 	inner_shake256_context sc;
 	prng p;
@@ -641,6 +657,8 @@ void report_invq00_fail_prob() {
 	inner_shake256_flip(&sc);
 	Zf(prng_init)(&p, &sc);
 
+	int inv_nu = logn == 10 ? 3000 : 1000;
+
 	int num_fails = 0;
 	for (int i = 0; i < n_repetitions; i++) {
 		poly_small_mkgauss(&p, f, logn);
@@ -651,10 +669,14 @@ void report_invq00_fail_prob() {
 		Zf(poly_invnorm2_fft)(rt1, rt2, rt3, logn);
 		Zf(iFFT)(rt1, logn);
 
-		num_fails += !fpr_lt(rt1[0], fpr_inv(fpr_of(1000)));
+		num_fails += !fpr_lt(rt1[0], fpr_inv(fpr_of(inv_nu)));
+		avg_invq00 = fpr_add(avg_invq00, rt1[0]);
 	}
+	avg_invq00 = fpr_div(avg_invq00, fpr_of(n_repetitions));
 
-	printf("\nExperimental probability that cst(1/q00) >= 0.001 is %.6f\n",
+	printf("\nAverage value cst(1/q00) = %.6f\n", *(double*)&avg_invq00);
+	printf("Experimental probability that cst(1/q00) >= %.6f is %.6f\n",
+		((double) 1.0) / inv_nu,
 		((double) num_fails) / n_repetitions);
 }
 

@@ -2226,21 +2226,31 @@ poly_sub_scaled_ntt(uint32_t *restrict F, size_t Flen, size_t Fstride,
 */
 
 #ifdef __CONFIG_fg
-static const size_t MAX_BL_SMALL[10] = { 1, 1, 2, 4, 4, 8, 16, 32, 64, 128 };
+static const size_t MAX_BL_SMALL_512[10] = { 1, 1, 2, 4, 4, 8, 16, 32, 64, 128 };
+static const size_t MAX_BL_SMALL_1024[11] = { 1, 1, 2, 4, 4, 8, 16, 32, 64, 128, 256 };
 #else
-static const size_t MAX_BL_SMALL[10] = { 1, 1, 1, 2, 3, 6, 11, 21, 42, 83 };
+// NIST-1 parameter set
+static const size_t MAX_BL_SMALL_512[10] = { 1, 1, 1, 2, 3, 6, 11, 21, 42, 83 };
+// NIST-5 parameter set
+static const size_t MAX_BL_SMALL_1024[11] = { 1, 1, 1, 2, 4, 7, 13, 25, 49, 96, 192 };
 #endif // __CONFIG_fg
 
-static const size_t MAX_BL_LARGE[9] = { 2, 2, 3, 5, 9, 16, 31, 62, 123 };
+// NIST-1 parameter set
+static const size_t MAX_BL_LARGE_512[9] = { 2, 2, 3, 5, 9, 16, 31, 62, 123 };
+// NIST-5 parameter set
+static const size_t MAX_BL_LARGE_1024[10] = { 2, 2, 3, 5, 10, 19, 37, 73, 144, 286 };
+
 
 /*
  * Average and standard deviation for the maximum size (in bits) of
  * coefficients of (f,g), depending on depth. These values are used
  * to compute bounds for Babai's reduction.
  */
+
 static const struct {
         int avg, std;
-} BITLENGTH[10] = {
+} BITLENGTH_512[10] = {
+	// NIST-1 parameter set
 	{ 3, 0 },
 	{ 8, 1 },
 	{ 19, 1 },
@@ -2251,7 +2261,21 @@ static const struct {
 	{ 606, 8 },
 	{ 1201, 13 },
 	{ 2402, 25 }
+}, BITLENGTH_1024[11] = {
+	// NIST-5 parameter set
+	{ 3, 1 },
+	{ 10, 1 },
+	{ 22, 1 },
+	{ 46, 1 },
+	{ 93, 2 },
+	{ 186, 3 },
+	{ 368, 4 },
+	{ 728, 6 },
+	{ 1444, 10 },
+	{ 2870, 16 },
+	{ 5741, 32 }
 };
+
 
 
 /*
@@ -2309,14 +2333,18 @@ align_u32(void *base, void *data)
  * Element k (k >= 0) contains P(|X| >= k+1) scaled up by 2^63.
  * To generate the values in the table below, run `sage code/renyi.sage`.
  */
-static const uint64_t gauss_keygen[13] = {
+static const uint64_t gauss_keygen_512[13] = {
 	6770309987939008324u, 2841792919453817158u, 824825004081786282u,
 	160853309707784581u, 20707417942076380u, 1740733985516594u,
 	94912702842187u, 3342501151111u, 75826385177u, 1106214542u, 10367241u,
 	62372u, 240u
 };
 
-static int8_t mkgauss_keygen(prng *rng)
+static const uint64_t gauss_keygen_1024[18] = {
+        7383575500167950195u, 4136346010143971104u, 1904559995876614063u, 709971025731164996u, 211992254950663720u, 50322218324695907u, 9445631610447646u, 1396554443915519u, 162188481909714u, 14764491139956u, 1051923941109u, 58588904909u, 2548776933u, 86545550u, 2292625u, 47361u, 762u, 9u
+};
+
+static int8_t mkgauss_keygen_512(prng *rng)
 {
 	uint64_t r;
 	uint8_t v, k, neg;
@@ -2337,7 +2365,39 @@ static int8_t mkgauss_keygen(prng *rng)
 		/*
 		 * Add 1 iff r < gauss_keygen[k].
 		 */
-		v += (uint8_t)((uint64_t)(r - gauss_keygen[k]) >> 63);
+		v += (uint8_t)((uint64_t)(r - gauss_keygen_512[k]) >> 63);
+	}
+
+	/*
+	 * Apply the sign ('neg' flag). If neg = 0, this has no effect.
+	 * However, if neg = 1, this changes v into -v = (~v) + 1.
+	 */
+	v = (v ^ -neg) + neg;
+	return *(int8_t *)&v;
+}
+
+static int8_t mkgauss_keygen_1024(prng *rng)
+{
+	uint64_t r;
+	uint8_t v, k, neg;
+
+	/*
+	 * Generate a 64 bit value.
+	 */
+	r = prng_get_u64(rng);
+
+	/*
+	 * Get the sign bit, and unset this bit in r.
+	 */
+	neg = (uint8_t)(r >> 63);
+	r &= ~((uint64_t)1u << 63);
+
+	v = 0;
+	for (k = 0; k < 18; k++) {
+		/*
+		 * Add 1 iff r < gauss_keygen[k].
+		 */
+		v += (uint8_t)((uint64_t)(r - gauss_keygen_1024[k]) >> 63);
 	}
 
 	/*
@@ -2362,9 +2422,17 @@ poly_small_mkgauss(prng *rng, int8_t *f, unsigned logn)
 
 	n = MKN(logn);
 	mod2 = 0u;
-	for (u = 0; u < n; u++) {
-		f[u] = mkgauss_keygen(rng);
-		mod2 ^= (uint8_t)f[u];
+
+	if (logn == 10) {
+		for (u = 0; u < n; u++) {
+			f[u] = mkgauss_keygen_1024(rng);
+			mod2 ^= (uint8_t)f[u];
+		}
+	} else {
+		for (u = 0; u < n; u++) {
+			f[u] = mkgauss_keygen_512(rng);
+			mod2 ^= (uint8_t)f[u];
+		}
 	}
 	return mod2;
 }
@@ -2388,8 +2456,14 @@ make_fg_step(uint32_t *data, unsigned logn, unsigned depth,
 
 	n = (size_t)1 << logn;
 	hn = n >> 1;
-	slen = MAX_BL_SMALL[depth];
-	tlen = MAX_BL_SMALL[depth + 1];
+
+	if (logn + depth == 10) {
+		slen = MAX_BL_SMALL_1024[depth];
+		tlen = MAX_BL_SMALL_1024[depth + 1];
+	} else {
+		slen = MAX_BL_SMALL_512[depth];
+		tlen = MAX_BL_SMALL_512[depth + 1];
+	}
 	primes = PRIMES;
 
 	/*
@@ -2577,7 +2651,11 @@ solve_NTRU_deepest(unsigned logn_top,
 	uint32_t *Fp, *Gp, *fp, *gp, *t1;
 	const small_prime *primes;
 
-	len = MAX_BL_SMALL[logn_top];
+	if (logn_top == 10) {
+		len = MAX_BL_SMALL_1024[logn_top];
+	} else {
+		len = MAX_BL_SMALL_512[logn_top];
+	}
 	primes = PRIMES;
 
 	Fp = tmp;
@@ -2642,9 +2720,15 @@ solve_NTRU_intermediate(unsigned logn_top,
 	 * We build our non-reduced F and G as two independent halves each,
 	 * of degree N/2 (F = F0 + X*F1, G = G0 + X*G1).
 	 */
-	slen = MAX_BL_SMALL[depth];
-	dlen = MAX_BL_SMALL[depth + 1];
-	llen = MAX_BL_LARGE[depth];
+	if (logn_top == 10) {
+		slen = MAX_BL_SMALL_1024[depth];
+		dlen = MAX_BL_SMALL_1024[depth + 1];
+		llen = MAX_BL_LARGE_1024[depth];
+	} else {
+		slen = MAX_BL_SMALL_512[depth];
+		dlen = MAX_BL_SMALL_512[depth + 1];
+		llen = MAX_BL_LARGE_512[depth];
+	}
 	primes = PRIMES;
 
 	/*
@@ -2935,8 +3019,13 @@ solve_NTRU_intermediate(unsigned logn_top,
 	 * allow for a deviation of at most six times the standard
 	 * deviation.
 	 */
-	minbl_fg = BITLENGTH[depth].avg - 6 * BITLENGTH[depth].std;
-	maxbl_fg = BITLENGTH[depth].avg + 6 * BITLENGTH[depth].std;
+	if (logn_top == 10) {
+		minbl_fg = BITLENGTH_1024[depth].avg - 6 * BITLENGTH_1024[depth].std;
+		maxbl_fg = BITLENGTH_1024[depth].avg + 6 * BITLENGTH_1024[depth].std;
+	} else {
+		minbl_fg = BITLENGTH_512[depth].avg - 6 * BITLENGTH_512[depth].std;
+		maxbl_fg = BITLENGTH_512[depth].avg + 6 * BITLENGTH_512[depth].std;
+	}
 
 	/*
 	 * Compute 1/(f*adj(f)+g*adj(g)) in rt5. We also keep adj(f)
@@ -3207,9 +3296,15 @@ solve_NTRU_binary_depth1(unsigned logn_top,
 	 * We build our non-reduced F and G as two independent halves each,
 	 * of degree N/2 (F = F0 + X*F1, G = G0 + X*G1).
 	 */
-	slen = MAX_BL_SMALL[depth];
-	dlen = MAX_BL_SMALL[depth + 1];
-	llen = MAX_BL_LARGE[depth];
+	if (logn_top == 10) {
+		slen = MAX_BL_SMALL_1024[depth];
+		dlen = MAX_BL_SMALL_1024[depth + 1];
+		llen = MAX_BL_LARGE_1024[depth];
+	} else {
+		slen = MAX_BL_SMALL_512[depth];
+		dlen = MAX_BL_SMALL_512[depth + 1];
+		llen = MAX_BL_LARGE_512[depth];
+	}
 
 	/*
 	 * Fd and Gd are the F and G from the deeper level. Ft and Gt
@@ -3952,6 +4047,10 @@ Zf(make_public)(const int8_t *restrict f, const int8_t *restrict g,
 	}
 }
 
+static const int32_t l2bound_ssec_1024[11] = {
+	0u /* unused */, 15u, 31u, 62u, 124u, 249u, 498u, 997u, 1995u, 3990u, 7980u
+};
+
 /* see inner.h */
 void
 Zf(keygen)(inner_shake256_context *rng,
@@ -4011,12 +4110,20 @@ Zf(keygen)(inner_shake256_context *rng,
 
 		if (logn == 9) {
 			/*
-			 * For n = 512, we reject a key pair if cst(1/q00) >= 0.001, as the
-			 * failure probability of decompressing a signature is bounded from
-			 * above by 1.9e-32 < 2^{-105}.  Experimentally this fails with
-			 * probability of 9%.
+			 * For n = 512, we reject a key pair if cst(1/q00) >= 1/1000, as
+			 * the failure probability of decompressing a signature is bounded
+			 * from above by 1.9e-32 < 2^{-105}. Experimentally this fails
+			 * with probability of 9%.
 			 */
 			fg_okay &= fpr_lt(rt1[0], fpr_inv(fpr_of(1000)));
+		} else if (logn == 10) {
+			/*
+			 * For n = 1024, we reject a key pair if cst(1/q00) >= 1/3000, as
+			 * the failure probability of decompressing a signature is bounded
+			 * from above by 1.2e-95 < 2^{-315}. Experimentally this fails
+			 * with probability of 0.9%.
+			 */
+			fg_okay &= fpr_lt(rt1[0], fpr_inv(fpr_of(3000)));
 		}
 
 		/*
@@ -4024,13 +4131,21 @@ Zf(keygen)(inner_shake256_context *rng,
 		 * return a shortest vector when given the public key much faster than
 		 * other instances, so this secret key is not secure to use.
 		 * Thus, set fg_okay to 0 when ||(f, g)||^2 < Zf(l2bound)[logn]/4.
+		 *
+		 * For NIST-5, ssec != sver so use a different bound array.
 		 */
 		norm = 0;
 		for (u = 0; u < n; u++) {
 			norm += (int32_t)f[u] * (int32_t)f[u];
 			norm += (int32_t)g[u] * (int32_t)g[u];
 		}
-		norm -= (int32_t)(Zf(l2bound)[logn] >> 2);
+
+		if (logn == 10) {
+			norm -= l2bound_ssec_1024[logn];
+		} else {
+			norm -= (int32_t)(Zf(l2bound_512)[logn] >> 2);
+		}
+
 		fg_okay &= ((uint32_t) -norm) >> 31;
 
 		if (fg_okay == 0) {

@@ -33,13 +33,13 @@
 #include "inner.h"
 
 /* see hawk.h */
-const size_t HAWK_PUBKEY_SIZE[10] = {
-	0 /* unused */, 7, 13, 23, 41, 77, 143, 276, 528, 1026
+const size_t HAWK_PUBKEY_SIZE[11] = {
+	0 /* unused */, 7, 13, 23, 41, 77, 143, 276, 528, 1026, 2390
 };
 
 // TODO: set 5 in the codec.c code (depending on logn!).
-#define SIG0_LOBITS(logn) (8)
-#define SIG_LOBITS(logn) (5)
+#define S0_LOBITS(logn) ((logn) == 10 ? 9u : 8u)
+#define S1_LOBITS(logn) ((logn) == 10 ? 6u : 5u)
 
 /* see hawk.h */
 void
@@ -150,7 +150,7 @@ hawk_keygen_make(shake256_context *rng, unsigned logn, void *seckey,
 	/*
 	 * Check parameters.
 	 */
-	if (logn < 1 || logn > 9) {
+	if (logn < 1 || logn > 10) {
 		return HAWK_ERR_BADARG;
 	}
 
@@ -258,7 +258,7 @@ hawk_make_public(void *pubkey, size_t pubkey_len, const void *seckey,
 		return HAWK_ERR_FORMAT;
 	}
 	logn = sk[0] & 0x0F;
-	if (logn < 1 || logn > 9 || seckey_len != HAWK_SECKEY_SIZE(logn)) {
+	if (logn < 1 || logn > 10 || seckey_len != HAWK_SECKEY_SIZE(logn)) {
 		return HAWK_ERR_FORMAT;
 	}
 	if (pubkey_len != HAWK_PUBKEY_SIZE[logn]
@@ -319,7 +319,7 @@ hawk_get_logn(const void *obj, size_t len)
 		return HAWK_ERR_FORMAT;
 	}
 	logn = *(const uint8_t *)obj & 0x0F;
-	if (logn < 1 || logn > 9) {
+	if (logn < 1 || logn > 10) {
 		return HAWK_ERR_FORMAT;
 	}
 	return logn;
@@ -347,7 +347,7 @@ hawk_expand_seckey(void *expanded_key, size_t expanded_key_len,
 		return HAWK_ERR_FORMAT;
 	}
 	logn = sk[0] & 0x0F;
-	if (logn < 1 || logn > 9 || seckey_len != HAWK_SECKEY_SIZE(logn)) {
+	if (logn < 1 || logn > 10 || seckey_len != HAWK_SECKEY_SIZE(logn)) {
 		return HAWK_ERR_FORMAT;
 	}
 	if (expanded_key_len < HAWK_EXPANDEDKEY_SIZE(logn)
@@ -470,7 +470,7 @@ hawk_sign_finish(shake256_context *rng, void *sig, size_t *sig_len,
 	 * Get degree from secret key header byte, and check parameters.
 	 */
 	logn = *(const uint8_t *)expanded_key;
-	if (logn < 1 || logn > 9) {
+	if (logn < 1 || logn > 10) {
 		return HAWK_ERR_FORMAT;
 	}
 	if (tmp_len < HAWK_TMPSIZE_SIGN(logn)) {
@@ -537,7 +537,7 @@ hawk_sign_finish(shake256_context *rng, void *sig, size_t *sig_len,
 		 */
 		memcpy(es + 1, salt, HAWK_SALT_SIZE(logn));
 
-		v = Zf(encode_sig)(es + u, es_len - u, sv, logn, SIG_LOBITS(logn));
+		v = Zf(encode_sig)(es + u, es_len - u, sv, logn, S1_LOBITS(logn));
 		if (sig_type == HAWK_SIG_COMPACT) {
 			if (v == 0) {
 				return HAWK_ERR_SIZE;
@@ -588,7 +588,7 @@ hawk_uncompressed_sign_finish(shake256_context *rng, void *sig, size_t *sig_len,
 		return HAWK_ERR_FORMAT;
 	}
 	logn = header_byte & 0x0F;
-	if (logn < 1 || logn > 9 || seckey_len != HAWK_SECKEY_SIZE(logn)) {
+	if (logn < 1 || logn > 10 || seckey_len != HAWK_SECKEY_SIZE(logn)) {
 		return HAWK_ERR_FORMAT;
 	}
 	if (tmp_len < HAWK_TMPSIZE_UNCOMPRESSED_SIGN(logn)) {
@@ -664,8 +664,8 @@ hawk_uncompressed_sign_finish(shake256_context *rng, void *sig, size_t *sig_len,
 		 */
 		memcpy(es + 1, salt, HAWK_SALT_SIZE(logn));
 
-		v = Zf(encode_sig_simple)(es + u, es_len - u, s0, s1, logn,
-				SIG0_LOBITS(logn), SIG_LOBITS(logn));
+		v = Zf(encode_uncomp_sig)(es + u, es_len - u, s0, s1, logn,
+				S0_LOBITS(logn), S1_LOBITS(logn));
 		if (sig_type == HAWK_SIG_COMPACT) {
 			if (v == 0) {
 				return HAWK_ERR_SIZE;
@@ -716,7 +716,7 @@ hawk_sign_dyn_finish(shake256_context *rng, void *sig, size_t *sig_len,
 		return HAWK_ERR_FORMAT;
 	}
 	logn = header_byte & 0x0F;
-	if (logn < 1 || logn > 9 || seckey_len != HAWK_SECKEY_SIZE(logn)) {
+	if (logn < 1 || logn > 10 || seckey_len != HAWK_SECKEY_SIZE(logn)) {
 		return HAWK_ERR_FORMAT;
 	}
 	if (tmp_len < HAWK_TMPSIZE_SIGNDYN(logn)) {
@@ -791,7 +791,7 @@ hawk_sign_dyn_finish(shake256_context *rng, void *sig, size_t *sig_len,
 		 */
 		memcpy(es + 1, salt, HAWK_SALT_SIZE(logn));
 
-		v = Zf(encode_sig)(es + u, es_len - u, sv, logn, SIG_LOBITS(logn));
+		v = Zf(encode_sig)(es + u, es_len - u, sv, logn, S1_LOBITS(logn));
 		if (sig_type == HAWK_SIG_COMPACT) {
 			if (v == 0) {
 				return HAWK_ERR_SIZE;
@@ -842,7 +842,7 @@ hawk_sign_NTT_finish(shake256_context *rng, void *sig, size_t *sig_len,
 		return HAWK_ERR_FORMAT;
 	}
 	logn = header_byte & 0x0F;
-	if (logn < 1 || logn > 9 || seckey_len != HAWK_SECKEY_SIZE(logn)) {
+	if (logn < 1 || logn > 10 || seckey_len != HAWK_SECKEY_SIZE(logn)) {
 		return HAWK_ERR_FORMAT;
 	}
 	if (tmp_len < HAWK_TMPSIZE_SIGNNTT(logn)) {
@@ -917,7 +917,7 @@ hawk_sign_NTT_finish(shake256_context *rng, void *sig, size_t *sig_len,
 		 */
 		memcpy(es + 1, salt, HAWK_SALT_SIZE(logn));
 
-		v = Zf(encode_sig)(es + u, es_len - u, sv, logn, SIG_LOBITS(logn));
+		v = Zf(encode_sig)(es + u, es_len - u, sv, logn, S1_LOBITS(logn));
 		if (sig_type == HAWK_SIG_COMPACT) {
 			if (v == 0) {
 				return HAWK_ERR_SIZE;
@@ -1008,7 +1008,7 @@ hawk_verify_finish(const void *sig, size_t sig_len, int sig_type,
 		return HAWK_ERR_FORMAT;
 	}
 	logn = pk[0] & 0x0F;
-	if (logn < 1 || logn > 9) {
+	if (logn < 1 || logn > 10) {
 		return HAWK_ERR_FORMAT;
 	}
 	if ((es[0] & 0x0F) != logn || (es[0] & 0xF0) != 0x30) {
@@ -1059,7 +1059,7 @@ hawk_verify_finish(const void *sig, size_t sig_len, int sig_type,
 	 * Decode signature value.
 	 */
 	u = 1 + salt_len;
-	v = Zf(decode_sig)(sv, es + u, sig_len - u, logn, SIG_LOBITS(logn));
+	v = Zf(decode_sig)(sv, es + u, sig_len - u, logn, S1_LOBITS(logn));
 	if (v == 0) {
 		return HAWK_ERR_FORMAT;
 	}
@@ -1156,7 +1156,7 @@ hawk_uncompressed_verify_finish(const void *sig, size_t sig_len, int sig_type,
 		return HAWK_ERR_FORMAT;
 	}
 	logn = pk[0] & 0x0F;
-	if (logn < 1 || logn > 9) {
+	if (logn < 1 || logn > 10) {
 		return HAWK_ERR_FORMAT;
 	}
 	if ((es[0] & 0x0F) != logn || (es[0] & 0xF0) != 0x30) {
@@ -1227,8 +1227,8 @@ hawk_uncompressed_verify_finish(const void *sig, size_t sig_len, int sig_type,
 	 * Decode signature value.
 	 */
 	u = 1 + salt_len;
-	v = Zf(decode_sig_simple)(s0, s1, es + u, sig_len - u, logn,
-		SIG0_LOBITS(logn), SIG_LOBITS(logn));
+	v = Zf(decode_uncomp_sig)(s0, s1, es + u, sig_len - u, logn,
+		S0_LOBITS(logn), S1_LOBITS(logn));
 	if (v == 0) {
 		return HAWK_ERR_FORMAT;
 	}

@@ -193,7 +193,7 @@ do_sign(prng *rng, const fpr *restrict expanded_seckey,
 			norm += z*z;
 			x1[u] = fpr_of(z);
 		}
-	} while ((uint32_t)norm > Zf(l2bound)[logn]);
+	} while ((uint32_t)norm > L2BOUND(logn));
 
 	Zf(FFT)(x0, logn);
 	Zf(FFT)(x1, logn);

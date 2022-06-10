@@ -324,14 +324,14 @@ extern "C" {
  * Secret key size (in bytes). The size is exact.
  */
 #define HAWK_SECKEY_SIZE(logn) \
-	((logn) <= 1 ? 6u : (1u + (9u << ((logn) - 2))))
+	((logn) <= 1 ? 6u : (1u + (((logn) == 10 ? 10u : 9u) << ((logn) - 2))))
 
 /*
  * Public key size (in bytes). The size is an upper bound on the allowed size,
  * the average is lower than this.
  * TODO: make this into a macro.
  */
-extern const size_t HAWK_PUBKEY_SIZE[10];
+extern const size_t HAWK_PUBKEY_SIZE[11];
 
 /*
  * Currently, only the signature sizes for logn = 9 are determined, as these
@@ -353,27 +353,27 @@ extern const size_t HAWK_PUBKEY_SIZE[10];
  * and the uncompressed scheme.
  */
 #define HAWK_UNCOMPRESSED_SIG_COMPACT_MAXSIZE(logn) \
-	(1309u)
+	((logn) == 10 ? 2863u : 1309u)
 
 /*
  * Signature size (in bytes) when using the PADDED format and the uncompressed
  * scheme. The size is exact.
  */
 #define HAWK_UNCOMPRESSED_SIG_PADDED_SIZE(logn) \
-	(1266u)
+	((logn) == 10 ? 2799u : 1266u)
 
 /*
  * Maximum practical signature size (in bytes) when using the COMPACT
  * format.
  */
 #define HAWK_SIG_COMPACT_MAXSIZE(logn) \
-	(593u)
+	((logn) == 10 ? 1263u : 593u)
 
 /*
  * Signature size (in bytes) when using the PADDED format. The size is exact.
  */
 #define HAWK_SIG_PADDED_SIZE(logn) \
-	(567u)
+	((logn) == 10 ? 1229u : 567u)
 
 /*
  * Temporary buffer size for key pair generation.

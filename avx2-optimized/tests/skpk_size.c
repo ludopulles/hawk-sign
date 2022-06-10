@@ -8,7 +8,7 @@
 // =============================================================================
 // | TESTING CODE                                                              |
 // =============================================================================
-#define MAX_LOGN (9)
+#define MAX_LOGN (10)
 #define MAX_N MKN(MAX_LOGN)
 
 long long pk_sum[MAX_LOGN+1] = {}, pk_sumsq[MAX_LOGN+1] = {}, pk_min[MAX_LOGN+1] = {}, pk_max[MAX_LOGN+1] = {};
@@ -84,7 +84,7 @@ int main() {
 
 	size_t nreps[MAX_LOGN + 1];
 	for (size_t logn = 1; logn <= MAX_LOGN; logn++) {
-		nreps[logn] = 1000;
+		nreps[logn] = 250;
 	}
 
 	for (size_t logn = 1; logn <= MAX_LOGN; logn++) {

@@ -81,7 +81,9 @@ void print_big(uint32_t *x, size_t xlen)
 }
 */
 
-const size_t logn = 9, n = MKN(logn);
+// const size_t logn = 10, n = MKN(logn);
+#define logn (10)
+#define n (MKN(logn))
 
 void sample_fg(inner_shake256_context *rng, int8_t *f, int8_t *g, uint8_t *tmp)
 {
@@ -128,7 +130,7 @@ void sample_fg_sizes(inner_shake256_context *rng, uint8_t *tmp)
 		sample_fg(rng, f, g, tmp);
 		// now do some statistics
 		for (size_t depth = 0; depth <= logn; depth++) {
-			len = MAX_BL_SMALL[depth]; // should be large enough
+			len = MAX_BL_SMALL_512[depth]; // should be large enough
 
 			fp = (uint32_t *)tmp;
 			gp = fp + (len << (logn - depth));
@@ -160,7 +162,7 @@ void sample_fg_sizes(inner_shake256_context *rng, uint8_t *tmp)
 		printf("Depth %zu: %.2f (%.2f) --> (%zu ints)\n", depth, avg, stddev, nr_ints);
 	}
 
-	printf("static const size_t MAX_BL_SMALL[10] = {\n\t");
+	printf("static const size_t MAX_BL_SMALL[%d] = {\n\t", logn + 1);
 	for (size_t depth = 0; depth <= logn; depth++) {
 		double avg = ((double)sum_b[depth]) / nsamples;
 		double stddev = sqrt(((double)sum_bsq[depth]) / nsamples - avg*avg);
@@ -171,7 +173,7 @@ void sample_fg_sizes(inner_shake256_context *rng, uint8_t *tmp)
 	};
 	printf("};\n");
 
-	printf("static const struct {\n\tint avg, std;\n} BITLENGTH[10] = {\n");
+	printf("static const struct {\n\tint avg, std;\n} BITLENGTH[%d] = {\n", logn + 1);
 	for (size_t depth = 0; depth <= logn; depth++) {
 		double avg = ((double)sum_b[depth]) / nsamples;
 		double stddev = sqrt(((double)sum_bsq[depth]) / nsamples - avg*avg);
@@ -184,7 +186,7 @@ void sample_fg_sizes(inner_shake256_context *rng, uint8_t *tmp)
 
 
 // =============================================================================
-uint8_t tmp[26 * 512];
+uint8_t tmp[26 * n];
 
 int main() {
 	srand(time(NULL));

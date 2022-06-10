@@ -133,9 +133,10 @@ has_short_trace(const fpr *restrict t0, const fpr *restrict t1,
 	 * Check whether the norm is in range [0, 2^31). Signature is valid iff
 	 * squared norm of (t0, t1) w.r.t. Q is at most bound.
 	 */
+	
 	return !fpr_lt(trace, fpr_zero)
 		&& fpr_lt(trace, fpr_ptwo31m1)
-		&& (uint32_t)fpr_rint(trace) <= Zf(l2bound)[logn];
+		&& (uint32_t)fpr_rint(trace) <= L2BOUND(logn);
 }
 
 /* =================================================================== */
@@ -928,7 +929,7 @@ Zf(uncompressed_verify_NTT)(const uint8_t *restrict h,
 
 	return Zf(in_positive_half)(s1, SECOND_HASH(h, logn), logn)
 		&& (norm0 & (hn - 1)) == 0
-		&& (norm0 >> (logn - 1)) <= Zf(l2bound)[logn];
+		&& (norm0 >> (logn - 1)) <= L2BOUND(logn);
 }
 
 #define hashbit(h, idx) ((h[idx >> 3] >> (idx & 7)) & 1u)

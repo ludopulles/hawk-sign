@@ -12,6 +12,8 @@ extern "C" {
 }
 using namespace std;
 
+constexpr int MAXN = 1024;
+
 /*
  * Create a dynamic Huffman table of size N which is (almost) optimal for a
  * normally distributed variable with mean 0 and standard deviation sigma.
@@ -110,7 +112,7 @@ size_t cost_expgolomb(const int16_t *x, unsigned logn, size_t lo_bits)
 // =============================================================================
 // | TESTING CODE                                                              |
 // =============================================================================
-constexpr int n_repetitions = 250;
+constexpr int n_repetitions = 100;
 
 // Taken from hawk.h:
 /*
@@ -125,7 +127,7 @@ constexpr int n_repetitions = 250;
 struct WorkerResult {
 	// s1 <- encode_sig()
 	long long sig_failed[10], sz[10], sz_sq[10], maxsz[10];
-	// (s0, s1) <- encode_sig_simple()
+	// (s0, s1) <- encode_uncomp_sig()
 	long long csig_failed[11], csz[11], csz_sq[11], maxcsz[11];
 	// encode_huffman
 	long long huf_failed, sz_h, sz_hsq, maxhuf;
@@ -200,13 +202,14 @@ struct WorkerResult {
 	}
 };
 
-vector<int> huffman_s0, huffman_s1;
+vector<int> huffman_512_s0, huffman_512_s1;
+vector<int> huffman_1024_s0, huffman_1024_s1;
 
 WorkerResult measure_signatures(unsigned logn) {
-	uint8_t b[48 * 512], h[512 / 4];
-	int8_t f[512], g[512], F[512], G[512];
-	int16_t s0[512], s1[512];
-	fpr q00[512], q10[512], q11[512];
+	uint8_t b[48 * MAXN], h[MAXN / 4];
+	int8_t f[MAXN], g[MAXN], F[MAXN], G[MAXN];
+	int16_t s0[MAXN], s1[MAXN];
+	fpr q00[MAXN], q10[MAXN], q11[MAXN];
 	size_t n;
 	unsigned char seed[48];
 	inner_shake256_context sc;
@@ -244,7 +247,7 @@ WorkerResult measure_signatures(unsigned logn) {
 		}
 
 		// size_t szh = Zf(encode_sig_huffman)(NULL, 0, s1, logn);
-		size_t szh = encoding_length(huffman_s1, s1, logn);
+		size_t szh = encoding_length(logn == 10 ? huffman_1024_s1 : huffman_512_s1, s1, logn);
 		if (szh != 0) {
 			result.sz_h += szh;
 			result.sz_hsq += szh*szh;
@@ -254,11 +257,11 @@ WorkerResult measure_signatures(unsigned logn) {
 		}
 
 		for (int lobits = 5; lobits < 11; lobits++) {
-			size_t sz = Zf(encode_sig_simple)(NULL, 0, s0, s1, logn, lobits, 5U);
+			size_t sz = Zf(encode_uncomp_sig)(NULL, 0, s0, s1, logn, lobits, logn - 4);
 			result.cadd(sz, lobits);
 		}
-		size_t cszh = encoding_length(huffman_s0, s0, logn)
-			+ encoding_length(huffman_s1, s1, logn);
+		size_t cszh = encoding_length(logn == 10 ? huffman_1024_s0 : huffman_512_s0, s0, logn)
+			+ encoding_length(logn == 10 ? huffman_1024_s1 : huffman_512_s1, s1, logn);
 		if (cszh != 0) {
 			result.csz_h += cszh;
 			result.csz_hsq += cszh*cszh;
@@ -283,13 +286,16 @@ void work(unsigned logn) {
 }
 
 int main() {
-	huffman_s0 = generate_huffman_table(2048, 354.900);
-	huffman_s1 = generate_huffman_table(512,  61.543);
+	huffman_512_s0 = generate_huffman_table(2048, 355);
+	huffman_512_s1 = generate_huffman_table(512,  61);
+
+	huffman_1024_s0 = generate_huffman_table(8192, 959);
+	huffman_1024_s1 = generate_huffman_table(1024,  118);
 
 	const int nthreads = 4;
 	std::thread* pool[nthreads-1];
 
-	for (unsigned logn = 9; logn <= 9; logn++) {
+	for (unsigned logn = 9; logn <= 10; logn++) {
 		size_t n = MKN(logn);
 		tot = WorkerResult();
 
@@ -314,26 +320,45 @@ int main() {
 			double avg_sz = (double)tot.sz[lb] / (runs - tot.sig_failed[lb]);
 			double var_sz = (double)tot.sz_sq[lb] / (runs - tot.sig_failed[lb]) - avg_sz * avg_sz;
 			printf("%7u | %7lld | %.1f (std %5.1f) | %5lld\n",
-				lb, salt_and_header + tot.maxsz[lb], salt_and_header + avg_sz, sqrt(var_sz), tot.sig_failed[lb]);
+				lb,
+				salt_and_header + tot.maxsz[lb],
+				salt_and_header + avg_sz,
+				sqrt(var_sz),
+				tot.sig_failed[lb]
+			);
 		}
 
 		double avg_h = (double) tot.sz_h / (runs - tot.huf_failed);
 		double var_h = (double) tot.sz_hsq / (runs - tot.huf_failed) - avg_h * avg_h;
 		printf("Huffman | %7lld | %.1f (std %5.1f) | %5lld\n",
-			salt_and_header + tot.maxhuf, salt_and_header + avg_h, sqrt(var_h), tot.huf_failed);
+			salt_and_header + tot.maxhuf,
+			salt_and_header + avg_h,
+			sqrt(var_h),
+			tot.huf_failed
+		);
 
 		printf("Complete signature (s0, s1) encodings:\n");
 		for (int lb = 7; lb < 11; lb++) {
 			double avg_sz = (double)tot.csz[lb] / (runs - tot.csig_failed[lb]);
 			double var_sz = (double)tot.csz_sq[lb] / (runs - tot.csig_failed[lb]) - avg_sz * avg_sz;
-			printf("(%2u, 5) | %7lld | %.1f (std %5.1f) | %5lld\n",
-				lb, salt_and_header + tot.maxcsz[lb], salt_and_header + avg_sz, sqrt(var_sz), tot.csig_failed[lb]);
+			printf("(%2u, %d) | %7lld | %.1f (std %5.1f) | %5lld\n",
+				lb,
+				logn - 4,
+				salt_and_header + tot.maxcsz[lb],
+				salt_and_header + avg_sz,
+				sqrt(var_sz),
+				tot.csig_failed[lb]
+			);
 		}
 
 		avg_h = (double) tot.csz_h / (runs - tot.chuf_failed);
 		var_h = (double) tot.csz_hsq / (runs - tot.chuf_failed) - avg_h * avg_h;
 		printf("Huffman | %7lld | %.1f (std %5.1f) | %5lld\n",
-			salt_and_header + tot.maxchuf, salt_and_header + avg_h, sqrt(var_h), tot.chuf_failed);
+			salt_and_header + tot.maxchuf,
+			salt_and_header + avg_h,
+			sqrt(var_h),
+			tot.chuf_failed
+		);
 
 	}
 

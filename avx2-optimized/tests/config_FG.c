@@ -27,7 +27,7 @@ Depth 9: 2368.50 (23.99) --> (82 ints)
 */
 
 // Set large enough upper bound:
-static const size_t __MAX_BL_LARGE__[9] = { 2, 2, 6, 8, 16, 32, 64, 128, 200 };
+static const size_t __MAX_BL_LARGE__[10] = { 2, 2, 6, 8, 16, 32, 64, 128, 200, 400 };
 
 /*
  * Helper function to measure number of bits required to represent a number.
@@ -85,8 +85,13 @@ _solve_NTRU_intermediate(unsigned logn_top,
 	 * We build our non-reduced F and G as two independent halves each,
 	 * of degree N/2 (F = F0 + X*F1, G = G0 + X*G1).
 	 */
-	slen = MAX_BL_SMALL[depth];
-	dlen = MAX_BL_SMALL[depth + 1];
+	if (logn_top == 10) {
+		slen = MAX_BL_SMALL_1024[depth];
+		dlen = MAX_BL_SMALL_1024[depth + 1];
+	} else {
+		slen = MAX_BL_SMALL_512[depth];
+		dlen = MAX_BL_SMALL_512[depth + 1];
+	}
 	llen = __MAX_BL_LARGE__[depth];
 	primes = PRIMES;
 
@@ -391,8 +396,14 @@ _solve_NTRU_intermediate(unsigned logn_top,
 	 * allow for a deviation of at most six times the standard
 	 * deviation.
 	 */
-	minbl_fg = BITLENGTH[depth].avg - 6 * BITLENGTH[depth].std;
-	maxbl_fg = BITLENGTH[depth].avg + 6 * BITLENGTH[depth].std;
+	if (logn_top == 10) {
+		minbl_fg = BITLENGTH_1024[depth].avg - 6 * BITLENGTH_1024[depth].std;
+		maxbl_fg = BITLENGTH_1024[depth].avg + 6 * BITLENGTH_1024[depth].std;
+	} else {
+		minbl_fg = BITLENGTH_512[depth].avg - 6 * BITLENGTH_512[depth].std;
+		maxbl_fg = BITLENGTH_512[depth].avg + 6 * BITLENGTH_512[depth].std;
+	}
+
 
 	/*
 	 * Compute 1/(f*adj(f)+g*adj(g)) in rt5. We also keep adj(f)
@@ -613,7 +624,10 @@ _solve_NTRU_intermediate(unsigned logn_top,
 // | END                                                                       |
 // =============================================================================
 
-const size_t logn = 9, n = 1<<logn;
+// const size_t logn = 10, n = MKN(logn);
+#define logn (10)
+#define n (MKN(logn))
+
 
 void sample_FG(inner_shake256_context *rng, int8_t *f, int8_t *g,
 	size_t *bits_FG, uint8_t *tmp)
@@ -652,7 +666,7 @@ sample:
 
 		unsigned depth = logn;
 
-		size_t len = MAX_BL_SMALL[logn];
+		size_t len = logn == 10 ? MAX_BL_SMALL_1024[logn] : MAX_BL_SMALL_512[logn];
 		uint32_t *ptr = (uint32_t *)tmp;
 		size_t szF = number_of_bits(ptr, len);
 		size_t szG = number_of_bits(ptr + len, len);
@@ -699,7 +713,7 @@ void sample_FG_sizes(inner_shake256_context *rng, uint8_t *tmp)
 		printf("Depth %zu: %.2f (%.2f) --> (%zu ints)\n", depth, avg, stddev, nr_ints);
 	}
 
-	printf("static const size_t MAX_BL_LARGE[9] = {\n\t");
+	printf("static const size_t MAX_BL_LARGE[%d] = {\n\t", logn);
 	for (size_t depth = 0; depth < logn; depth++) {
 		double avg = ((double)sum_b[depth]) / nsamples;
 		double stddev = sqrt(((double)sum_bsq[depth]) / nsamples - avg*avg);
@@ -714,7 +728,7 @@ void sample_FG_sizes(inner_shake256_context *rng, uint8_t *tmp)
 
 
 // =============================================================================
-uint8_t tmp[68 * 512];
+uint8_t tmp[68 * n];
 int main() {
 	srand(time(NULL));
 

@@ -511,7 +511,10 @@ prng_get_80_bits(prng *p, uint16_t *bit16, uint64_t *bit64)
  *
  * To generate these values, run 'gen_table.cpp'.
  */
-extern const uint32_t Zf(l2bound)[10];
+extern const uint32_t Zf(l2bound_512)[10];
+extern const uint32_t Zf(l2bound_1024)[11];
+
+#define L2BOUND(logn) ((logn) == 10 ? Zf(l2bound_1024)[logn] : Zf(l2bound_512)[logn])
 
 /*
  * Convert an integer polynomial (with small values) to floating point numbers.
@@ -572,7 +575,7 @@ size_t Zf(decode_pubkey)(int16_t *q00, int16_t *q10,
 /*
  * Encode a signature (s0, s1) with Golomb-Rice encoding.
  */
-size_t Zf(encode_sig_simple)(void *out, size_t max_out_len,
+size_t Zf(encode_uncomp_sig)(void *out, size_t max_out_len,
 	const int16_t *s0, const int16_t *s1, unsigned logn,
 	size_t lo_bits_s0, size_t lo_bits_s1);
 
@@ -580,20 +583,20 @@ size_t Zf(encode_sig_simple)(void *out, size_t max_out_len,
  * Encode a signature s1 by outputting 'lo_bits' bits of the lowest signficant
  * bits of x[i] and using unary for the other most significant bits.
  */
-size_t Zf(encode_sig)(void *out, size_t max_out_len, const int16_t *x,
+size_t Zf(encode_sig)(void *out, size_t max_out_len, const int16_t *s1,
 	unsigned logn, size_t lo_bits);
 
 /*
  * Decode a signature (s0, s1) with Golomb-Rice encoding.
  */
-size_t Zf(decode_sig_simple)(int16_t *s0, int16_t *s1,
+size_t Zf(decode_uncomp_sig)(int16_t *s0, int16_t *s1,
 	const void *in, size_t max_in_len, unsigned logn,
 	size_t lo_bits_s0, size_t lo_bits_s1);
 
 /*
  * Decode a signature s1.
  */
-size_t Zf(decode_sig)(int16_t *x, const void *in, size_t max_in_len,
+size_t Zf(decode_sig)(int16_t *s1, const void *in, size_t max_in_len,
 	unsigned logn, size_t lo_bits);
 
 /*
@@ -1106,7 +1109,7 @@ int Zf(verify_simple_rounding_fft)(const uint8_t *restrict h,
 /*
  * Verify if a signature (s0, s1) is valid for a hashed message h of length n /
  * 4 bytes. This method does not use any floating point operations.
- * Assumes Zf(l2bound)[logn] * n/2 < 2^30.
+ * Assumes Zf(l2bound_XXX)[logn] * n/2 < 2^30.
  *
  * Note: tmp[] must have space for at least 32 * 2^logn bytes.
  */
