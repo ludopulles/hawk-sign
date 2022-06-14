@@ -31,6 +31,19 @@ Zf(int8_to_fft)(fpr *p, const int8_t *x, unsigned logn)
 
 /* see inner.h */
 void
+Zf(int16_to_fft)(fpr *p, const int16_t *x, unsigned logn)
+{
+	size_t u;
+
+	u = MKN(logn);
+	while (u -- > 0) {
+		p[u] = fpr_of(x[u]);
+	}
+	Zf(FFT)(p, logn);
+}
+
+/* see inner.h */
+void
 Zf(fft_to_int16)(int16_t *x, fpr *p, unsigned logn)
 {
 	size_t u;

@@ -79,8 +79,13 @@
 #include <string.h>
 
 
+/*
+ * Optionally, one can do a lightweight-check during signing in HAWK (not
+ * uncompressed) if recovering the first half of the signature works. To have
+ * this, add the flag -DHAWK_RECOVER_CHECK to $(CFLAGS) in the Makefile.
+ */
+
 /* =================================================================== */
-// yyySUPERCOP+0
 /*
  * For seed generation from the operating system:
  *  - On Linux and glibc-2.25+, FreeBSD 12+ and OpenBSD, use getentropy().
@@ -123,7 +128,7 @@
 #define HAWK_RAND_WIN32   0
 #endif
 #endif
-// yyySUPERCOP-
+
 /* =================================================================== */
 
 /*
@@ -452,6 +457,12 @@ extern const uint32_t Zf(l2bound_1024)[11];
  * This also works correctly when p and x overlap.
  */
 void Zf(int8_to_fft)(fpr *p, const int8_t *x, unsigned logn);
+
+/*
+ * Convert an integer polynomial (with small values) to floating point numbers.
+ * This also works correctly when p and x overlap.
+ */
+void Zf(int16_to_fft)(fpr *p, const int16_t *x, unsigned logn);
 
 /*
  * Convert a floating point polynomial (assumed to have small values) into an
@@ -908,7 +919,7 @@ void Zf(keygen)(inner_shake256_context *rng,
  * close to (h0, h1) / 2 with respect to the quadratic form Q.
  * Return if the signature has small enough norm.
  *
- * Note: tmp[] must have space for at least 8 * 2^logn bytes.
+ * Note: tmp[] must have space for at least 48 * 2^logn bytes.
  */
 int Zf(uncompressed_sign)(inner_shake256_context *rng,
 	int16_t *restrict s0, int16_t *restrict s1,
@@ -935,7 +946,11 @@ int Zf(sign_dyn)(inner_shake256_context *rng, int16_t *restrict sig,
  * secret key when calling Zf(expand_seckey). This expanded secret key can be
  * used in Zf(sign).
  */
+#if HAWK_RECOVER_CHECK
+#define EXPANDED_SECKEY_SIZE(logn) (9u << ((logn) - 1))
+#else
 #define EXPANDED_SECKEY_SIZE(logn) (8u << ((logn) - 1))
+#endif
 
 /*
  * Expands a secret key given by the key generation, to produce the secret key
@@ -960,6 +975,19 @@ void Zf(expand_seckey)(fpr *restrict expanded_seckey,
 int Zf(sign)(inner_shake256_context *rng, int16_t *restrict sig,
 	const fpr *restrict expanded_seckey, const uint8_t *restrict h,
 	unsigned logn, uint8_t *restrict tmp);
+
+/*
+ * Compute a signature of h, i.e. the signature is a vector (s0, s1) that is
+ * close to (h0, h1) / 2 with respect to the quadratic form Q.
+ * Return if the signature has small enough norm.
+ *
+ * Note: tmp[] must have space for at least 8 * 2^logn bytes.
+ */
+int Zf(uncompressed_sign_NTT)(inner_shake256_context *rng,
+	int16_t *restrict s0, int16_t *restrict s1,
+	const int8_t *restrict f, const int8_t *restrict g,
+	const int8_t *restrict F, const int8_t *restrict G,
+	const uint8_t *restrict h, unsigned logn, uint8_t *restrict tmp);
 
 /*
  * Compute s1 of a signature of h, i.e. a signature is a vector (s0, s1) that
@@ -1007,7 +1035,7 @@ int Zf(uncompressed_verify)(const uint8_t *restrict h,
  * and reconstructs s0 with simple rounding:
  *     s0 = round((hm%2) / 2 - s1 q10 / q00).
  */
-int Zf(verify_simple_rounding)(const uint8_t *restrict h,
+int Zf(recover_and_verify)(const uint8_t *restrict h,
 	int16_t *restrict s0, const int16_t *restrict s1,
 	const fpr *restrict q00, const fpr *restrict q10, const fpr *restrict q11,
 	unsigned logn, uint8_t *restrict tmp);
@@ -1032,10 +1060,9 @@ int Zf(verify_nearest_plane)(const uint8_t *restrict h,
  *
  * Note: tmp[] must have space for at least 16 * 2^logn bytes.
  */
-int Zf(verify_simple_rounding_fft)(const uint8_t *restrict h,
-	const int16_t *restrict s1, const fpr *restrict q00,
-	const fpr *restrict q10, const fpr *restrict q11, unsigned logn,
-	uint8_t *restrict tmp);
+int Zf(verify)(const uint8_t *restrict h, const int16_t *restrict s1,
+	const fpr *restrict q00, const fpr *restrict q10, const fpr *restrict q11,
+	unsigned logn, uint8_t *restrict tmp);
 
 /*
  * Verify if a signature (s0, s1) is valid for a hashed message h of length n /

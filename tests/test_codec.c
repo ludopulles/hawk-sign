@@ -25,6 +25,24 @@ int poly16_eq(int16_t *p, int16_t *q, unsigned logn) {
 #define N MKN(LOGN)
 #define BUFLEN (10240)
 
+// TODO: set 5 in the codec.c code (depending on logn!).
+#define S0_LOBITS(logn) ((logn) == 10 ? 9u : 8u)
+#define S1_LOBITS(logn) ((logn) == 10 ? 6u : 5u)
+
+/*
+ * Maximum practical signature size (in bytes) when using the compact format
+ * and the uncompressed scheme.
+ */
+#define HAWK_UNCOMPRESSED_SIG_COMPACT_MAXSIZE(logn) \
+	((logn) == 10 ? 2863u : 1309u)
+
+/*
+ * Maximum practical signature size (in bytes) when using the COMPACT
+ * format.
+ */
+#define HAWK_SIG_COMPACT_MAXSIZE(logn) \
+	((logn) == 10 ? 1263u : 593u)
+
 uint8_t b[48 << LOGN], outbuf[BUFLEN];
 int8_t f[N], g[N], F[N], G[N];
 fpr q00[N], q10[N], q11[N];
@@ -41,9 +59,14 @@ inner_shake256_context sc;
 const int n_repetitions = 100;
 
 void test_encode_decode(unsigned logn) {
-	size_t n;
+	size_t n, bs0, bs1;
+	size_t ls, lus;
 
 	n = MKN(logn);
+	bs0 = S0_LOBITS(logn);
+	bs1 = S1_LOBITS(logn);
+	ls = HAWK_SIG_COMPACT_MAXSIZE(logn);
+	lus = HAWK_UNCOMPRESSED_SIG_COMPACT_MAXSIZE(logn);
 
 	for (int i = 0; i < n_repetitions; i++) {
 		// Generate key pair.
@@ -87,20 +110,20 @@ void test_encode_decode(unsigned logn) {
 		inner_shake256_extract(&sc, h, n <= 8 ? 2 : n / 4);
 
 		while (!Zf(uncompressed_sign)(&sc, s0, s1, f, g, F, G, h, logn, b)) {}
-		size_t sig_len = Zf(encode_uncomp_sig)(outbuf, BUFLEN, s0, s1,
-			logn, 8, 5);
+		size_t sig_len = Zf(encode_uncomp_sig)(outbuf, lus, s0, s1,
+			logn, bs0, bs1);
 		assert(sig_len != 0);
 		assert(sig_len == Zf(decode_uncomp_sig)(_s0, _s1, outbuf, sig_len,
-			logn, 8, 5));
+			logn, bs0, bs1));
 
 		assert(poly16_eq(s0, _s0, logn));
 		assert(poly16_eq(s1, _s1, logn));
 
 		// Test (compressed) signature encoding and decoding
 		while (!Zf(sign_dyn)(&sc, s1, f, g, F, G, h, logn, b)) {}
-		sig_len = Zf(encode_sig)(outbuf, BUFLEN, s1, logn, 5);
+		sig_len = Zf(encode_sig)(outbuf, ls, s1, logn, bs1);
 		assert(sig_len != 0);
-		assert(sig_len == Zf(decode_sig)(_s1, outbuf, sig_len, logn, 5));
+		assert(sig_len == Zf(decode_sig)(_s1, outbuf, sig_len, logn, bs1));
 
 		assert(poly16_eq(s1, _s1, logn));
 	}

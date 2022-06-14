@@ -342,11 +342,11 @@ hash_to_fft(fpr *p, const uint8_t *h, unsigned logn)
 		for (u = 0; u < n; ) {
 			hash = *h++;
 			for (v = 0; v < 8; v ++, u ++) {
-				p[u] = fpr_of(hash & 1);
-				hash >>= 1;
+				p[u] = fpr_of((hash >> v) & 1);
 			}
 		}
 	}
+
 	Zf(FFT)(p, logn);
 }
 
@@ -396,8 +396,7 @@ construct_basis(
 		size_t u, hn;
 
 		/*
-		 * Compute G = (1 + gF) / f, where all polynomials are in FFT
-		 * representation.
+		 * Compute (in FFT representation) G = (1 + gF) / f.
 		 */
 		hn = MKN(logn) >> 1;
 		Zf(poly_prod_fft)(bG, bg, bF, logn);
@@ -489,7 +488,8 @@ sample_short(prng *rng, fpr *restrict x0, fpr *restrict x1,
 
 /* see inner.h */
 int
-Zf(sign_dyn)(inner_shake256_context *rng, int16_t *restrict s1,
+Zf(uncompressed_sign)(inner_shake256_context *rng,
+	int16_t *restrict s0, int16_t *restrict s1,
 	const int8_t *restrict f, const int8_t *restrict g,
 	const int8_t *restrict F, const int8_t *restrict G,
 	const uint8_t *restrict h, unsigned logn, uint8_t *restrict tmp)
@@ -515,6 +515,61 @@ Zf(sign_dyn)(inner_shake256_context *rng, int16_t *restrict s1,
 	norm_okay = sample_short(&p, x0, x1, bf, bg, bF, bG, h, logn);
 
 	/*
+	 * Compute (s0, s1) = ((h0, h1) - B^{-1} (x0, x1)) / 2, so
+	 *
+	 *     s0 = (h0 - (x0 * G + x1 (-F))) / 2,
+	 *     s1 = (h1 - (x0 * (-g) + x1 f)) / 2.
+	 */
+	Zf(poly_neg)(x0, logn);
+	Zf(poly_matmul_fft)(bG, bF, bg, bf, x0, x1, logn);
+	Zf(poly_neg)(x0, logn);
+	Zf(iFFT)(x0, logn);
+	Zf(iFFT)(x1, logn);
+
+	noise_to_lattice(s0, h, x0, logn);
+	noise_to_lattice(s1, SECOND_HASH(h, logn), x1, logn);
+
+	flag = (uint16_t)Zf(in_positive_half)(s1, SECOND_HASH(h, logn), logn);
+	conditional_flip(flag, s0, h, logn);
+	conditional_flip(flag, s1, SECOND_HASH(h, logn), logn);
+
+	return norm_okay;
+}
+
+
+/* see inner.h */
+int
+Zf(sign_dyn)(inner_shake256_context *rng, int16_t *restrict s1,
+	const int8_t *restrict f, const int8_t *restrict g,
+	const int8_t *restrict F, const int8_t *restrict G,
+	const uint8_t *restrict h, unsigned logn, uint8_t *restrict tmp)
+{
+#if HAWK_RECOVER_CHECK
+	size_t n, u;
+#else
+	size_t n;
+#endif
+	fpr *x0, *x1, *bf, *bg, *bF, *bG;
+	uint16_t flag;
+	int norm_okay;
+	prng p;
+
+	n = MKN(logn);
+	bf = (fpr *)tmp;
+	bg = bf + n;
+	bF = bg + n;
+	bG = bF + n;
+	x0 = bG + n;
+	x1 = x0 + n;
+
+	Zf(prng_init)(&p, rng);
+
+	construct_basis(f, g, F, G, bf, bg, bF, bG, logn);
+
+	norm_okay = sample_short(&p, x0, x1, bf, bg, bF, bG, h, logn);
+
+#if HAWK_RECOVER_CHECK
+	/*
 	 * Compute *twice* the rounding error, which is given by:
 	 *
 	 *     (f* x0 + g* x1) / (f* f + g* g).
@@ -525,8 +580,6 @@ Zf(sign_dyn)(inner_shake256_context *rng, int16_t *restrict s1,
 	 * Currently, this check is NOT performed, as the probability of a failure
 	 * to happen here is (heuristically) less than 2^{-105}.
 	 */
-
-/*
 	Zf(poly_add_muladj_fft)(bF, x0, x1, bf, bg, logn);
 	Zf(poly_invnorm2_fft)(bG, bf, bg, logn);
 	Zf(poly_mul_autoadj_fft)(bF, bG, logn);
@@ -537,14 +590,14 @@ Zf(sign_dyn)(inner_shake256_context *rng, int16_t *restrict s1,
 			return 0;
 		}
 	}
-*/
+#endif
 
 	/*
 	 * Compute s1 in (s0, s1) = ((h0, h1) - B^{-1} (x0, x1)) / 2, so
 	 *
 	 *     s1 = (h1 - (x0 * (-g) + x1 f)) / 2.
 	 */
-	Zf(poly_neg)(bg, logn);
+	Zf(poly_neg)(x0, logn);
 	Zf(poly_add_mul_fft)(bF, x0, x1, bg, bf, logn);
 	Zf(iFFT)(bF, logn);
 	noise_to_lattice(s1, SECOND_HASH(h, logn), bF, logn);
@@ -561,8 +614,13 @@ Zf(sign)(inner_shake256_context *rng, int16_t *restrict s1,
 	const fpr *restrict expanded_seckey, const uint8_t *restrict h,
 	unsigned logn, uint8_t *restrict tmp)
 {
+#if HAWK_RECOVER_CHECK
+	size_t n, u;
+	const fpr *bf, *bg, *bF, *bG, *invq00;
+#else
 	size_t n;
 	const fpr *bf, *bg, *bF, *bG;
+#endif
 	fpr *x0, *x1, *res;
 	uint16_t flag;
 	int norm_okay;
@@ -583,6 +641,7 @@ Zf(sign)(inner_shake256_context *rng, int16_t *restrict s1,
 
 	norm_okay = sample_short(&p, x0, x1, bf, bg, bF, bG, h, logn);
 
+#if HAWK_RECOVER_CHECK
 	/*
 	 * Compute *twice* the rounding error, which is given by:
 	 *
@@ -594,9 +653,7 @@ Zf(sign)(inner_shake256_context *rng, int16_t *restrict s1,
 	 * Currently, this check is NOT performed, as the probability of a failure
 	 * to happen here is (heuristically) less than 2^{-105}.
 	 */
-
-/*
-	const fpr *invq00 = bG + n;
+	invq00 = bG + n;
 
 	Zf(poly_add_muladj_fft)(res, x0, x1, bf, bg, logn);
 	Zf(poly_mul_autoadj_fft)(res, invq00, logn);
@@ -607,7 +664,7 @@ Zf(sign)(inner_shake256_context *rng, int16_t *restrict s1,
 			return 0;
 		}
 	}
-*/
+#endif
 
 	/*
 	 * Compute s1 in (s0, s1) = ((h0, h1) - B^{-1} (x0, x1)) / 2, so
@@ -638,31 +695,41 @@ int8_to_ntt(uint16_t *restrict p, const int8_t *restrict f, unsigned logn)
 	Zf(mq_NTT)(p, logn);
 }
 
-/* see inner.h */
-int
-Zf(uncompressed_sign)(inner_shake256_context *rng,
-	int16_t *restrict s0, int16_t *restrict s1,
-	const int8_t *restrict f, const int8_t *restrict g,
-	const int8_t *restrict F, const int8_t *restrict G,
-	const uint8_t *restrict h, unsigned logn, uint8_t *restrict tmp)
+static void
+hash_to_ntt(uint16_t *p, const uint8_t *h, unsigned logn)
 {
-	size_t n, u, v, w;
-	uint8_t h0, h1;
-	uint16_t flag, *bf, *bg, *bF, *bG, *x0, *x1;
-	int32_t norm, z;
-	prng p;
+	size_t n, u, v;
+	uint8_t hash;
 
 	n = MKN(logn);
-	norm = 0;
 
-	bf = (uint16_t *)tmp;
-	bg = bf + n;
-	bF = bg + n;
-	bG = bF + n;
-	x0 = (uint16_t *)s0;
-	x1 = (uint16_t *)s1;
+	if (logn <= 3) {
+		for (u = 0; u < n; u ++) {
+			p[u] = (h[0] >> u) & 1;
+		}
+	} else {
+		for (u = 0; u < n; ) {
+			hash = *h++;
+			for (v = 0; v < 8; v ++, u ++) {
+				p[u] = (hash >> v) & 1;
+			}
+		}
+	}
 
-	Zf(prng_init)(&p, rng);
+	Zf(mq_NTT)(p, logn);
+}
+
+static inline void
+construct_basis_NTT(
+	const int8_t *restrict f, const int8_t *restrict g,
+	const int8_t *restrict F, const int8_t *restrict G,
+	uint16_t *restrict bf, uint16_t *restrict bg,
+	uint16_t *restrict bF, uint16_t *restrict bG,
+	unsigned logn)
+{
+	size_t u, n;
+
+	n = MKN(logn);
 
 	int8_to_ntt(bf, f, logn);
 	int8_to_ntt(bg, g, logn);
@@ -670,8 +737,7 @@ Zf(uncompressed_sign)(inner_shake256_context *rng,
 
 	if (G == NULL) {
 		/*
-		 * Compute G = (1 + gF) / f, where all polynomials are in NTT
-		 * representation.
+		 * Compute (in NTT representation) G = (1 + gF) / f.
 		 */
 		for (u = 0; u < n; u++) {
 			bG[u] = Zf(mq_mul)(bg[u], bF[u]);
@@ -681,39 +747,31 @@ Zf(uncompressed_sign)(inner_shake256_context *rng,
 	} else {
 		int8_to_ntt(bG, G, logn);
 	}
+}
 
-	/*
-	 * Put the hash (h0, h1) inside x0, x1.
-	 */
-	if (logn <= 3) {
-		for (u = 0; u < n; u ++) {
-			x0[u] = (h[0] >> u) & 1;
-			x1[u] = (h[1] >> u) & 1;
-		}
-	} else {
-		for (u = w = 0; u < n; w ++) {
-			h0 = h[w];
-			h1 = h[n/8 + w];
-			for (v = 0; v < 8; v ++, u ++) {
-				x0[u] = h0 & 1;
-				x1[u] = h1 & 1;
-				h0 >>= 1;
-				h1 >>= 1;
-			}
-		}
-	}
+static int
+sample_short_NTT(prng *rng, uint16_t *restrict x0, uint16_t *restrict x1,
+	const uint16_t *restrict bf, const uint16_t *restrict bg,
+	const uint16_t *restrict bF, const uint16_t *restrict bG,
+	const uint8_t *restrict h, unsigned logn)
+{
+	size_t n, u;
+	int32_t norm, center, offset, latcoord;
 
-	Zf(mq_NTT)(x0, logn);
-	Zf(mq_NTT)(x1, logn);
+	n = MKN(logn);
+	norm = 0;
 
-	Zf(mq_poly_tomonty)(x0, logn);
-	Zf(mq_poly_tomonty)(x1, logn);
+	hash_to_ntt(x0, h, logn);
+	hash_to_ntt(x1, SECOND_HASH(h, logn), logn);
 
 	/*
 	 * Set the target vector to (t0, t1) = B * (h0, h1), i.e.:
 	 *     t0 = f h0 + F h1,
 	 *     t1 = g h0 + G h1.
 	 */
+	Zf(mq_poly_tomonty)(x0, logn);
+	Zf(mq_poly_tomonty)(x1, logn);
+
 	for (u = 0; u < n; u ++) {
 		uint32_t res0, res1;
 
@@ -732,24 +790,68 @@ Zf(uncompressed_sign)(inner_shake256_context *rng,
 	Zf(mq_iNTT)(x0, logn);
 	Zf(mq_iNTT)(x1, logn);
 
+	/*
+	 * For the NTT, we store the lattice point B*s close to target t = B*h/2 in
+	 * memory, so a signature is given by calculating B^{-1} (B*s). In the FFT
+	 * case, we store the doubled distance from the lattice point to target.
+	 * Here it is convenient to store the lattice point straight on, as the
+	 * division by two works best as soon as possible.
+	 */
 	for (u = 0; u < n; u ++) {
-		z = Zf(mq_conv_signed)(x0[u]);
-		z = mkgauss_sign(&p, z & 1, logn);
-		x0[u] = Zf(mq_conv_small)(z);
-		norm += z*z;
+		center = Zf(mq_conv_signed)(x0[u]);
+		offset = mkgauss_sign(rng, center & 1, logn);
+		latcoord = (center - offset) / 2;
+		x0[u] = Zf(mq_conv_small)(latcoord);
+		norm += offset * offset;
 	}
 	for (u = 0; u < n; u ++) {
-		z = Zf(mq_conv_signed)(x1[u]);
-		z = mkgauss_sign(&p, z & 1, logn);
-		x1[u] = Zf(mq_conv_small)(z);
-		norm += z*z;
+		center = Zf(mq_conv_signed)(x1[u]);
+		offset = mkgauss_sign(rng, center & 1, logn);
+		latcoord = (center - offset) / 2;
+		x1[u] = Zf(mq_conv_small)(latcoord);
+		norm += offset * offset;
 	}
 
 	Zf(mq_NTT)(x0, logn);
 	Zf(mq_NTT)(x1, logn);
 
-	Zf(mq_poly_tomonty)(x0, logn);
-	Zf(mq_poly_tomonty)(x1, logn);
+	/*
+	 * Test whether the l2-norm of (x0, x1) is below the given bound. The
+	 * code below uses only 32-bit operations to compute the squared norm,
+	 * since the max. value is 2n * 128^2 <= 2^24 (when logn <= 9).
+	 * For a large enough verification margin, it is unlikely that the
+	 * norm of the gaussian (x0, x1) is too large.
+	 */
+	return (uint32_t)norm <= L2BOUND(logn);
+}
+
+/* see inner.h */
+int
+Zf(uncompressed_sign_NTT)(inner_shake256_context *rng,
+	int16_t *restrict s0, int16_t *restrict s1,
+	const int8_t *restrict f, const int8_t *restrict g,
+	const int8_t *restrict F, const int8_t *restrict G,
+	const uint8_t *restrict h, unsigned logn, uint8_t *restrict tmp)
+{
+	size_t n, u;
+	uint16_t flag, *bf, *bg, *bF, *bG, *x0, *x1;
+	int norm_okay;
+	prng p;
+
+	n = MKN(logn);
+
+	bf = (uint16_t *)tmp;
+	bg = bf + n;
+	bF = bg + n;
+	bG = bF + n;
+	x0 = (uint16_t *)s0;
+	x1 = (uint16_t *)s1;
+
+	Zf(prng_init)(&p, rng);
+
+	construct_basis_NTT(f, g, F, G, bf, bg, bF, bG, logn);
+
+	norm_okay = sample_short_NTT(&p, x0, x1, bf, bg, bF, bG, h, logn);
 
 	/*
 	 * Compute (s0, s1) = ((h0, h1) - B^{-1} (x0, x1)) / 2, so
@@ -757,6 +859,8 @@ Zf(uncompressed_sign)(inner_shake256_context *rng,
 	 *     s0 = (h0 - (x0 * G + x1 (-F))) / 2,
 	 *     s1 = (h1 - (x0 * (-g) + x1 f)) / 2.
 	 */
+	Zf(mq_poly_tomonty)(x0, logn);
+	Zf(mq_poly_tomonty)(x1, logn);
 
 	for (u = 0; u < n; u++) {
 		uint16_t z0, z1;
@@ -768,6 +872,7 @@ Zf(uncompressed_sign)(inner_shake256_context *rng,
 		x0[u] = z0;
 		x1[u] = z1;
 	}
+
 	Zf(mq_iNTT)(x0, logn);
 	Zf(mq_iNTT)(x1, logn);
 
@@ -781,30 +886,10 @@ Zf(uncompressed_sign)(inner_shake256_context *rng,
 		s1[u] = Zf(mq_conv_signed)(x1[u]);
 	}
 
-	n = MKN(logn);
-	if (logn <= 3) {
-		for (u = 0; u < n; u ++) {
-			s0[u] = (((h[0] >> u) & 1) - s0[u]) / 2;
-			s1[u] = (((h[1] >> u) & 1) - s1[u]) / 2;
-		}
-	} else {
-		for (u = w = 0; u < n; w ++) {
-			h0 = h[w];
-			h1 = h[n / 8 + w];
-			for (v = 0; v < 8; v ++, u ++) {
-				s0[u] = ((h0 & 1) - s0[u]) / 2;
-				s1[u] = ((h1 & 1) - s1[u]) / 2;
-				h0 >>= 1;
-				h1 >>= 1;
-			}
-		}
-	}
-
 	flag = (uint16_t)Zf(in_positive_half)(s1, SECOND_HASH(h, logn), logn);
 	conditional_flip(flag, s0, h, logn);
 	conditional_flip(flag, s1, SECOND_HASH(h, logn), logn);
-
-	return (uint32_t)norm <= L2BOUND(logn);
+	return norm_okay;
 }
 
 /* see inner.h */
@@ -814,14 +899,12 @@ Zf(sign_NTT)(inner_shake256_context *rng, int16_t *restrict s1,
 	const int8_t *restrict F, const int8_t *restrict G,
 	const uint8_t *restrict h, unsigned logn, uint8_t *restrict tmp)
 {
-	size_t n, u, v, w;
-	uint8_t h0, h1;
+	size_t n, u;
 	uint16_t flag, *bf, *bg, *bF, *bG, *x0, *x1;
-	int32_t norm, z;
+	int norm_okay;
 	prng p;
 
 	n = MKN(logn);
-	norm = 0;
 
 	bf = (uint16_t *)tmp;
 	bg = bf + n;
@@ -832,89 +915,9 @@ Zf(sign_NTT)(inner_shake256_context *rng, int16_t *restrict s1,
 
 	Zf(prng_init)(&p, rng);
 
-	int8_to_ntt(bf, f, logn);
-	int8_to_ntt(bg, g, logn);
-	int8_to_ntt(bF, F, logn);
+	construct_basis_NTT(f, g, F, G, bf, bg, bF, bG, logn);
 
-	if (G == NULL) {
-		/*
-		 * Compute G = (1 + gF) / f, where all polynomials are in NTT
-		 * representation.
-		 */
-		for (u = 0; u < n; u++) {
-			bG[u] = Zf(mq_mul)(bg[u], bF[u]);
-			bG[u] = Zf(mq_add)(1, bG[u]);
-		}
-		Zf(mq_poly_div)(bG, bf, logn);
-	} else {
-		int8_to_ntt(bG, G, logn);
-	}
-
-	/*
-	 * Put the hash (h0, h1) inside x0, x1.
-	 */
-	if (logn <= 3) {
-		for (u = 0; u < n; u ++) {
-			x0[u] = (h[0] >> u) & 1;
-			x1[u] = (h[1] >> u) & 1;
-		}
-	} else {
-		for (u = w = 0; u < n; w ++) {
-			h0 = h[w];
-			h1 = h[n/8 + w];
-			for (v = 0; v < 8; v ++, u ++) {
-				x0[u] = h0 & 1;
-				x1[u] = h1 & 1;
-				h0 >>= 1;
-				h1 >>= 1;
-			}
-		}
-	}
-
-	Zf(mq_NTT)(x0, logn);
-	Zf(mq_NTT)(x1, logn);
-
-	Zf(mq_poly_tomonty)(x0, logn);
-	Zf(mq_poly_tomonty)(x1, logn);
-
-	/*
-	 * Set the target vector to (t0, t1) = B * (h0, h1), i.e.:
-	 *     t0 = f h0 + F h1,
-	 *     t1 = g h0 + G h1.
-	 */
-	for (u = 0; u < n; u ++) {
-		uint32_t res0, res1;
-
-		res0 = Zf(mq_add)(Zf(mq_montymul)(bf[u], x0[u]),
-			Zf(mq_montymul)(bF[u], x1[u]));
-		res1 = Zf(mq_add)(Zf(mq_montymul)(bg[u], x0[u]),
-			Zf(mq_montymul)(bG[u], x1[u]));
-		x0[u] = res0;
-		x1[u] = res1;
-	}
-
-	/*
-	 * Sample and write the result in (x0, x1). Gaussian smoothing is used to
-	 * not reveal information on the secret basis.
-	 */
-	Zf(mq_iNTT)(x0, logn);
-	Zf(mq_iNTT)(x1, logn);
-
-	for (u = 0; u < n; u ++) {
-		z = Zf(mq_conv_signed)(x0[u]);
-		z = mkgauss_sign(&p, z & 1, logn);
-		x0[u] = Zf(mq_conv_small)(z);
-		norm += z*z;
-	}
-	for (u = 0; u < n; u ++) {
-		z = Zf(mq_conv_signed)(x1[u]);
-		z = mkgauss_sign(&p, z & 1, logn);
-		x1[u] = Zf(mq_conv_small)(z);
-		norm += z*z;
-	}
-
-	Zf(mq_NTT)(x0, logn);
-	Zf(mq_NTT)(x1, logn);
+	norm_okay = sample_short_NTT(&p, x0, x1, bf, bg, bF, bG, h, logn);
 
 	Zf(mq_poly_tomonty)(x0, logn);
 	Zf(mq_poly_tomonty)(x1, logn);
@@ -924,7 +927,6 @@ Zf(sign_NTT)(inner_shake256_context *rng, int16_t *restrict s1,
 	 *
 	 *     s1 = (h1 - (x0 * (-g) + x1 f)) / 2.
 	 */
-
 	for (u = 0; u < n; u++) {
 		x1[u] = Zf(mq_sub)(Zf(mq_montymul)(bf[u], x1[u]),
 			Zf(mq_montymul)(bg[u], x0[u]));
@@ -939,25 +941,10 @@ Zf(sign_NTT)(inner_shake256_context *rng, int16_t *restrict s1,
 		s1[u] = Zf(mq_conv_signed)(x1[u]);
 	}
 
-	n = MKN(logn);
-	if (logn <= 3) {
-		for (u = 0; u < n; u ++) {
-			s1[u] = (((h[1] >> u) & 1) - s1[u]) / 2;
-		}
-	} else {
-		for (u = w = 0; u < n; w ++) {
-			h1 = h[n / 8 + w];
-			for (v = 0; v < 8; v ++, u ++) {
-				s1[u] = ((h1 & 1) - s1[u]) / 2;
-				h1 >>= 1;
-			}
-		}
-	}
-
 	flag = (uint16_t)Zf(in_positive_half)(s1, SECOND_HASH(h, logn), logn);
 	conditional_flip(flag, s1, SECOND_HASH(h, logn), logn);
 
-	return (uint32_t)norm <= L2BOUND(logn);
+	return norm_okay;
 }
 
 /* =================================================================== */
@@ -981,10 +968,7 @@ Zf(expand_seckey)(fpr *restrict expanded_seckey,
 	 */
 	construct_basis(f, g, F, NULL, bf, bg, bF, bG, logn);
 
-	/*
-	 * Not needed as there is no decompression check:
-	 *
-	 * fpr *invq00 = bG + n;
-	 * Zf(poly_invnorm2_fft)(invq00, bf, bg, logn);
-	 */
+#if HAWK_RECOVER_CHECK
+	Zf(poly_invnorm2_fft)(bG + n, bf, bg, logn);
+#endif
 }

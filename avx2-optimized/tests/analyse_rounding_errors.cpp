@@ -126,7 +126,7 @@ int approximate_fail_prob(inner_shake256_context *rng,
 		inner_shake256_extract(rng, h, n / 4);
 		// Make sure that sign.c may fail on generating a signature that does not decompress correctly.
 		Zf(sign)(rng, sig, expkey, h, logn, tmp);
-		if (!Zf(verify_simple_rounding_fft)(h, sig, q00, q10, q11, logn, tmp))
+		if (!Zf(verify)(h, sig, q00, q10, q11, logn, tmp))
 			fails++;
 	}
 	return fails;

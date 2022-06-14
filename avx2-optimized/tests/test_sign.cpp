@@ -97,9 +97,9 @@ verify_nearest_plane_tree(const fpr *restrict tree,
 // =============================================================================
 // | TESTING CODE                                                              |
 // =============================================================================
-constexpr size_t logn = 9, n = MKN(logn);
+constexpr size_t logn = 10, n = MKN(logn);
 
-const int num_samples = 10;
+const int num_samples = 1000;
 
 uint8_t pregen_h[num_samples][n / 4] = {};
 int16_t pregen_s0[num_samples][n], pregen_s1[num_samples][n], pregen_s[num_samples][n];
@@ -169,7 +169,7 @@ void measure_sign_speed()
 	nr_cor = 0;
 	gettimeofday(&t0, NULL);
 	for (int rep = 0; rep < num_samples; rep++) {
-		nr_cor += Zf(verify_simple_rounding)(pregen_h[rep], s0, pregen_s[rep], q00, q10, q11, logn, b);
+		nr_cor += Zf(recover_and_verify)(pregen_h[rep], s0, pregen_s[rep], q00, q10, q11, logn, b);
 	}
 	gettimeofday(&t1, NULL);
 	printf("# correct = %d\n", nr_cor);
@@ -178,7 +178,7 @@ void measure_sign_speed()
 	nr_cor = 0;
 	gettimeofday(&t0, NULL);
 	for (int rep = 0; rep < num_samples; rep++) {
-		nr_cor += Zf(verify_simple_rounding_fft)(pregen_h[rep], pregen_s[rep], q00, q10, q11, logn, b);
+		nr_cor += Zf(verify)(pregen_h[rep], pregen_s[rep], q00, q10, q11, logn, b);
 	}
 	gettimeofday(&t1, NULL);
 	printf("# correct = %d\n", nr_cor);
@@ -206,9 +206,9 @@ void measure_sign_speed()
 	ll vnpt_us = time_diff(&t0, &t1);
 	printf("# correct = %d\n", nr_cor);
 
-	printf("         verify_simple: %.1f us/vrfy\n", (double) cv_us / num_samples);
-	printf("verify_simple_rounding: %.1f us/vrfy\n", (double) vsr_us / num_samples);
-	printf("verify_simple_roundfft: %.1f us/vrfy\n", (double)vfsr_us / num_samples);
+	printf("   uncompressed_verify: %.1f us/vrfy\n", (double) cv_us / num_samples);
+	printf("    recover_and_verify: %.1f us/vrfy\n", (double) vsr_us / num_samples);
+	printf("                verify: %.1f us/vrfy\n", (double)vfsr_us / num_samples);
 	printf("  verify_nearest_plane: %.1f us/vrfy\n", (double) vnp_us / num_samples);
 	printf("verify_nearest_plane_t: %.1f us/vrfy\n", (double) vnpt_us / num_samples);
 }
@@ -270,7 +270,7 @@ WorkerResult measure_signatures()
 		// Compute the signature.
 		Zf(sign)(&sc, s1, exp_sk, h, logn, b);
 
-		if (!Zf(verify_simple_rounding_fft)(h, s1, q00, q10, q11, logn, b))
+		if (!Zf(verify)(h, s1, q00, q10, q11, logn, b))
 			result.fft_fail++;
 
 		/* size_t sig_sz = Zf(encode_sig)(NULL, 0, s1, logn, 5);

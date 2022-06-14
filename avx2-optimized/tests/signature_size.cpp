@@ -112,7 +112,7 @@ size_t cost_expgolomb(const int16_t *x, unsigned logn, size_t lo_bits)
 // =============================================================================
 // | TESTING CODE                                                              |
 // =============================================================================
-constexpr int n_repetitions = 100;
+constexpr int n_repetitions = 250;
 
 // Taken from hawk.h:
 /*
@@ -314,11 +314,13 @@ int main() {
 		printf("Average coefficient of s1 ~ %7.3f +/- %7.3f\n", avg_s1, sqrt(var_s1));
 
 		long long salt_and_header = 1 + HAWK_SALT_SIZE(logn);
+		double avg_sz, var_sz;
 
+		int best_lb = 9;
 		printf("lo_bits | max sig | avg sig. size (B) | #fails\n");
 		for (int lb = 3; lb < 10; lb++) {
-			double avg_sz = (double)tot.sz[lb] / (runs - tot.sig_failed[lb]);
-			double var_sz = (double)tot.sz_sq[lb] / (runs - tot.sig_failed[lb]) - avg_sz * avg_sz;
+			avg_sz = (double)tot.sz[lb] / (runs - tot.sig_failed[lb]);
+			var_sz = (double)tot.sz_sq[lb] / (runs - tot.sig_failed[lb]) - avg_sz * avg_sz;
 			printf("%7u | %7lld | %.1f (std %5.1f) | %5lld\n",
 				lb,
 				salt_and_header + tot.maxsz[lb],
@@ -326,6 +328,8 @@ int main() {
 				sqrt(var_sz),
 				tot.sig_failed[lb]
 			);
+
+			if (tot.maxsz[lb] < tot.maxsz[best_lb]) best_lb = lb;
 		}
 
 		double avg_h = (double) tot.sz_h / (runs - tot.huf_failed);
@@ -337,10 +341,16 @@ int main() {
 			tot.huf_failed
 		);
 
+		avg_sz = (double)tot.sz[best_lb] / (runs - tot.sig_failed[best_lb]);
+		var_sz = (double)tot.sz_sq[best_lb] / (runs - tot.sig_failed[best_lb]) - avg_sz * avg_sz;
+		printf("HAWK_SIG_COMPACT_MAXSIZE: %d\n", (int) ceil(salt_and_header + avg_sz + 12.0 * sqrt(var_sz)));
+		printf("HAWK_SIG_PADDED_SIZE: %d\n", (int) ceil(salt_and_header + avg_sz + 6.0 * sqrt(var_sz)));
+
 		printf("Complete signature (s0, s1) encodings:\n");
+		best_lb = 10;
 		for (int lb = 7; lb < 11; lb++) {
-			double avg_sz = (double)tot.csz[lb] / (runs - tot.csig_failed[lb]);
-			double var_sz = (double)tot.csz_sq[lb] / (runs - tot.csig_failed[lb]) - avg_sz * avg_sz;
+			avg_sz = (double)tot.csz[lb] / (runs - tot.csig_failed[lb]);
+			var_sz = (double)tot.csz_sq[lb] / (runs - tot.csig_failed[lb]) - avg_sz * avg_sz;
 			printf("(%2u, %d) | %7lld | %.1f (std %5.1f) | %5lld\n",
 				lb,
 				logn - 4,
@@ -349,6 +359,7 @@ int main() {
 				sqrt(var_sz),
 				tot.csig_failed[lb]
 			);
+			if (tot.maxcsz[lb] < tot.maxcsz[best_lb]) best_lb = lb;
 		}
 
 		avg_h = (double) tot.csz_h / (runs - tot.chuf_failed);
@@ -360,6 +371,10 @@ int main() {
 			tot.chuf_failed
 		);
 
+		avg_sz = (double)tot.csz[best_lb] / (runs - tot.sig_failed[best_lb]);
+		var_sz = (double)tot.csz_sq[best_lb] / (runs - tot.sig_failed[best_lb]) - avg_sz * avg_sz;
+		printf("HAWK_UNCOMPRESSED_SIG_COMPACT_MAXSIZE: %d\n", (int) ceil(salt_and_header + avg_sz + 12.0 * sqrt(var_sz)));
+		printf("HAWK_UNCOMPRESSED_SIG_PADDED_SIZE: %d\n", (int) ceil(salt_and_header + avg_sz + 6.0 * sqrt(var_sz)));
 	}
 
 	return 0;

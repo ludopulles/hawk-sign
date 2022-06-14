@@ -2,9 +2,9 @@
 .POSIX:
 
 CC = c99
-#CFLAGS = -W -Wall -Wshadow -O3 -march=native
-CFLAGS = -W -Wall -Wshadow -O2 -mavx2 -fdiagnostics-color=always
-#CFLAGS = -W -Wall -Wshadow -g -fsanitize=address,undefined
+#CFLAGS = -W -Wall -Wshadow -O3 -march=native -DHAWK_RECOVER_CHECK
+CFLAGS = -W -Wall -Wshadow -O2 -mavx2 -fdiagnostics-color=always -DHAWK_RECOVER_CHECK
+#CFLAGS = -W -Wall -Wshadow -g -fsanitize=address,undefined -DHAWK_RECOVER_CHECK
 LIBS = -lpthread -lm
 CXX = g++
 CXXFLAGS = --std=c++17 $(CFLAGS)

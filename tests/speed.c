@@ -172,8 +172,7 @@ bench_expand_seckey(void *ctx, unsigned long num)
 	while (num -- > 0) {
 		CC(hawk_expand_seckey(
 			bc->esk, HAWK_EXPANDEDKEY_SIZE(bc->logn),
-			bc->sk, HAWK_SECKEY_SIZE(bc->logn),
-			bc->tmp, bc->tmp_len));
+			bc->sk, HAWK_SECKEY_SIZE(bc->logn)));
 	}
 	return 0;
 }
@@ -188,22 +187,6 @@ bench_uncompressed_sign(void *ctx, unsigned long num)
 		bc->uncompsig_len = HAWK_UNCOMPRESSED_SIG_COMPACT_MAXSIZE(bc->logn);
 		CC(hawk_uncompressed_sign(&bc->rng,
 			bc->uncompsig, &bc->uncompsig_len, HAWK_SIG_COMPACT,
-			bc->sk, HAWK_SECKEY_SIZE(bc->logn),
-			"data", 4, bc->tmp, bc->tmp_len));
-	}
-	return 0;
-}
-
-static int
-bench_sign_NTT(void *ctx, unsigned long num)
-{
-	bench_context *bc;
-
-	bc = ctx;
-	while (num -- > 0) {
-		bc->sig_len = HAWK_SIG_COMPACT_MAXSIZE(bc->logn);
-		CC(hawk_sign_NTT(&bc->rng,
-			bc->sig, &bc->sig_len, HAWK_SIG_COMPACT,
 			bc->sk, HAWK_SECKEY_SIZE(bc->logn),
 			"data", 4, bc->tmp, bc->tmp_len));
 	}
@@ -286,14 +269,20 @@ test_speed_hawk(unsigned logn, double threshold)
 		fprintf(stderr, "random seeding failed\n");
 		exit(EXIT_FAILURE);
 	}
+
 	len = HAWK_TMPSIZE_KEYGEN(logn);
+
 	len = maxsz(len, HAWK_TMPSIZE_UNCOMPRESSED_SIGN(logn));
+	len = maxsz(len, HAWK_TMPSIZE_UNCOMPRESSED_SIGN_NTT(logn));
 	len = maxsz(len, HAWK_TMPSIZE_SIGNDYN(logn));
-	len = maxsz(len, HAWK_TMPSIZE_SIGNNTT(logn));
+	len = maxsz(len, HAWK_TMPSIZE_SIGNDYN_NTT(logn));
 	len = maxsz(len, HAWK_TMPSIZE_SIGN(logn));
-	len = maxsz(len, HAWK_TMPSIZE_EXPANDPRIV(logn));
+
 	len = maxsz(len, HAWK_TMPSIZE_UNCOMPRESSED_VERIFY(logn));
+	len = maxsz(len, HAWK_TMPSIZE_UNCOMPRESSED_VERIFY_NTT(logn));
 	len = maxsz(len, HAWK_TMPSIZE_VERIFY(logn));
+	len = maxsz(len, HAWK_TMPSIZE_VERIFY_NTT(logn));
+
 	bc.tmp = xmalloc(len);
 	bc.tmp_len = len;
 	bc.sk = xmalloc(HAWK_SECKEY_SIZE(logn));
@@ -304,18 +293,21 @@ test_speed_hawk(unsigned logn, double threshold)
 	bc.sig = xmalloc(HAWK_SIG_COMPACT_MAXSIZE(logn));
 	bc.sig_len = 0;
 
+	// keygen
 	printf(" %8.2f", do_bench(&bench_keygen, &bc, threshold) / 1000000.0);
 	fflush(stdout);
 	printf(" %8.2f", do_bench(&bench_expand_seckey, &bc, threshold) / 1000.0);
 	fflush(stdout);
+
+	// sign
 	printf(" %8.2f", do_bench(&bench_uncompressed_sign, &bc, threshold) / 1000.0);
-	fflush(stdout);
-	printf(" %8.2f", do_bench(&bench_sign_NTT, &bc, threshold) / 1000.0);
 	fflush(stdout);
 	printf(" %8.2f", do_bench(&bench_sign_dyn, &bc, threshold) / 1000.0);
 	fflush(stdout);
 	printf(" %8.2f", do_bench(&bench_sign, &bc, threshold) / 1000.0);
 	fflush(stdout);
+
+	// verify
 	printf(" %8.2f", do_bench(&bench_uncompressed_verify, &bc, threshold) / 1000.0);
 	fflush(stdout);
 	printf(" %8.2f", do_bench(&bench_verify, &bc, threshold) / 1000.0);
@@ -353,14 +345,14 @@ main(int argc, char *argv[])
 	}
 	printf("time threshold = %.4f s\n", threshold);
 	printf("kg = keygen, ek = expand private key\n");
-	printf("us = uncompressed sign, sn = sign with NTT, sd = sign (without ek), sek = sign (with ek), vu = uncompressed verify, vv = verify\n");
+	printf("su = uncompressed sign, sd = sign (without ek), sek = sign (with ek), vu = uncompressed verify, vv = verify\n");
 	printf("keygen in milliseconds, other values in microseconds\n");
 	printf("\n");
-	printf("degree  kg(ms)   ek(us)   us(us)   sn(us)   sd(us)   sek(us)  vu(us)   vv(us)\n");
+	printf("degree  kg(ms)   ek(us)   su(us)   sd(us)   sek(us)  vu(us)   vv(us)\n");
 	fflush(stdout);
 
 	for (unsigned logn = 1; logn <= 10; logn++) {
-		test_speed_hawk(logn, logn <= 8 ? 0.001 : threshold);
+		test_speed_hawk(logn, logn <= 9 ? 0.001 : threshold);
 	}
 
 	return 0;

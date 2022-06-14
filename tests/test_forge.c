@@ -38,10 +38,10 @@ void test_simple_forgeries(unsigned logn)
 		// Compute the signature.
 		while (!Zf(sign)(&sc, sig, exp_sk, h, logn, tmp.b)) {}
 
-		assert(Zf(verify_simple_rounding_fft)(h, sig, q00, q10, q11, logn, tmp.b));
+		assert(Zf(verify)(h, sig, q00, q10, q11, logn, tmp.b));
 		for (size_t u = 0; u < n; u ++)
 			sig[u] = 0;
-		assert(!Zf(verify_simple_rounding_fft)(h, sig, q00, q10, q11, logn, tmp.b));
+		assert(!Zf(verify)(h, sig, q00, q10, q11, logn, tmp.b));
 	}
 }
 

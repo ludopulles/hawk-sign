@@ -289,7 +289,7 @@ void work(int id) {
 
 		// Make sure that sign.c may fail on generating a signature that does not decompress correctly.
 		// Zf(sign)(&rng, sig, expkey, h, logn, tmp);
-		// if (!Zf(verify_simple_rounding_fft)(h, sig, q00, q10, q11, logn, tmp)) fails++;
+		// if (!Zf(verify)(h, sig, q00, q10, q11, logn, tmp)) fails++;
 		fails += !mock_sign(&p, expkey, h, bound, logn, tmp, _lens);
 	}
 

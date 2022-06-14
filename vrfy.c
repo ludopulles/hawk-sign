@@ -146,22 +146,16 @@ void
 Zf(complete_pubkey)(const int16_t *restrict iq00, const int16_t *restrict iq10,
 	fpr *restrict q00, fpr *restrict q10, fpr *restrict q11, unsigned logn)
 {
-	size_t u, n, hn;
+	size_t u, hn;
 
-	n = MKN(logn);
-	hn = n >> 1;
+	hn = MKN(logn - 1);
 
-	// doing this in reverse, allows iq00, iq10 to overlap with the begin
-	// of q00.
-	for (u = n; u -- > 0; ) {
-		q10[u] = fpr_of(iq10[u]);
-	}
-	for (u = n; u -- > 0; ) {
-		q00[u] = fpr_of(iq00[u]);
-	}
-
-	Zf(FFT)(q00, logn);
-	Zf(FFT)(q10, logn);
+	/*
+	 * Doing this in reverse, allows iq00, iq10 to overlap with the begin of
+	 * q00.
+	 */
+	Zf(int16_to_fft)(q10, iq10, logn);
+	Zf(int16_to_fft)(q00, iq00, logn);
 
 	/*
 	 * Reconstruct q11 using q11 = (1 + q10 adj(q10)) / q00.
@@ -192,13 +186,14 @@ Zf(uncompressed_verify)(const uint8_t *restrict h,
 	 */
 	hash_to_fft(t0, h, s0, logn);
 	hash_to_fft(t1, SECOND_HASH(h, logn), s1, logn);
+
 	return Zf(in_positive_half)(s1, SECOND_HASH(h, logn), logn)
 		&& has_short_trace(t0, t1, q00, q10, q11, logn);
 }
 
 /* see inner.h */
 int
-Zf(verify_simple_rounding)(const uint8_t *restrict h,
+Zf(recover_and_verify)(const uint8_t *restrict h,
 	int16_t *restrict s0, const int16_t *restrict s1,
 	const fpr *restrict q00, const fpr *restrict q10, const fpr *restrict q11,
 	unsigned logn, uint8_t *restrict tmp)
@@ -286,9 +281,8 @@ Zf(verify_nearest_plane)(const uint8_t *restrict h,
 
 /* see inner.h */
 int
-Zf(verify_simple_rounding_fft)(const uint8_t *restrict h,
-	const int16_t *restrict s1, const fpr *restrict q00,
-	const fpr *restrict q10, const fpr *restrict q11,
+Zf(verify)(const uint8_t *restrict h, const int16_t *restrict s1,
+	const fpr *restrict q00, const fpr *restrict q10, const fpr *restrict q11,
 	unsigned logn, uint8_t *restrict tmp)
 {
 	size_t u, v, w, n;
@@ -963,12 +957,10 @@ int Zf(verify_NTT)(const uint8_t *restrict h,
 
 	hash_to_fft(t0, SECOND_HASH(h, logn), s1, logn);
 
-	for (u = 0; u < n; u++) t1[u] = fpr_of(q10[u]);
-	Zf(FFT)(t1, logn);
+	Zf(int16_to_fft)(t1, q10, logn);
 	Zf(poly_mul_fft)(t0, t1, logn);
 
-	for (u = 0; u < n; u++) t1[u] = fpr_of(q00[u]);
-	Zf(FFT)(t1, logn);
+	Zf(int16_to_fft)(t1, q00, logn);
 	Zf(poly_div_autoadj_fft)(t0, t1, logn);
 
 	Zf(iFFT)(t0, logn);
@@ -1036,10 +1028,9 @@ int Zf(verify_NTT)(const uint8_t *restrict h,
 	printf("\n");
 	for (u = 0; u < n; u ++) {
 		numerator[u] = fpr_half(fpr_of(modp_norm(e0_i32[u], p)));
-		denominator[u] = fpr_of(q00[u]);
 	}
 	Zf(FFT)(numerator, logn);
-	Zf(FFT)(denominator, logn);
+	Zf(int16_to_fft)(denominator, q00, logn);
 
 	Zf(poly_div_autoadj_fft)(numerator, denominator, logn);
 	Zf(iFFT)(numerator, logn);

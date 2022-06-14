@@ -87,12 +87,16 @@ extern "C" {
  * TODO: sort table to size
  *
  *    HAWK_TMPSIZE_MAKEPUB
+ *    HAWK_TMPSIZE_UNCOMPRESSED_VERIFY
+ *    HAWK_TMPSIZE_UNCOMPRESSED_VERIFY_NTT
  *    HAWK_TMPSIZE_VERIFY
+ *    HAWK_TMPSIZE_VERIFY_NTT
  *    HAWK_TMPSIZE_KEYGEN
  *    HAWK_TMPSIZE_UNCOMPRESSED_SIGN
+ *    HAWK_TMPSIZE_UNCOMPRESSED_SIGN_NTT
  *    HAWK_TMPSIZE_SIGN
- *    HAWK_TMPSIZE_EXPANDPRIV
  *    HAWK_TMPSIZE_SIGNDYN
+ *    HAWK_TMPSIZE_SIGNDYN_NTT
  *
  * i.e. a temporary buffer large enough for computing signatures with
  * an expanded key ("SIGN") will also be large enough for a
@@ -375,6 +379,7 @@ extern const size_t HAWK_PUBKEY_SIZE[11];
 #define HAWK_SIG_PADDED_SIZE(logn) \
 	((logn) == 10 ? 1229u : 567u)
 
+
 /*
  * Temporary buffer size for key pair generation.
  */
@@ -400,28 +405,27 @@ extern const size_t HAWK_PUBKEY_SIZE[11];
 
 /*
  * The number of bytes that are required for the hash when signing a message or
- * verifying a signature using the hash-then-sign principle on which Hawk is
+ * verifying a signature using the hash-then-sign principle on which HAWK is
  * based.
  */
 #define HAWK_HASH_SIZE(logn) ((logn) <= 2 ? 2u : (1u << ((logn) - 2)))
 
 /*
- * Temporary buffer size for generating a signature ("dynamic" variant).
+ * Temporary buffer size for dynamically generating an uncompressed signature.
  */
 #define HAWK_TMPSIZE_UNCOMPRESSED_SIGN(logn) \
-	(HAWK_HASH_SIZE(logn) + (15u << (logn)) + 1)
+	(HAWK_HASH_SIZE(logn) + (55u << (logn)) + 7) // 7 in hawk.c, 6*8 in sign
+#define HAWK_TMPSIZE_UNCOMPRESSED_SIGN_NTT(logn) \
+	(HAWK_HASH_SIZE(logn) + (19u << (logn)) + 7) // 7 in hawk.c, 6*2 in sign
+
 
 /*
- * Temporary buffer size for generating a signature ("dynamic" variant).
+ * Temporary buffer size for dynamically generating a signature.
  */
 #define HAWK_TMPSIZE_SIGNDYN(logn) \
 	(HAWK_HASH_SIZE(logn) + (53u << (logn)) + 7)
-
-/*
- * Temporary buffer size for generating a signature ("NTT" variant)
- */
-#define HAWK_TMPSIZE_SIGNNTT(logn) \
-	(HAWK_HASH_SIZE(logn) + (5u << (logn)) + (10u << (logn)) + 1)
+#define HAWK_TMPSIZE_SIGNDYN_NTT(logn) \
+	(HAWK_HASH_SIZE(logn) + (15u << (logn)) + 1)
 
 /*
  * Temporary buffer size for generating a signature with an expanded key.
@@ -430,41 +434,34 @@ extern const size_t HAWK_PUBKEY_SIZE[11];
 	(HAWK_HASH_SIZE(logn) + (2u << (logn)) + (26u << (logn)) + 7)
 
 /*
- * Temporary buffer size for expanding a secret key.
- */
-#define HAWK_TMPSIZE_EXPANDPRIV(logn) \
-	(3u << (logn))
-
-/*
  * Size of an expanded secret key.
  */
+#if HAWK_RECOVER_CHECK
+/* For the recover-check, we also need to store 1/q00. */
+#define HAWK_EXPANDEDKEY_SIZE(logn) \
+	((36u << (logn)) + 8)
+#else
+/* Store f, g, F, G in FFT-representation */
 #define HAWK_EXPANDEDKEY_SIZE(logn) \
 	((32u << (logn)) + 8)
-
-/*
- * When performing decompression checks, one also needs 1/q00 as part of the
- * expanded secret key, giving the following size:
- *
- * #define HAWK_EXPANDEDKEY_SIZE(logn) ((36u << (logn)) + 8)
- */
+#endif
 
 /*
  * Temporary buffer size for verifying a signature.
  */
 
-#ifdef TARGET_AVX2
 #define HAWK_TMPSIZE_VERIFY(logn) \
-	(HAWK_HASH_SIZE(logn) + (42u << (logn)))
-#else
-#define HAWK_TMPSIZE_VERIFY(logn) \
-	(HAWK_HASH_SIZE(logn) + (100u << (logn)))
-#endif
+	(HAWK_HASH_SIZE(logn) + (42u << (logn)) + 7)
+#define HAWK_TMPSIZE_VERIFY_NTT(logn) \
+	(HAWK_HASH_SIZE(logn) + (40u << (logn)) + 7)
 
 /*
  * Temporary buffer size for verifying an uncompressed signature with NTT.
  */
 #define HAWK_TMPSIZE_UNCOMPRESSED_VERIFY(logn) \
-	(HAWK_HASH_SIZE(logn) + (40u << (logn)))
+	(HAWK_HASH_SIZE(logn) + (40u << (logn)) + 7)
+#define HAWK_TMPSIZE_UNCOMPRESSED_VERIFY_NTT(logn) \
+	(HAWK_HASH_SIZE(logn) + (32u << (logn)) + 3)
 
 /* ========================================================================= */
 /*
@@ -620,13 +617,10 @@ int hawk_get_logn(const void *obj, size_t len);
  * Expanded keys may be moved in RAM only if their 8-byte alignment remains
  * unchanged.
  *
- * The tmp[] buffer is used to hold temporary values. Its size tmp_len MUST be
- * at least HAWK_TMPSIZE_EXPANDPRIV(logn) bytes.
- *
  * Returned value: 0 on success, or a negative error code.
  */
 int hawk_expand_seckey(void *expanded_key, size_t expanded_key_len,
-	const void *seckey, size_t seckey_len, void *tmp, size_t tmp_len);
+	const void *seckey, size_t seckey_len);
 
 /* Helper for hawk_uncompressed_sign_finish */
 int hawk_uncompressed_sign(shake256_context *rng, void *sig, size_t *sig_len,
@@ -635,11 +629,6 @@ int hawk_uncompressed_sign(shake256_context *rng, void *sig, size_t *sig_len,
 
 /* Helper for hawk_sign_dyn_finish */
 int hawk_sign_dyn(shake256_context *rng, void *sig, size_t *sig_len,
-	int sig_type, const void *seckey, size_t seckey_len, const void *data,
-	size_t data_len, void *tmp, size_t tmp_len);
-
-/* Helper for hawk_sign_NTT_finish */
-int hawk_sign_NTT(shake256_context *rng, void *sig, size_t *sig_len,
 	int sig_type, const void *seckey, size_t seckey_len, const void *data,
 	size_t data_len, void *tmp, size_t tmp_len);
 
@@ -721,43 +710,12 @@ int hawk_uncompressed_sign_finish(shake256_context *rng, void *sig,
  * to the secret key.
  *
  * The tmp[] buffer is used to hold temporary values. Its size tmp_len MUST be
- * at least HAWK_TMPSIZE_SIGNDYN(logn) bytes.
+ * at least HAWK_TMPSIZE_SIGNDYN(logn) bytes when HAWK_AVX is defined, else at
+ * least HAWK_TMPSIZE_SIGNDYN_NTT(logn).
  *
  * Returned value: 0 on success, or a negative error code.
  */
 int hawk_sign_dyn_finish(shake256_context *rng, void *sig, size_t *sig_len,
-	int sig_type, const void *seckey, size_t seckey_len,
-	shake256_context *hash_data, void *salt, void *tmp, size_t tmp_len);
-
-/*
- * Finish a signature generation operation, using the secret key held in
- * seckey[] of length seckey_len bytes. The hashed message is provided as the
- * SHAKE256 context *hash_data, which must still be in input mode (i.e. not yet
- * flipped to output mode). During signing, a salt is generated, written in
- * salt[] and added to (a copy of) *hash_data, after which output is taken from
- * it. The salt length is 24 or 40 bytes, see the HAWK_SALT_SIZE macro.
- *
- * The source of randomness is the provided SHAKE256 context *rng, which
- * must have been already initialized, seeded, and set to output mode (see
- * shake256_init_prng_from_seed() and shake256_init_prng_from_system()).
- *
- * The signature is written in sig[]. The caller must set *sig_len to the
- * maximum size of sig[]; if the signature computation is successful, then
- * *sig_len will be set to the actual length of the signature. The signature
- * length depends on the signature type, which is specified with the sig_type
- * parameter to one of the three defined values HAWK_SIG_COMPACT or
- * HAWK_SIG_PADDED; for the latter, the signature length is fixed (for a given
- * Hawk degree).
- *
- * Regardless of the signature type, the process is constant-time with regard
- * to the secret key.
- *
- * The tmp[] buffer is used to hold temporary values. Its size tmp_len MUST be
- * at least HAWK_TMPSIZE_SIGNNTT(logn) bytes.
- *
- * Returned value: 0 on success, or a negative error code.
- */
-int hawk_sign_NTT_finish(shake256_context *rng, void *sig, size_t *sig_len,
 	int sig_type, const void *seckey, size_t seckey_len,
 	shake256_context *hash_data, void *salt, void *tmp, size_t tmp_len);
 
