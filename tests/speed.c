@@ -135,12 +135,6 @@ typedef struct {
 	size_t tmp_len, uncompsig_len, sig_len;
 } bench_context;
 
-static inline size_t
-maxsz(size_t a, size_t b)
-{
-	return a > b ? a : b;
-}
-
 #define CC(x)   do { \
 		int ccr = (x); \
 		if (ccr != 0) { \
@@ -259,32 +253,18 @@ static void
 test_speed_hawk(unsigned logn, double threshold)
 {
 	bench_context bc;
-	size_t len;
 
 	printf("%4u:", 1u << logn);
 	fflush(stdout);
 
 	bc.logn = logn;
+
+	// shake256_init_prng_from_seed(&bc.rng, "test", 4);
 	if (shake256_init_prng_from_system(&bc.rng) != 0) {
 		fprintf(stderr, "random seeding failed\n");
 		exit(EXIT_FAILURE);
 	}
 
-	len = HAWK_TMPSIZE_KEYGEN(logn);
-
-	len = maxsz(len, HAWK_TMPSIZE_UNCOMPRESSED_SIGN(logn));
-	len = maxsz(len, HAWK_TMPSIZE_UNCOMPRESSED_SIGN_NTT(logn));
-	len = maxsz(len, HAWK_TMPSIZE_SIGNDYN(logn));
-	len = maxsz(len, HAWK_TMPSIZE_SIGNDYN_NTT(logn));
-	len = maxsz(len, HAWK_TMPSIZE_SIGN(logn));
-
-	len = maxsz(len, HAWK_TMPSIZE_UNCOMPRESSED_VERIFY(logn));
-	len = maxsz(len, HAWK_TMPSIZE_UNCOMPRESSED_VERIFY_NTT(logn));
-	len = maxsz(len, HAWK_TMPSIZE_VERIFY(logn));
-	len = maxsz(len, HAWK_TMPSIZE_VERIFY_NTT(logn));
-
-	bc.tmp = xmalloc(len);
-	bc.tmp_len = len;
 	bc.sk = xmalloc(HAWK_SECKEY_SIZE(logn));
 	bc.pk = xmalloc(HAWK_PUBKEY_SIZE[logn]);
 	bc.esk = xmalloc(HAWK_EXPANDEDKEY_SIZE(logn));
@@ -294,22 +274,45 @@ test_speed_hawk(unsigned logn, double threshold)
 	bc.sig_len = 0;
 
 	// keygen
+	bc.tmp = xmalloc(bc.tmp_len = HAWK_TMPSIZE_KEYGEN(logn));
 	printf(" %8.2f", do_bench(&bench_keygen, &bc, threshold) / 1000000.0);
 	fflush(stdout);
+
 	printf(" %8.2f", do_bench(&bench_expand_seckey, &bc, threshold) / 1000.0);
 	fflush(stdout);
 
 	// sign
+#ifdef HAWK_AVX
+	bc.tmp = realloc(bc.tmp, bc.tmp_len = HAWK_TMPSIZE_UNCOMPRESSED_SIGN(logn));
+#else
+	bc.tmp = realloc(bc.tmp, bc.tmp_len = HAWK_TMPSIZE_UNCOMPRESSED_SIGN_NTT(logn));
+#endif
 	printf(" %8.2f", do_bench(&bench_uncompressed_sign, &bc, threshold) / 1000.0);
 	fflush(stdout);
+#ifdef HAWK_AVX
+	bc.tmp = realloc(bc.tmp, bc.tmp_len = HAWK_TMPSIZE_SIGNDYN(logn));
+#else
+	bc.tmp = realloc(bc.tmp, bc.tmp_len = HAWK_TMPSIZE_SIGNDYN_NTT(logn));
+#endif
 	printf(" %8.2f", do_bench(&bench_sign_dyn, &bc, threshold) / 1000.0);
 	fflush(stdout);
+	bc.tmp = realloc(bc.tmp, bc.tmp_len = HAWK_TMPSIZE_SIGN(logn));
 	printf(" %8.2f", do_bench(&bench_sign, &bc, threshold) / 1000.0);
 	fflush(stdout);
 
 	// verify
+#ifdef HAWK_AVX
+	bc.tmp = realloc(bc.tmp, bc.tmp_len = HAWK_TMPSIZE_UNCOMPRESSED_VERIFY(logn));
+#else
+	bc.tmp = realloc(bc.tmp, bc.tmp_len = HAWK_TMPSIZE_UNCOMPRESSED_VERIFY_NTT(logn));
+#endif
 	printf(" %8.2f", do_bench(&bench_uncompressed_verify, &bc, threshold) / 1000.0);
 	fflush(stdout);
+#ifdef HAWK_AVX
+	bc.tmp = realloc(bc.tmp, bc.tmp_len = HAWK_TMPSIZE_VERIFY(logn));
+#else
+	bc.tmp = realloc(bc.tmp, bc.tmp_len = HAWK_TMPSIZE_VERIFY_NTT(logn));
+#endif
 	printf(" %8.2f", do_bench(&bench_verify, &bc, threshold) / 1000.0);
 	fflush(stdout);
 
@@ -352,7 +355,7 @@ main(int argc, char *argv[])
 	fflush(stdout);
 
 	for (unsigned logn = 1; logn <= 10; logn++) {
-		test_speed_hawk(logn, logn <= 9 ? 0.001 : threshold);
+		test_speed_hawk(logn, logn <= 8 ? 0.01 : threshold);
 	}
 
 	return 0;

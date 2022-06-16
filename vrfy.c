@@ -29,6 +29,7 @@
  * @author   Thomas Pornin <thomas.pornin@nccgroup.com>
  */
 
+#include <assert.h>
 #include "inner.h"
 
 /*
@@ -353,14 +354,14 @@ static const small_prime PRIMES[] = {
 	{ 2147473409,  383167813,      10239 },
 	{ 2147389441,  211808905,  471403745 },
 	{ 2147387393,   37672282, 1329335065 },
-	{ 2147377153, 1977035326,  968223422 },
+/*	{ 2147377153, 1977035326,  968223422 },
 	{ 2147358721, 1067163706,  132460015 },
 	{ 2147352577, 1606082042,  598693809 },
 	{ 2147346433, 2033915641, 1056257184 },
 	{ 2147338241, 1653770625,  421286710 },
 	{ 2147309569,  631200819, 1111201074 },
 	{ 2147297281, 2038364663, 1042003613 },
-	{ 0, 0, 0 }
+	{ 0, 0, 0 } */
 };
 
 /*
@@ -645,7 +646,7 @@ modp_mkgm2(uint32_t *restrict gm, uint32_t *restrict igm, unsigned logn,
 	unsigned k;
 	uint32_t ig, x1, x2, R2;
 
-	n = (size_t)1 << logn;
+	n = MKN(logn);
 
 	/*
 	 * We want g such that g^(2N) = 1 mod p, but the provided
@@ -763,116 +764,135 @@ modp_iNTT2(uint32_t *a, const uint32_t *igm, unsigned logn,
 	}
 }
 
+static void
+int16_to_ntt(uint32_t *a, const int16_t *x, const uint32_t *gm,
+	uint32_t p, uint32_t p0i, unsigned logn)
+{
+	size_t n, u;
+
+	n = MKN(logn);
+	for (u = 0; u < n; u++) {
+		a[u] = modp_set(x[u], p);
+	}
+
+	modp_NTT2(a, gm, logn, p, p0i);
+}
+
 /*
  * Set the polynomial a equal to h - 2 * s and converts it to Montgomery NTT
  * representation.
  */
 static void
-hash_to_i32(uint32_t *a, const uint8_t *h, const int16_t *s,
+hash_to_ntt(uint32_t *a, const uint8_t *h, const int16_t *s,
 	uint32_t *gm, uint32_t R2, uint32_t p, uint32_t p0i, unsigned logn)
 {
-	int32_t *b;
 	size_t n, u, v;
-	uint8_t hash;
+	int32_t hash;
 
 	n = MKN(logn);
-	b = (int32_t *)a;
-
 	if (logn <= 3) {
+		hash = h[0];
 		for (u = 0; u < n; u ++) {
-			a[u] = ((h[0] >> u) & 1) - 2 * s[u];
+			a[u] = modp_set(((hash >> u) & 1) - 2 * s[u], p);
 		}
 	} else {
 		for (u = 0; u < n; ) {
 			hash = *h++;
 			for (v = 0; v < 8; v ++, u ++) {
-				a[u] = (hash & 1) - 2 * s[u];
+				a[u] = modp_set((hash & 1) - 2 * s[u], p);
 				hash >>= 1;
 			}
 		}
 	}
 
-	for (u = 0; u < n; u++) {
-		a[u] = modp_set(b[u], p);
-	}
 	modp_NTT2(a, gm, logn, p, p0i);
 	for (u = 0; u < n; u++) {
 		a[u] = modp_montymul(a[u], R2, p, p0i);
 	}
 }
 
-/* see inner.h */
-int
-Zf(uncompressed_verify_NTT)(const uint8_t *restrict h,
+/*
+ * This a helper function for Zf(uncompressed_verify_NTT) and Zf(verify_NTT),
+ * since these both calculate the norm of (s0, s1) modulo various primes with
+ * respect to a quadratic form Q.
+ * However, in Zf(verify_NTT), some of the computations are already done.
+ */
+static int
+verify_norm_NTT(const uint8_t *restrict h,
 	const int16_t *restrict s0, const int16_t *restrict s1,
 	const int16_t *restrict q00, const int16_t *restrict q10,
+	uint32_t p, uint32_t p0i, uint32_t R, uint32_t R2,
 	unsigned logn, uint8_t *restrict tmp)
 {
-	uint32_t norm, norm0, term, p, p0i, R, R2;
-	uint32_t *gm, *igm, *q00_i32, *q10_i32, *q11_i32, *s0_i32, *s1_i32;
+	/*
+	 * TODO: since q00, q11 are selfadjoint, write a NTT, iNTT version for
+	 * selfadjoints that only uses first half of coefficients, saving 4n bytes.
+	 */
+
+	uint32_t norm, norm0, term;
+	uint32_t *s0_i32, *s1_i32, *r0_i32, *r1_i32, *gm, *igm;
 	int32_t *q11;
 	size_t n, hn, u, v;
 
 	n = MKN(logn);
-	norm = 0;
 	hn = n >> 1;
-	q11 = (int32_t *)tmp;
-	gm = (uint32_t *)(q11 + n);
-	igm = gm + n;
-	q00_i32 = igm + n;
-	q10_i32 = q00_i32 + n;
-	q11_i32 = q10_i32 + n; 
-	s0_i32 = q11_i32 + n;
+	norm = 0;
+
+	s0_i32 = (uint32_t *)tmp;
 	s1_i32 = s0_i32 + n;
+	r0_i32 = s1_i32 + n;
+	r1_i32 = r0_i32 + n;
+	q11 = (int32_t *)r1_i32;
+	gm = r1_i32 + n;
+	igm = gm + n;
 
-	p = PRIMES[0].p;
-	p0i = modp_ninv31(p);
-	R = modp_R(p);
-	R2 = modp_R2(p, p0i);
-	modp_mkgm2(gm, igm, logn, PRIMES[0].g, p, p0i);
+	hash_to_ntt(s0_i32, h, s0, gm, R2, p, p0i, logn);
+	hash_to_ntt(s1_i32, SECOND_HASH(h, logn), s1, gm, R2, p, p0i, logn);
 
-	for (u = 0; u < n; u++) {
-		q00_i32[u] = modp_set(q00[u], p);
-		q10_i32[u] = modp_set(q10[u], p);
-	}
-
-	modp_NTT2(q00_i32, gm, logn, p, p0i);
-	modp_NTT2(q10_i32, gm, logn, p, p0i);
-
-	for (u = 0; u < hn; u++) {
-		q11_i32[u] = modp_montymul(q10_i32[u], R2, p, p0i);
-		q11_i32[u] = modp_montymul(q11_i32[u], q10_i32[n - 1 - u], p, p0i);
-		q11_i32[u] = modp_add(q11_i32[u], 1u, p);
-		q11_i32[u] = modp_div(q11_i32[u], q00_i32[u], p, p0i, R);
-
-		// Needed for the iNTT:
-		q11_i32[n - 1 - u] = q11_i32[u];
-	}
-
-	hash_to_i32(s0_i32, h, s0, gm, R2, p, p0i, logn);
-	hash_to_i32(s1_i32, SECOND_HASH(h, logn), s1, gm, R2, p, p0i, logn);
+	/*
+	 * Store q00 in r0_i32 and assume q10 is in r1_i32 (NTT representation).
+	 */
+	int16_to_ntt(r0_i32, q00, gm, p, p0i, logn);
 
 	// s0* q00 s0
 	for (u = 0; u < hn; u++) {
 		term = modp_montymul(s0_i32[u], s0_i32[n - 1 - u], p, p0i);
-		norm = modp_add(norm, modp_montymul(term, q00_i32[u], p, p0i), p);
-	}
-
-	// s1* q11 s1
-	for (u = 0; u < hn; u++) {
-		term = modp_montymul(s1_i32[u], s1_i32[n - 1 - u], p, p0i);
-		norm = modp_add(norm, modp_montymul(term, q11_i32[u], p, p0i), p);
+		norm = modp_add(norm, modp_montymul(term, r0_i32[u], p, p0i), p);
 	}
 
 	// s0* q01 s1 + s1* q10 s0
 	for (u = 0; u < n; u++) {
 		term = modp_montymul(s1_i32[u], s0_i32[n - 1 - u], p, p0i);
-		norm = modp_add(norm, modp_montymul(term, q10_i32[u], p, p0i), p);
+		norm = modp_add(norm, modp_montymul(term, r1_i32[u], p, p0i), p);
 	}
 
-	modp_iNTT2(q11_i32, igm, logn, p, p0i);
-	for (u = 0; u < n; u++)
-		q11[u] = modp_norm(q11_i32[u], p);
+	/*
+	 * Now determine q11 = (1 + q10*q01) / q00.
+	 */
+	for (u = 0; u < hn; u++) {
+		r1_i32[u] = modp_montymul(r1_i32[u], R2, p, p0i);
+		r1_i32[u] = modp_montymul(r1_i32[u], r1_i32[n - 1 - u], p, p0i);
+		r1_i32[u] = modp_add(r1_i32[u], 1u, p);
+		r1_i32[u] = modp_div(r1_i32[u], r0_i32[u], p, p0i, R);
+
+		// Needed for the iNTT:
+		r1_i32[n - 1 - u] = r1_i32[u];
+	}
+
+	// s1* q11 s1
+	for (u = 0; u < hn; u++) {
+		term = modp_montymul(s1_i32[u], s1_i32[n - 1 - u], p, p0i);
+		norm = modp_add(norm, modp_montymul(term, r1_i32[u], p, p0i), p);
+	}
+
+	/*
+	 * Store q11 for later checks, since taking the inverse (modp_div) is
+	 * expensive modulo a prime p.
+	 */
+	modp_iNTT2(r1_i32, igm, logn, p, p0i);
+	for (u = 0; u < n; u++) {
+		q11[u] = modp_norm(r1_i32[u], p);
+	}
 
 	norm0 = norm;
 	for (v = 1; v < 3; v++) {
@@ -883,37 +903,32 @@ Zf(uncompressed_verify_NTT)(const uint8_t *restrict h,
 		R2 = modp_R2(p, p0i);
 		modp_mkgm2(gm, igm, logn, PRIMES[v].g, p, p0i);
 
-		// TODO: we can optimize RAM by putting the q00, q10, q11 resp. in NTT
-		// version when needed below
-		for (u = 0; u < n; u++) {
-			q00_i32[u] = modp_set(q00[u], p);
-			q10_i32[u] = modp_set(q10[u], p);
-			q11_i32[u] = modp_set(q11[u], p);
-		}
-
-		modp_NTT2(q00_i32, gm, logn, p, p0i);
-		modp_NTT2(q10_i32, gm, logn, p, p0i);
-		modp_NTT2(q11_i32, gm, logn, p, p0i);
-
-		hash_to_i32(s0_i32, h, s0, gm, R2, p, p0i, logn);
-		hash_to_i32(s1_i32, SECOND_HASH(h, logn), s1, gm, R2, p, p0i, logn);
+		hash_to_ntt(s0_i32, h, s0, gm, R2, p, p0i, logn);
+		hash_to_ntt(s1_i32, SECOND_HASH(h, logn), s1, gm, R2, p, p0i, logn);
 
 		// s0* q00 s0
+		int16_to_ntt(r0_i32, q00, gm, p, p0i, logn);
 		for (u = 0; u < hn; u++) {
 			term = modp_montymul(s0_i32[u], s0_i32[n - 1 - u], p, p0i);
-			norm = modp_add(norm, modp_montymul(term, q00_i32[u], p, p0i), p);
-		}
-
-		// s1* q11 s1
-		for (u = 0; u < hn; u++) {
-			term = modp_montymul(s1_i32[u], s1_i32[n - 1 - u], p, p0i);
-			norm = modp_add(norm, modp_montymul(term, q11_i32[u], p, p0i), p);
+			norm = modp_add(norm, modp_montymul(term, r0_i32[u], p, p0i), p);
 		}
 
 		// s0* q01 s1 + s1* q10 s0
+		int16_to_ntt(r0_i32, q10, gm, p, p0i, logn);
 		for (u = 0; u < n; u++) {
 			term = modp_montymul(s1_i32[u], s0_i32[n - 1 - u], p, p0i);
-			norm = modp_add(norm, modp_montymul(term, q10_i32[u], p, p0i), p);
+			norm = modp_add(norm, modp_montymul(term, r0_i32[u], p, p0i), p);
+		}
+
+		// s1* q11 s1
+		// int32_to_ntt(r0_i32, q11, gm, p, p0i, logn);
+		for (u = 0; u < n; u++)
+			r0_i32[u] = modp_set(q11[u], p);
+		modp_NTT2(r0_i32, gm, logn, p, p0i);
+
+		for (u = 0; u < hn; u++) {
+			term = modp_montymul(s1_i32[u], s1_i32[n - 1 - u], p, p0i);
+			norm = modp_add(norm, modp_montymul(term, r0_i32[u], p, p0i), p);
 		}
 
 		// norm0 := \infty, when norm0 != norm.
@@ -926,8 +941,33 @@ Zf(uncompressed_verify_NTT)(const uint8_t *restrict h,
 		&& (norm0 >> (logn - 1)) <= L2BOUND(logn);
 }
 
-#define hashbit(h, idx) ((h[idx >> 3] >> (idx & 7)) & 1u)
+/* see inner.h */
+int
+Zf(uncompressed_verify_NTT)(const uint8_t *restrict h,
+	const int16_t *restrict s0, const int16_t *restrict s1,
+	const int16_t *restrict q00, const int16_t *restrict q10,
+	unsigned logn, uint8_t *restrict tmp)
+{
+	size_t n;
+	uint32_t *gm, *igm, *q10_i32, p, p0i, R, R2;
 
+	n = MKN(logn);
+	p = PRIMES[0].p;
+	p0i = modp_ninv31(p);
+	R = modp_R(p);
+	R2 = modp_R2(p, p0i);
+
+	q10_i32 = ((uint32_t *)tmp) + 3*n;
+	gm = q10_i32 + n;
+	igm = gm + n;
+
+	modp_mkgm2(gm, igm, logn, PRIMES[0].g, p, p0i);
+	int16_to_ntt(q10_i32, q10, gm, p, p0i, logn);
+
+	return verify_norm_NTT(h, s0, s1, q00, q10, p, p0i, R, R2, logn, tmp);
+}
+
+/* see inner.h */
 int Zf(verify_NTT)(const uint8_t *restrict h,
 	const int16_t *restrict s1,
 	const int16_t *restrict q00, const int16_t *restrict q10,
@@ -943,27 +983,52 @@ int Zf(verify_NTT)(const uint8_t *restrict h,
 
 	size_t n, u, v, w;
 	int16_t *s0;
-	// uint32_t p, p0i, R2;
-	// uint32_t *gm, *igm, *q00_i32, *q10_i32, *e0_i32, *e1_i32;
-	// fpr *numerator, *denominator;
+	uint32_t p, p0i, R, R2, *gm, *igm, *q10_i32, *s1_i32;
 	fpr *t0, *t1;
 	uint8_t h0;
 
 	n = MKN(logn);
-	s0 = (int16_t *)tmp;
 
 	t0 = (fpr *)tmp;
 	t1 = t0 + n;
 
-	hash_to_fft(t0, SECOND_HASH(h, logn), s1, logn);
+	gm = (uint32_t *)(t1 + n);
+	igm = gm + n;
+	s0 = (int16_t *)(igm + n);
+	q10_i32 = igm + n;
+	s1_i32 = ((uint32_t *)t1) + n;
 
-	Zf(int16_to_fft)(t1, q10, logn);
-	Zf(poly_mul_fft)(t0, t1, logn);
+	p = PRIMES[0].p;
+	p0i = modp_ninv31(p);
+	R = modp_R(p);
+	R2 = modp_R2(p, p0i);
+	modp_mkgm2(gm, igm, logn, PRIMES[0].g, p, p0i);
+
+	int16_to_ntt(q10_i32, q10, gm, p, p0i, logn);
+	hash_to_ntt(s1_i32, SECOND_HASH(h, logn), s1, gm, R2, p, p0i, logn);
+	for (u = 0; u < n; u++) {
+		s1_i32[u] = modp_montymul(s1_i32[u], q10_i32[u], p, p0i);
+	}
+
+	/*
+	 * Convert (h1 - 2 s1) q10, calculated in NTT, to FFT format, so we can do
+	 * division and rounding.
+	 */
+	modp_iNTT2(s1_i32, igm, logn, p, p0i);
+	for (u = 0; u < n; u++) {
+		t0[u] = fpr_of(modp_norm(s1_i32[u], p));
+	}
+	Zf(FFT)(t0, logn);
 
 	Zf(int16_to_fft)(t1, q00, logn);
 	Zf(poly_div_autoadj_fft)(t0, t1, logn);
-
 	Zf(iFFT)(t0, logn);
+
+	/*
+	 * verify_norm_NTT expects that q10 is in NTT representation in the second
+	 * half of t1.
+	 */
+	memcpy(s1_i32, q10_i32, n * sizeof *q10_i32);
 
 	/*
 	 * Recover s0 with s0 = round(h0 / 2 + (h1 / 2 - s1) q10 / q00).
@@ -985,64 +1050,5 @@ int Zf(verify_NTT)(const uint8_t *restrict h,
 		}
 	}
 
-/*
-	gm = (uint32_t *)(s0 + n);
-	igm = gm + n;
-	q00_i32 = igm + n;
-	q10_i32 = q00_i32 + n;
-	e0_i32 = q10_i32 + n;
-	e1_i32 = e0_i32 + n;
-	numerator = (fpr *)(e1_i32 + n);
-	denominator = (fpr *)(numerator + n);
-
-	p = PRIMES[0].p;
-	p0i = modp_ninv31(p);
-	R2 = modp_R2(p, p0i);
-	modp_mkgm2(gm, igm, logn, PRIMES[0].g, p, p0i);
-
-	for (u = 0; u < n; u++) {
-		q00_i32[u] = modp_set(q00[u], p);
-		q10_i32[u] = modp_set(q10[u], p);
-		e0_i32[u] = modp_set(hashbit(h, u), p);
-		e1_i32[u] = modp_set(hashbit(SECOND_HASH(h, logn), u) - 2 * s1[u], p);
-	}
-	modp_NTT2(q00_i32, gm, logn, p, p0i);
-	modp_NTT2(q10_i32, gm, logn, p, p0i);
-	modp_NTT2(e0_i32, gm, logn, p, p0i);
-	modp_NTT2(e1_i32, gm, logn, p, p0i);
-
-	for (u = 0; u < n; u++) {
-		e0_i32[u] = modp_montymul(q00_i32[u],
-			modp_montymul(e0_i32[u], R2, p, p0i), p, p0i);
-		e1_i32[u] = modp_montymul(q10_i32[u],
-			modp_montymul(e1_i32[u], R2, p, p0i), p, p0i);
-
-		e0_i32[u] = modp_sub(e0_i32[u], e1_i32[u], p);
-	}
-
-	modp_iNTT2(e0_i32, igm, logn, p, p0i);
-	printf("\n");
-	for (u = 0; u < n; u++) {
-		printf("%d ", modp_norm(e0_i32[u], p));
-	}
-	printf("\n");
-	for (u = 0; u < n; u ++) {
-		numerator[u] = fpr_half(fpr_of(modp_norm(e0_i32[u], p)));
-	}
-	Zf(FFT)(numerator, logn);
-	Zf(int16_to_fft)(denominator, q00, logn);
-
-	Zf(poly_div_autoadj_fft)(numerator, denominator, logn);
-	Zf(iFFT)(numerator, logn);
-
-	for (u = 0; u < n; u ++) {
-		s0[u] = fpr_rint(numerator[u]);
-		printf("%d ", s0[u]);
-	}
-	printf("\n");
-*/
-
-	// return Zf(uncompressed_verify_NTT)(h, s0, s1, q00, q10, logn, (uint8_t *) gm);
-	// return 1;
-	return Zf(uncompressed_verify_NTT)(h, s0, s1, q00, q10, logn, (uint8_t *)(s0 + n));
+	return verify_norm_NTT(h, s0, s1, q00, q10, p, p0i, R, R2, logn, tmp);
 }

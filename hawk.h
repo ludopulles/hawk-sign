@@ -384,7 +384,7 @@ extern const size_t HAWK_PUBKEY_SIZE[11];
  * Temporary buffer size for key pair generation.
  */
 #define HAWK_TMPSIZE_KEYGEN(logn) \
-	((44u << (logn)) + (22u << (logn)) + 7)
+	((64u << (logn)) + 7)
 
 /*
  * Temporary buffer size for computing the public key from the secret key.
@@ -416,7 +416,7 @@ extern const size_t HAWK_PUBKEY_SIZE[11];
 #define HAWK_TMPSIZE_UNCOMPRESSED_SIGN(logn) \
 	(HAWK_HASH_SIZE(logn) + (55u << (logn)) + 7) // 7 in hawk.c, 6*8 in sign
 #define HAWK_TMPSIZE_UNCOMPRESSED_SIGN_NTT(logn) \
-	(HAWK_HASH_SIZE(logn) + (19u << (logn)) + 7) // 7 in hawk.c, 6*2 in sign
+	(HAWK_HASH_SIZE(logn) + (15u << (logn)) + 7) // 7 in hawk.c, 4*2 in sign
 
 
 /*
@@ -431,7 +431,7 @@ extern const size_t HAWK_PUBKEY_SIZE[11];
  * Temporary buffer size for generating a signature with an expanded key.
  */
 #define HAWK_TMPSIZE_SIGN(logn) \
-	(HAWK_HASH_SIZE(logn) + (2u << (logn)) + (26u << (logn)) + 7)
+	(HAWK_HASH_SIZE(logn) + (26u << (logn)) + 7)
 
 /*
  * Size of an expanded secret key.
@@ -453,7 +453,7 @@ extern const size_t HAWK_PUBKEY_SIZE[11];
 #define HAWK_TMPSIZE_VERIFY(logn) \
 	(HAWK_HASH_SIZE(logn) + (42u << (logn)) + 7)
 #define HAWK_TMPSIZE_VERIFY_NTT(logn) \
-	(HAWK_HASH_SIZE(logn) + (40u << (logn)) + 7)
+	(HAWK_HASH_SIZE(logn) + (34u << (logn)) + 7)
 
 /*
  * Temporary buffer size for verifying an uncompressed signature with NTT.

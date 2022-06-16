@@ -1138,15 +1138,22 @@ int Zf(verify)(const uint8_t *restrict h, const int16_t *restrict s1,
  * 4 bytes. This method does not use any floating point operations.
  * Assumes Zf(l2bound_XXX)[logn] * n/2 < 2^30.
  *
- * Note: tmp[] must have space for at least 32 * 2^logn bytes.
+ * Note: tmp[] must have space for at least 24 * 2^logn bytes.
  */
 int Zf(uncompressed_verify_NTT)(const uint8_t *restrict h,
 	const int16_t *restrict s0, const int16_t *restrict s1,
 	const int16_t *restrict q00, const int16_t *restrict q10,
 	unsigned logn, uint8_t *restrict tmp);
 
-int Zf(verify_NTT)(const uint8_t *restrict h,
-	const int16_t *restrict s1,
+/*
+ * Verify if a signature s1 is valid for a hashed message h of length n / 4
+ * bytes. This method does not use any floating point operations, EXCEPT for
+ * recovering s0 where it uses division and rounding.
+ * Assumes Zf(l2bound_XXX)[logn] * n/2 < 2^30.
+ *
+ * Note: tmp[] must have space for at least 28 * 2^logn bytes.
+ */
+int Zf(verify_NTT)(const uint8_t *restrict h, const int16_t *restrict s1,
 	const int16_t *restrict q00, const int16_t *restrict q10,
 	unsigned logn, uint8_t *restrict tmp);
 
