@@ -662,15 +662,6 @@ uint32_t Zf(mq_montymul)(uint32_t x, uint32_t y);
  * Operands must be in the 0..q-1 range.
  */
 uint32_t Zf(mq_mul)(uint32_t x, uint32_t y);
-/*
- * Montgomery squaring (computes (x^2)/R).
- */
-uint32_t Zf(mq_montysqr)(uint32_t x);
-
-/*
- * Divide x by y modulo q = 12289.
- */
-uint32_t Zf(mq_div_12289)(uint32_t x, uint32_t y);
 
 /*
  * Compute NTT on a ring element.

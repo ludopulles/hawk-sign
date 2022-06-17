@@ -32,7 +32,7 @@
 #include "hawk.h"
 #include "inner.h"
 
-#ifdef TARGET_AVX2
+#ifdef __AVX2__
 /*
  * Use floating points when the AVX2 instruction set is available, since a CPU
  * supporting AVX2 probably has a FPU.

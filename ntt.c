@@ -434,11 +434,12 @@ uint32_t
 Zf(mq_mul)(uint32_t x, uint32_t y)
 {
 	x = Zf(mq_montymul)(x, R2);
-	x = Zf(mq_montymul)(x, y);
-	return x;
+	return Zf(mq_montymul)(x, y);
 }
 
-/* see inner.h */
+/*
+ * Montgomery squaring (computes (x^2)/R).
+ */
 static inline uint32_t
 mq_montysqr(uint32_t x)
 {
@@ -446,8 +447,8 @@ mq_montysqr(uint32_t x)
 }
 
 /* see inner.h */
-uint32_t
-Zf(mq_div_12289)(uint32_t x, uint32_t y)
+static uint32_t
+mq_div_12289(uint32_t x, uint32_t y)
 {
 	/*
 	 * We invert y by computing y^(q-2) mod q.
@@ -613,7 +614,7 @@ Zf(mq_poly_div)(uint16_t *f, uint16_t *g, unsigned logn)
 
 	n = MKN(logn);
 	for (u = 0; u < n; u ++) {
-		f[u] = (uint16_t)Zf(mq_div_12289)(f[u], g[u]);
+		f[u] = (uint16_t)mq_div_12289(f[u], g[u]);
 	}
 }
 

@@ -40,6 +40,14 @@
 
 #include "../hawk.h"
 
+#ifdef __AVX2__
+/*
+ * Use floating points when the AVX2 instruction set is available, since a CPU
+ * supporting AVX2 probably has a FPU.
+ */
+#define HAWK_AVX
+#endif
+
 static void *
 xmalloc(size_t len)
 {
@@ -264,6 +272,7 @@ test_speed_hawk(unsigned logn, double threshold)
 		fprintf(stderr, "random seeding failed\n");
 		exit(EXIT_FAILURE);
 	}
+	shake256_flip(&bc.rng);
 
 	bc.sk = xmalloc(HAWK_SECKEY_SIZE(logn));
 	bc.pk = xmalloc(HAWK_PUBKEY_SIZE[logn]);

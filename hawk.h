@@ -451,7 +451,7 @@ extern const size_t HAWK_PUBKEY_SIZE[11];
  */
 
 #define HAWK_TMPSIZE_VERIFY(logn) \
-	(HAWK_HASH_SIZE(logn) + (42u << (logn)) + 7)
+	(HAWK_HASH_SIZE(logn) + (46u << (logn)) + 7)
 #define HAWK_TMPSIZE_VERIFY_NTT(logn) \
 	(HAWK_HASH_SIZE(logn) + (34u << (logn)) + 7)
 
@@ -459,7 +459,7 @@ extern const size_t HAWK_PUBKEY_SIZE[11];
  * Temporary buffer size for verifying an uncompressed signature with NTT.
  */
 #define HAWK_TMPSIZE_UNCOMPRESSED_VERIFY(logn) \
-	(HAWK_HASH_SIZE(logn) + (40u << (logn)) + 7)
+	(HAWK_HASH_SIZE(logn) + (44u << (logn)) + 7)
 #define HAWK_TMPSIZE_UNCOMPRESSED_VERIFY_NTT(logn) \
 	(HAWK_HASH_SIZE(logn) + (32u << (logn)) + 3)
 
