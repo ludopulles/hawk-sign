@@ -53,7 +53,7 @@ int16_t s0[N], s1[N], _s0[N], _s1[N];
 
 int8_t _f[N], _g[N], _F[N], _G[N];
 int16_t _iq00[N], _iq10[N];
-fpr _q00[N], _q10[N], _q11[N], exp_seckey[EXPANDED_SECKEY_SIZE(LOGN)];
+fpr exp_seckey[EXPANDED_SECKEY_SIZE(LOGN)];
 
 inner_shake256_context sc;
 const int n_repetitions = 100;
@@ -70,7 +70,7 @@ void test_encode_decode(unsigned logn) {
 
 	for (int i = 0; i < n_repetitions; i++) {
 		// Generate key pair.
-		Zf(keygen)(&sc, f, g, F, G, q00, q10, q11, logn, b);
+		Zf(keygen)(&sc, f, g, F, G, iq00, iq10, logn, b);
 
 		// Test secret key encoding and decoding
 		size_t sk_len = Zf(encode_seckey)(outbuf, BUFLEN, f, g, F, logn);
@@ -98,13 +98,9 @@ void test_encode_decode(unsigned logn) {
 		size_t pk_len = Zf(encode_pubkey)(outbuf, BUFLEN, iq00, iq10, logn);
 		assert(pk_len != 0);
 		assert(pk_len == Zf(decode_pubkey)(_iq00, _iq10, outbuf, pk_len, logn));
-		Zf(complete_pubkey)(_iq00, _iq10, _q00, _q10, _q11, logn);
 
-		for (size_t u = 0; u < n; u++) {
-			assert(fpr_rint(fpr_sub(q00[u], _q00[u])) == 0);
-			assert(fpr_rint(fpr_sub(q10[u], _q10[u])) == 0);
-			assert(fpr_rint(fpr_sub(q11[u], _q11[u])) == 0);
-		}
+		assert(poly16_eq(iq00, _iq00, logn));
+		assert(poly16_eq(iq10, _iq10, logn));
 
 		// Test complete signature encoding and decoding
 		inner_shake256_extract(&sc, h, n <= 8 ? 2 : n / 4);

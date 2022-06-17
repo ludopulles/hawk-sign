@@ -683,18 +683,6 @@ Zf(sign)(inner_shake256_context *rng, int16_t *restrict s1,
 }
 
 
-static inline void
-int8_to_ntt(uint16_t *restrict p, const int8_t *restrict f, unsigned logn)
-{
-	size_t n, u;
-
-	n = MKN(logn);
-	for (u = 0; u < n; u++) {
-		p[u] = Zf(mq_conv_small)(f[u]);
-	}
-	Zf(mq_NTT)(p, logn);
-}
-
 static void
 hash_to_ntt(uint16_t *p, const uint8_t *h, unsigned logn)
 {
@@ -717,36 +705,6 @@ hash_to_ntt(uint16_t *p, const uint8_t *h, unsigned logn)
 	}
 
 	Zf(mq_NTT)(p, logn);
-}
-
-static inline void
-construct_basis_NTT(
-	const int8_t *restrict f, const int8_t *restrict g,
-	const int8_t *restrict F, const int8_t *restrict G,
-	uint16_t *restrict bf, uint16_t *restrict bg,
-	uint16_t *restrict bF, uint16_t *restrict bG,
-	unsigned logn)
-{
-	size_t u, n;
-
-	n = MKN(logn);
-
-	int8_to_ntt(bf, f, logn);
-	int8_to_ntt(bg, g, logn);
-	int8_to_ntt(bF, F, logn);
-
-	if (G == NULL) {
-		/*
-		 * Compute (in NTT representation) G = (1 + gF) / f.
-		 */
-		for (u = 0; u < n; u++) {
-			bG[u] = Zf(mq_mul)(bg[u], bF[u]);
-			bG[u] = Zf(mq_add)(1, bG[u]);
-		}
-		Zf(mq_poly_div)(bG, bf, logn);
-	} else {
-		int8_to_ntt(bG, G, logn);
-	}
 }
 
 static int
@@ -849,7 +807,7 @@ Zf(uncompressed_sign_NTT)(inner_shake256_context *rng,
 
 	Zf(prng_init)(&p, rng);
 
-	construct_basis_NTT(f, g, F, G, bf, bg, bF, bG, logn);
+	Zf(NTT_NTRU)(f, g, F, G, bf, bg, bF, bG, logn);
 
 	norm_okay = sample_short_NTT(&p, x0, x1, bf, bg, bF, bG, h, logn);
 
@@ -915,7 +873,7 @@ Zf(sign_NTT)(inner_shake256_context *rng, int16_t *restrict s1,
 
 	Zf(prng_init)(&p, rng);
 
-	construct_basis_NTT(f, g, F, G, bf, bg, bF, bG, logn);
+	Zf(NTT_NTRU)(f, g, F, G, bf, bg, bF, bG, logn);
 
 	norm_okay = sample_short_NTT(&p, x0, x1, bf, bg, bF, bG, h, logn);
 

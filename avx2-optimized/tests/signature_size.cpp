@@ -208,8 +208,7 @@ vector<int> huffman_1024_s0, huffman_1024_s1;
 WorkerResult measure_signatures(unsigned logn) {
 	uint8_t b[48 * MAXN], h[MAXN / 4];
 	int8_t f[MAXN], g[MAXN], F[MAXN], G[MAXN];
-	int16_t s0[MAXN], s1[MAXN];
-	fpr q00[MAXN], q10[MAXN], q11[MAXN];
+	int16_t iq00[MAXN], iq10[MAXN], s0[MAXN], s1[MAXN];
 	size_t n;
 	unsigned char seed[48];
 	inner_shake256_context sc;
@@ -225,7 +224,7 @@ WorkerResult measure_signatures(unsigned logn) {
 	WorkerResult result;
 	for (int rep = 0; rep < n_repetitions; rep++) {
 		// Generate key pair.
-		Zf(keygen)(&sc, f, g, F, G, q00, q10, q11, logn, b);
+		Zf(keygen)(&sc, f, g, F, G, iq00, iq10, logn, b);
 
 		// make a signature of a random message...
 		inner_shake256_extract(&sc, h, sizeof h);

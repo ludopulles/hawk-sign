@@ -110,7 +110,7 @@ void measure_sign_speed()
 	uint8_t b[50 << logn];
 	int8_t f[n], g[n], F[n], G[n];
 	fpr exp_sk[EXPANDED_SECKEY_SIZE(logn)]; // if logn is not known at compile-time, take fixed value
-	int16_t s0[n], s1[n];
+	int16_t iq00[n], iq10[n], s0[n], s1[n];
 	fpr q00[n], q10[n], q11[n];
 	unsigned char seed[48];
 	inner_shake256_context sc;
@@ -123,7 +123,8 @@ void measure_sign_speed()
 	inner_shake256_flip(&sc);
 
 	// One key generation
-	Zf(keygen)(&sc, f, g, F, G, q00, q10, q11, logn, b);
+	Zf(keygen)(&sc, f, g, F, G, iq00, iq10, logn, b);
+	Zf(complete_pubkey)(iq00, iq10, q00, q10, q11, logn);
 	Zf(expand_seckey)(exp_sk, f, g, F, logn);
 
 	// memset(pregen_h, 0, num_samples * n / 4);
@@ -237,7 +238,7 @@ WorkerResult measure_signatures()
 	uint8_t b[50 << logn];
 	int8_t f[n], g[n], F[n], G[n];
 	uint8_t h[n / 4];
-	int16_t s1[n];
+	int16_t iq00[n], iq10[n], s1[n];
 	fpr q00[n], q10[n], q11[n];
 	unsigned char seed[48];
 	inner_shake256_context sc;
@@ -260,7 +261,8 @@ WorkerResult measure_signatures()
 	for (int rep = 0; rep < num_reps; rep++) {
 		// Generate key pair.
 		if ((rep & 1023) == 0) {
-			Zf(keygen)(&sc, f, g, F, G, q00, q10, q11, logn, b);
+			Zf(keygen)(&sc, f, g, F, G, iq00, iq10, logn, b);
+			Zf(complete_pubkey)(iq00, iq10, q00, q10, q11, logn);
 			Zf(expand_seckey)(exp_sk, f, g, F, logn);
 		}
 

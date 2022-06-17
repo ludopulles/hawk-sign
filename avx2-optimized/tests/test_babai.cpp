@@ -424,9 +424,8 @@ WorkerResult measure_keygen()
 		fpr dummy_fpr;
 	} tmp;
 	int8_t f[n], g[n], F[n], G[n];
-	fpr *_f = (fpr*)tmp.b, *_g = _f + n, *_F = _g + n, *_G = _F + n;
-	fpr q00[n], q10[n], q11[n];
-	int16_t q00i[n], q10i[n];
+	fpr *_f = (fpr*)tmp.b, *_g = _f + n, *_F = _g + n, *_G = _F + n, q10b[n];
+	int16_t iq00[n], iq10[n];
 	unsigned char seed[48];
 	inner_shake256_context sc;
 	struct timeval t0, t1;
@@ -443,15 +442,12 @@ WorkerResult measure_keygen()
 	gettimeofday(&t0, NULL);
 	for (int _ = 0; _ < result.num_iters; _++) {
 		// Generate key pair.
-		Zf(keygen)(&sc, f, g, F, G, q00, q10, q11, logn, tmp.b);
+		Zf(keygen)(&sc, f, g, F, G, iq00, iq10, logn, tmp.b);
 
-		Zf(fft_to_int16)(q00i, q00, logn);
-		Zf(fft_to_int16)(q10i, q10, logn);
-
-		size_t enc00 = Zf(encode_q00)(NULL, 0, q00i, logn, 512, 5);
-		size_t huf00 = Zf(huffman_encode_q00)(NULL, 0, q00i, logn);
-		size_t enc = Zf(encode_q10)(NULL, 0, q10i, logn, 4096, 8);
-		size_t huf = Zf(huffman_encode_large)(NULL, 0, q10i, logn);
+		size_t enc00 = Zf(encode_q00)(NULL, 0, iq00, logn, 512, 5);
+		size_t huf00 = Zf(huffman_encode_q00)(NULL, 0, iq00, logn);
+		size_t enc = Zf(encode_q10)(NULL, 0, iq10, logn, 4096, 8);
+		size_t huf = Zf(huffman_encode_large)(NULL, 0, iq10, logn);
 
 		if (!enc00 || !huf00 || !enc || !huf) { printf("."); fflush(stdout); result.num_fails++; _--; continue; }
 
@@ -463,11 +459,11 @@ WorkerResult measure_keygen()
 		Zf(ffBabai_reduce)(_f, _g, _F, _G, F, G, logn, _G + n);
 
 		// q10 = F*adj(f) + G*adj(g)
-		Zf(poly_add_muladj_fft)(q10, _F, _G, _f, _g, logn);
-		Zf(fft_to_int16)(q10i, q10, logn);
+		Zf(poly_add_muladj_fft)(q10b, _F, _G, _f, _g, logn);
+		Zf(fft_to_int16)(iq10, q10b, logn);
 
-		size_t encB = Zf(encode_q10)(NULL, 0, q10i, logn, 2048, 8);
-		size_t hufB = Zf(huffman_encode)(NULL, 0, q10i, logn);
+		size_t encB = Zf(encode_q10)(NULL, 0, iq10, logn, 2048, 8);
+		size_t hufB = Zf(huffman_encode)(NULL, 0, iq10, logn);
 
 		if (!encB || !hufB) { result.num_fails++; _--; continue; }
 

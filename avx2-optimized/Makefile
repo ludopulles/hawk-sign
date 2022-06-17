@@ -3,8 +3,8 @@
 
 CC = c99
 #CFLAGS = -W -Wall -Wshadow -O3 -march=native -DHAWK_RECOVER_CHECK
-#CFLAGS = -W -Wall -Wshadow -O2 -mavx2 -fdiagnostics-color=always -DHAWK_RECOVER_CHECK
-CFLAGS = -W -Wall -Wshadow -g -mavx2 -fsanitize=address,undefined -DHAWK_RECOVER_CHECK
+CFLAGS = -W -Wall -Wshadow -O2 -mavx2 -fdiagnostics-color=always -DHAWK_RECOVER_CHECK
+#CFLAGS = -W -Wall -Wshadow -g -mavx2 -fsanitize=address,undefined -fdiagnostics-color=always -DHAWK_RECOVER_CHECK
 LIBS = -lpthread -lm
 CXX = g++
 CXXFLAGS = --std=c++17 $(CFLAGS)

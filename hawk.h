@@ -379,19 +379,6 @@ extern const size_t HAWK_PUBKEY_SIZE[11];
 #define HAWK_SIG_PADDED_SIZE(logn) \
 	((logn) == 10 ? 1229u : 567u)
 
-
-/*
- * Temporary buffer size for key pair generation.
- */
-#define HAWK_TMPSIZE_KEYGEN(logn) \
-	((64u << (logn)) + 7)
-
-/*
- * Temporary buffer size for computing the public key from the secret key.
- */
-#define HAWK_TMPSIZE_MAKEPUB(logn) \
-	((6u << (logn)) + 1)
-
 /*
  * The number of bytes that are required for the salt that gets prepended to a
  * message before hashing.
@@ -409,6 +396,23 @@ extern const size_t HAWK_PUBKEY_SIZE[11];
  * based.
  */
 #define HAWK_HASH_SIZE(logn) ((logn) <= 2 ? 2u : (1u << ((logn) - 2)))
+
+/* ========================================================================= */
+/*
+ * Temporary buffer sizes.
+ */
+
+/*
+ * Temporary buffer size for key pair generation.
+ */
+#define HAWK_TMPSIZE_KEYGEN(logn) \
+	((52u << (logn)) + 7)
+
+/*
+ * Temporary buffer size for computing the public key from the secret key.
+ */
+#define HAWK_TMPSIZE_MAKEPUB(logn) \
+	((6u << (logn)) + 1)
 
 /*
  * Temporary buffer size for dynamically generating an uncompressed signature.

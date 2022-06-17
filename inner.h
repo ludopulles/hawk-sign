@@ -78,7 +78,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-
 /*
  * Optionally, one can do a lightweight-check during signing in HAWK (not
  * uncompressed) if recovering the first half of the signature works. To have
@@ -605,6 +604,35 @@ void Zf(mq_NTT)(uint16_t *a, unsigned logn);
 void Zf(mq_iNTT)(uint16_t *a, unsigned logn);
 
 /*
+ * Convert a polynomial of int8_t's to NTT form.
+ */
+void Zf(mq_int8_to_NTT)(uint16_t *restrict p, const int8_t *restrict f,
+	unsigned logn);
+
+/*
+ * Convert a basis B = [[f, F], [g, G]] into NTT form. Even when G is not
+ * provided, it can be reconstructed with G = (1 + gF) / f.
+ */
+void Zf(NTT_NTRU)(
+	const int8_t *restrict f, const int8_t *restrict g,
+	const int8_t *restrict F, const int8_t *restrict G,
+	uint16_t *restrict bf, uint16_t *restrict bg,
+	uint16_t *restrict bF, uint16_t *restrict bG, unsigned logn);
+
+/*
+ * Multiply polynomial a with the adjoint of polynomial b. a and b MUST NOT
+ * overlap. This function works only in NTT representation.
+ */
+void Zf(mq_poly_muladj)(uint16_t *restrict a, const uint16_t *restrict b,
+	unsigned logn);
+
+/*
+ * Multiply polynomial with its own adjoint. This function works only in NTT
+ * representation.
+ */
+void Zf(mq_poly_mulselfadj)(uint16_t *a, unsigned logn);
+
+/*
  * Convert a polynomial (mod q) to Montgomery representation.
  */
 void Zf(mq_poly_tomonty)(uint16_t *f, unsigned logn);
@@ -868,15 +896,13 @@ void Zf(ffBabai_reduce)(const fpr *restrict f, const fpr *restrict g,
  */
 
 /*
- * Generates the Gram matrix of the basis [ (f, g), (F, G) ].
+ * Generates q00 and q10 from the Gram matrix of the lattice basis.
  *
- * Note: tmp[] must have space for at least 16 * 2^logn bytes.
- * The pointer to q11 may be NULL-valued, in which case tmp must have space for
- * at least 24 * 2^logn bytes.
+ * Note: tmp[] must have space for at least 4 * 2^logn bytes.
  */
 void Zf(make_public)(const int8_t *restrict f, const int8_t *restrict g,
 	const int8_t *restrict F, const int8_t *restrict G,
-	fpr *restrict q00, fpr *restrict q10, fpr *restrict q11,
+	int16_t *restrict iq00, int16_t *restrict iq10,
 	unsigned logn, uint8_t *restrict tmp);
 
 /*
@@ -895,9 +921,9 @@ void Zf(make_public)(const int8_t *restrict f, const int8_t *restrict g,
  * Note: tmp[] must have space for at least 44 * 2^logn bytes.
  */
 void Zf(keygen)(inner_shake256_context *rng,
-	int8_t *restrict f, int8_t *restrict g, // secret key
-	int8_t *restrict F, int8_t *restrict G, // secret key
-	fpr *restrict q00, fpr *restrict q10, fpr *restrict q11, // public key
+	int8_t *restrict f, int8_t *restrict g,
+	int8_t *restrict F, int8_t *restrict G,
+	int16_t *restrict iq00, int16_t *restrict iq10,
 	unsigned logn, uint8_t *restrict tmp);
 
 /* ==================================================================== */

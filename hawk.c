@@ -154,7 +154,6 @@ hawk_keygen_make(shake256_context *rng, unsigned logn, void *seckey,
 {
 	int8_t *f, *g, *F, *G;
 	int16_t *iq00, *iq10;
-	fpr *q00, *q10;
 	uint8_t *sk, *pk, *atmp;
 	size_t u, n, sk_len, pk_len;
 	unsigned oldcw;
@@ -170,7 +169,7 @@ hawk_keygen_make(shake256_context *rng, unsigned logn, void *seckey,
 	 * Check that the seckey and pubkey buffers are at least as large as the
 	 * allowed encoded sizes, and check the temporary buffer size.
 	 */
-	if (seckey_len < HAWK_SECKEY_SIZE(logn)
+	if (seckey_len != HAWK_SECKEY_SIZE(logn)
 		|| (pubkey != NULL && pubkey_len < HAWK_PUBKEY_SIZE[logn])
 		|| tmp_len < HAWK_TMPSIZE_KEYGEN(logn)) {
 		return HAWK_ERR_SIZE;
@@ -184,16 +183,13 @@ hawk_keygen_make(shake256_context *rng, unsigned logn, void *seckey,
 	 */
 	n = MKN(logn);
 
-	iq00 = align_i16(tmp);
-	iq10 = iq00 + n;
-
-	f = (int8_t *)iq00;
+	f = (int8_t *)tmp;
 	g = f + n;
 	F = g + n;
 	G = F + n;
-	q00 = align_fpr(G + n);
-	q10 = q00 + n;
-	atmp = (uint8_t *)(q10 + n);
+	iq00 = align_i16(G + n);
+	iq10 = iq00 + n;
+	atmp = (uint8_t *)align_fpr(iq10 + n);
 
 	/*
 	 * Fix the first byte of secret key and secret key.
@@ -201,45 +197,50 @@ hawk_keygen_make(shake256_context *rng, unsigned logn, void *seckey,
 	sk = seckey;
 	sk[0] = 0x50 + logn;
 
-	pk = pubkey;
-	if (pubkey != NULL) {
-		pk[0] = 0x00 + logn;
+	if (pubkey == NULL) {
+		/* Should not be possible */
+		if (tmp_len < (8u << logn) + 7 + HAWK_PUBKEY_SIZE[logn]) {
+			return HAWK_ERR_SIZE;
+		}
+		pk = atmp;
+	} else {
+		pk = pubkey;
 	}
+	pk[0] = 0x00 + logn;
 
 	do {
 		oldcw = set_fpu_cw(2);
-		Zf(keygen)((inner_shake256_context *)rng, f, g, F, G, q00, q10, NULL,
-			logn, atmp);
+		Zf(keygen)((inner_shake256_context *)rng,
+			f, g, F, G, iq00, iq10, logn, atmp);
 		set_fpu_cw(oldcw);
 
-		sk_len = Zf(encode_seckey)(sk + 1, HAWK_SECKEY_SIZE(logn) - 1, f, g, F, logn);
-
 		/*
-		 * Destroy the secret key basis [[f,g], [F,G]] to store q00, q10.
+		 * For constant-time code, the secret key has a simple encoding of a
+		 * fixed size.
 		 */
-		Zf(fft_to_int16)(iq00, q00, logn);
-		Zf(fft_to_int16)(iq10, q10, logn);
-		pk_len = Zf(encode_pubkey)(pk + 1, HAWK_PUBKEY_SIZE[logn] - 1, iq00, iq10, logn);
+		sk_len = Zf(encode_seckey)(sk + 1, HAWK_SECKEY_SIZE(logn) - 1,
+			f, g, F, logn);
+		if (sk_len != HAWK_SECKEY_SIZE(logn) - 1) {
+			return HAWK_ERR_INTERNAL;
+		}
+
+		pk_len = Zf(encode_pubkey)(pk + 1, HAWK_PUBKEY_SIZE[logn] - 1,
+			iq00, iq10, logn);
 
 		/*
 		 * Retry key-generation as the secret key or public key cannot be
 		 * encoded, is shorter or is larger than the allowed size. This only
 		 * happens with negligible probability.
 		 */
-	} while (sk_len == 0 || pk_len == 0);
-
-	/*
-	 * Do not forgot that there is one header byte in sk and pk. Pad the secret
-	 * and secret key with zeros up to the key size.
-	 */
-	for (u = 1; u < HAWK_SECKEY_SIZE(logn); u ++) {
-		// if (u >= 1 + sk_len) sk[u] = 0;
-		sk[u] &= -(uint8_t)(u < 1 + sk_len);
-	}
+	} while (pk_len == 0);
 
 	if (pubkey != NULL) {
-		for (u = 1; u < HAWK_PUBKEY_SIZE[logn]; u ++) {
-			pk[u] &= -(uint8_t)(u < 1 + pk_len);
+		for (u = 1; u < pubkey_len; u ++) {
+			/*
+			 * Pad the public key with zeros in constant time, by doing:
+			 * if (u >= 1 + pk_len) pk[u] = 0;
+			 */
+			pk[u] &= -(((uint32_t)(u - 1 - pk_len)) >> 31);
 		}
 	}
 
@@ -251,13 +252,12 @@ int
 hawk_make_public(void *pubkey, size_t pubkey_len, const void *seckey,
 	size_t seckey_len, void *tmp, size_t tmp_len)
 {
+	unsigned logn;
+	size_t u, n, pk_len;
 	uint8_t *pk, *atmp;
 	const uint8_t *sk;
-	unsigned logn;
-	size_t u, v, n;
 	int8_t *f, *g, *F;
 	int16_t *iq00, *iq10;
-	fpr *q00, *q10;
 
 	/*
 	 * Get degree from secret key header byte, and check parameters.
@@ -273,7 +273,7 @@ hawk_make_public(void *pubkey, size_t pubkey_len, const void *seckey,
 	if (logn < 1 || logn > 10 || seckey_len != HAWK_SECKEY_SIZE(logn)) {
 		return HAWK_ERR_FORMAT;
 	}
-	if (pubkey_len != HAWK_PUBKEY_SIZE[logn]
+	if (pubkey_len < HAWK_PUBKEY_SIZE[logn]
 		|| tmp_len < HAWK_TMPSIZE_MAKEPUB(logn)) {
 		return HAWK_ERR_SIZE;
 	}
@@ -295,11 +295,9 @@ hawk_make_public(void *pubkey, size_t pubkey_len, const void *seckey,
 	 */
 	iq00 = align_i16(tmp);
 	iq10 = iq00 + n;
-	q00 = align_fpr(iq10 + n);
-	q10 = q00 + n;
-	atmp = (uint8_t *)(q10 + n);
+	atmp = (uint8_t *)(iq10 + n);
 
-	Zf(make_public)(f, g, F, NULL, q00, q10, NULL, logn, atmp);
+	Zf(make_public)(f, g, F, NULL, iq00, iq10, logn, atmp);
 
 	/*
 	 * Encode public key.
@@ -307,15 +305,18 @@ hawk_make_public(void *pubkey, size_t pubkey_len, const void *seckey,
 	pk = pubkey;
 	pk[0] = 0x00 + logn;
 
-	Zf(fft_to_int16)(iq10, q10, logn);
-	Zf(fft_to_int16)(iq00, q00, logn);
-	v = Zf(encode_pubkey)(pk + 1, HAWK_PUBKEY_SIZE[logn] - 1, iq00, iq10, logn);
-	if (v == 0) {
+	pk_len = Zf(encode_pubkey)(pk + 1, HAWK_PUBKEY_SIZE[logn] - 1,
+		iq00, iq10, logn);
+	if (pk_len == 0) {
 		return HAWK_ERR_FORMAT;
 	}
 
-	for (u = 1; u < HAWK_PUBKEY_SIZE[logn]; u ++) {
-		pk[u] &= -(uint8_t)(u < 1 + v);
+	for (u = 1; u < pubkey_len; u ++) {
+		/*
+		 * Pad the public key with zeros in constant time, by doing:
+		 * if (u >= 1 + pk_len) pk[u] = 0;
+		 */
+		pk[u] &= -(((uint8_t)(u - 1 - pk_len)) >> 7);
 	}
 	return 0;
 
@@ -947,7 +948,7 @@ hawk_verify_finish(const void *sig, size_t sig_len, int sig_type,
 		return HAWK_ERR_BADARG;
 	}
 
-	if (pubkey_len != HAWK_PUBKEY_SIZE[logn]) {
+	if (pubkey_len < HAWK_PUBKEY_SIZE[logn]) {
 		return HAWK_ERR_FORMAT;
 	}
 #ifdef HAWK_AVX
@@ -985,11 +986,9 @@ hawk_verify_finish(const void *sig, size_t sig_len, int sig_type,
 	u += v;
 	if (u != sig_len) {
 		/*
-		 * Extra bytes of value 0 are tolerated only for the
-		 * "padded" format.
+		 * Extra bytes of value 0 are tolerated only for the "padded" format.
 		 */
-		if ((sig_type == 0 && sig_len == HAWK_SIG_PADDED_SIZE(logn))
-			|| sig_type == HAWK_SIG_PADDED)
+		if (sig_type == HAWK_SIG_PADDED)
 		{
 			while (u < sig_len) {
 				if (es[u] != 0) {
@@ -1093,7 +1092,7 @@ hawk_uncompressed_verify_finish(const void *sig, size_t sig_len, int sig_type,
 		return HAWK_ERR_BADARG;
 	}
 
-	if (pubkey_len != HAWK_PUBKEY_SIZE[logn]) {
+	if (pubkey_len < HAWK_PUBKEY_SIZE[logn]) {
 		return HAWK_ERR_FORMAT;
 	}
 
@@ -1143,11 +1142,9 @@ hawk_uncompressed_verify_finish(const void *sig, size_t sig_len, int sig_type,
 	u += v;
 	if (u != sig_len) {
 		/*
-		 * Extra bytes of value 0 are tolerated only for the
-		 * "padded" format.
+		  Extra bytes of value 0 are tolerated only for the "padded" format.
 		 */
-		if ((sig_type == 0 && sig_len == HAWK_SIG_PADDED_SIZE(logn))
-			|| sig_type == HAWK_SIG_PADDED)
+		if (sig_type == HAWK_SIG_PADDED)
 		{
 			while (u < sig_len) {
 				if (es[u] != 0) {

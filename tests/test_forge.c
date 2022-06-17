@@ -9,16 +9,20 @@
 
 #include "../inner.h"
 
+#define MAXLOGN (9)
+#define MAXN MKN(MAXLOGN)
+
 union {
-	uint8_t b[48 * 512];
+	uint8_t b[48 * MAXN];
 	uint64_t dummy_u64;
 	fpr dummy_fpr;
 } tmp;
 
-int8_t f[512], g[512], F[512], G[512];
-uint8_t h[512/4];
-fpr q00[512], q10[512], q11[512], exp_sk[EXPANDED_SECKEY_SIZE(9)];
-int16_t sig[512];
+int8_t f[MAXN], g[MAXN], F[MAXN], G[MAXN];
+uint8_t h[MAXN/4];
+int16_t iq00[MAXN], iq10[MAXN];
+fpr q00[MAXN], q10[MAXN], q11[MAXN], exp_sk[EXPANDED_SECKEY_SIZE(MAXLOGN)];
+int16_t sig[MAXN];
 inner_shake256_context sc;
 
 void test_simple_forgeries(unsigned logn)
@@ -28,7 +32,8 @@ void test_simple_forgeries(unsigned logn)
 	n = MKN(logn);
 
 	// Generate key pair.
-	Zf(keygen)(&sc, f, g, F, G, q00, q10, q11, logn, tmp.b);
+	Zf(keygen)(&sc, f, g, F, G, iq00, iq10, logn, tmp.b);
+	Zf(complete_pubkey)(iq00, iq10, q00, q10, q11, logn);
 	Zf(expand_seckey)(exp_sk, f, g, F, logn);
 
 	for (int rep = 0; rep < 500; rep++) {

@@ -195,7 +195,8 @@ FT fail_prob(FT iq00, long long n) {
 
 uint8_t b[48 << LOGN];
 int8_t f[N], g[N], F[N], G[N];
-fpr q00[N], q10[N], q11[N], iq00[N], exp_key[9*N/2];
+int16_t iq00[N], iq10[N];
+fpr inv_q00[N], exp_key[9*N/2];
 
 /*
  * This function measures the ACTUAL probability that signing gives a different
@@ -230,15 +231,15 @@ void test_decomp_prob(inner_shake256_context *sc)
 	const size_t num_reps = 100 * 1000;
 
 	while (1) {
-		Zf(keygen)(sc, f, g, F, G, q00, q10, q11, LOGN, b);
+		Zf(keygen)(sc, f, g, F, G, iq00, iq10, LOGN, b);
 
-		for (u = 0; u < hn; u ++) {
-			iq00[u] = fpr_inv(q00[u]);
-			iq00[u + hn] = fpr_zero;
-		}
-		Zf(iFFT)(iq00, LOGN);
+		Zf(int16_to_fft)(inv_q00, iq00, LOGN);
+		Zf(FFT)(inv_q00, LOGN);
+		for (u = 0; u < hn; u ++)
+			inv_q00[u] = fpr_inv(inv_q00[u]);
+		Zf(iFFT)(inv_q00, LOGN);
 
-		double cst_iq = *((double*)&iq00[0]);
+		double cst_iq = *((double*)&inv_q00[0]);
 		FT p = fail_prob(cst_iq, N);
 
 		// if (cst_iq < 0.002) continue;

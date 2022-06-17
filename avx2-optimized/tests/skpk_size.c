@@ -22,28 +22,25 @@ long long q11_sum[MAX_LOGN+1] = {}, q11_sumsq[MAX_LOGN+1] = {};
 uint8_t b[48 << MAX_LOGN];
 int8_t f[MAX_N], g[MAX_N], F[MAX_N], G[MAX_N];
 fpr q00[MAX_N], q10[MAX_N], q11[MAX_N];
-int16_t q00n[MAX_N], q10n[MAX_N], q11n[MAX_N];
+int16_t iq00[MAX_N], iq10[MAX_N];
 inner_shake256_context sc;
 
 void measure_keygen(size_t n_repetitions, size_t logn) {
 	for (size_t i = 0; i < n_repetitions; i++) {
 		// Generate key pair.
-		Zf(keygen)(&sc, f, g, F, G, q00, q10, q11, logn, b);
+		Zf(keygen)(&sc, f, g, F, G, iq00, iq10, logn, b);
+		Zf(complete_pubkey)(iq00, iq10, q00, q10, q11, logn);
 
 		for (size_t u = 0; u < MKN(logn); u++) {
 			fg_sumsq[logn] += f[u]*f[u] + g[u]*g[u];
 			FG_sumsq[logn] += F[u]*F[u] + G[u]*G[u];
 		}
 
-		Zf(fft_to_int16)(q00n, q00, logn);
-		assert(q00n[0] >= 0);
-		Zf(fft_to_int16)(q10n, q10, logn);
-		Zf(fft_to_int16)(q11n, q11, logn);
-		// Pay attention: q11[0] does NOT fit into a int16_t.
-		// assert(q11n[0] >= 0);
+		assert(iq00[0] >= 0);
+		// Pay attention: q11 does NOT fit into a int16_t.
 
 		// Take the header byte into account:
-		int pk_sz = 1 + Zf(encode_pubkey)(NULL, 0, q00n, q10n, logn);
+		int pk_sz = 1 + Zf(encode_pubkey)(NULL, 0, iq00, iq10, logn);
 		int sk_sz = 1 + Zf(encode_seckey)(NULL, 0, f, g, F, logn);
 
 		pk_sum[logn] += pk_sz;

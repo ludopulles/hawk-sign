@@ -342,55 +342,55 @@ const size_t logn = 9, n = MKN(logn);
 
 struct WorkerResult
 {
-	long long num_iters, encodeB, huffmanB, encodeBB, huffmanBB;
+	long long num_iters, kgEnc, kgHuf, enumEnc, enumHuf;
 	double time_sum;
 
-	WorkerResult() : num_iters(0), encodeB(0), huffmanB(0), encodeBB(0), huffmanBB(0), time_sum(0.0) {}
+	WorkerResult() : num_iters(0), kgEnc(0), kgHuf(0), enumEnc(0), enumHuf(0), time_sum(0.0) {}
 
 	void combine(const WorkerResult &res) {
 		num_iters += res.num_iters;
-		encodeB += res.encodeB;
-		huffmanB += res.huffmanB;
-		encodeBB += res.encodeBB;
-		huffmanBB += res.huffmanBB;
+		kgEnc += res.kgEnc;
+		kgHuf += res.kgHuf;
+		enumEnc += res.enumEnc;
+		enumHuf += res.enumHuf;
 		time_sum += res.time_sum;
 	}
 };
 
 void
-do_enumeration(const int8_t *f, const int8_t *g, int8_t *F, int8_t *G, const fpr *q00, fpr *q10, const int16_t *q00i, int16_t *q10i)
+do_enumeration(const int8_t *f, const int8_t *g, int8_t *F, int8_t *G, const fpr *q00, fpr *q10, const int16_t *iq00, int16_t *iq10)
 {
 	constexpr int NP = 10, STEPS = 10*1000;
 	int16_t newq10[n];
 	int pos[NP], add[NP];
 	for (int i = (NP-1)*STEPS; i --> 0; ) {
 		// Try to modify q10 at NP points
-		memcpy(newq10, q10i, sizeof newq10);
+		memcpy(newq10, iq10, sizeof newq10);
 		int np = 2 + i/STEPS;
 		for (int it = np; it --> 0; ) {
 			pos[it] = rand() % n;
 			add[it] = rand() % 2;
 
 			for (size_t j = 0; j < n - pos[it]; j++)
-				newq10[pos[it]+j  ] += add[it] ? q00i[j] : -q00i[j];
+				newq10[pos[it]+j  ] += add[it] ? iq00[j] : -iq00[j];
 			for (size_t j = n - pos[it]; j < n; j++)
-				newq10[pos[it]+j-n] += add[it] ? -q00i[j] : q00i[j];
+				newq10[pos[it]+j-n] += add[it] ? -iq00[j] : iq00[j];
 		}
 
-		if (sqnorm16(newq10, logn) < sqnorm16(q10i, logn)) {
-			// printf("Improvement (%d): %d ==> %d\n", np, sqnorm16(q10i, logn), sqnorm16(newq10, logn));
+		if (sqnorm16(newq10, logn) < sqnorm16(iq10, logn)) {
+			// printf("Improvement (%d): %d ==> %d\n", np, sqnorm16(iq10, logn), sqnorm16(newq10, logn));
 			for (size_t it = np; it --> 0; ) {
 				for (size_t j = 0; j < n - pos[it]; j++) {
 					F[pos[it]+j  ] += add[it] ? f[j] : -f[j];
 					G[pos[it]+j  ] += add[it] ? g[j] : -g[j];
 					q10[pos[it]+j  ] = fpr_add(q10[pos[it]+j  ], add[it] ? q00[j] : fpr_neg(q00[j]));
-					q10i[pos[it]+j  ] += add[it] ? q00i[j] : -q00i[j];
+					iq10[pos[it]+j  ] += add[it] ? iq00[j] : -iq00[j];
 				}
 				for (size_t j = n - pos[it]; j < n; j++) {
 					F[pos[it]+j-n] += add[it] ? -f[j] : f[j];
 					G[pos[it]+j-n] += add[it] ? -g[j] : g[j];
 					q10[pos[it]+j-n] = fpr_add(q10[pos[it]+j-n], add[it] ? fpr_neg(q00[j]) : q00[j]);
-					q10i[pos[it]+j-n] += add[it] ? -q00i[j] : q00i[j];
+					iq10[pos[it]+j-n] += add[it] ? -iq00[j] : iq00[j];
 				}
 			}
 		}
@@ -401,27 +401,27 @@ do_enumeration(const int8_t *f, const int8_t *g, int8_t *F, int8_t *G, const fpr
 	while (p != lp) {
 		for (add[0] = 0; add[0] < 2; add[0]++) {
 improveq10:
-			memcpy(newq10, q10i, sizeof newq10);
+			memcpy(newq10, iq10, sizeof newq10);
 			for (size_t j = 0; j < n - p; j++)
-				newq10[p+j  ] += add[0] ? q00i[j] : -q00i[j];
+				newq10[p+j  ] += add[0] ? iq00[j] : -iq00[j];
 			for (size_t j = n - p; j < n; j++)
-				newq10[p+j-n] += add[0] ? -q00i[j] : q00i[j];
+				newq10[p+j-n] += add[0] ? -iq00[j] : iq00[j];
 
-			if (sqnorm16(newq10, logn) < sqnorm16(q10i, logn)) {
-				printf("Improvement (1, %d): %d ==> %d\n", p, sqnorm16(q10i, logn), sqnorm16(newq10, logn));
+			if (sqnorm16(newq10, logn) < sqnorm16(iq10, logn)) {
+				printf("Improvement (1, %d): %d ==> %d\n", p, sqnorm16(iq10, logn), sqnorm16(newq10, logn));
 				lp = p;
 
 				for (size_t j = 0; j < n - p; j++) {
 					F[p+j  ] += add[0] ? f[j] : -f[j];
 					G[p+j  ] += add[0] ? g[j] : -g[j];
 					q10[p+j  ] = fpr_add(q10[p+j  ], add[0] ? q00[j] : fpr_neg(q00[j]));
-					q10i[p+j  ] += add[0] ? q00i[j] : -q00i[j];
+					iq10[p+j  ] += add[0] ? iq00[j] : -iq00[j];
 				}
 				for (size_t j = n - p; j < n; j++) {
 					F[p+j-n] += add[0] ? -f[j] : f[j];
 					G[p+j-n] += add[0] ? -g[j] : g[j];
 					q10[p+j-n] = fpr_add(q10[p+j-n], add[0] ? fpr_neg(q00[j]) : q00[j]);
-					q10i[p+j-n] += add[0] ? -q00i[j] : q00i[j];
+					iq10[p+j-n] += add[0] ? -iq00[j] : iq00[j];
 				}
 				// repeat this position
 				goto improveq10;
@@ -439,12 +439,10 @@ WorkerResult measure_keygen()
 		fpr dummy_fpr;
 	} tmp;
 	int8_t f[n], g[n], F[n], G[n];
-	fpr q00[n], q10[n], q11[n];
-	int16_t q00i[n], q10i[n];
+	int16_t iq00[n], iq10[n];
+	fpr q00[n], q10[n];
 	unsigned char seed[48];
 	inner_shake256_context sc;
-
-	fpr tmp_babai[4*n], rt1[n], rt2[n], rt3[n], rt4[n];
 
 	struct timeval t0, t1;
 	const int n_repetitions = 1;
@@ -460,42 +458,27 @@ WorkerResult measure_keygen()
 	gettimeofday(&t0, NULL);
 	for (int _ = 0; _ < n_repetitions; _++) {
 		// Generate key pair.
-		Zf(keygen)(&sc, f, g, F, G, q00, q10, q11, logn, tmp.b);
-
+		Zf(keygen)(&sc, f, g, F, G, iq00, iq10, logn, tmp.b);
 		result.num_iters++;
 
-		Zf(fft_to_int16)(q00i, q00, logn);
-		Zf(fft_to_int16)(q10i, q10, logn);
-
-		size_t eq10 = Zf(encode_q10)(NULL, 0, q10i, logn, 4095, 8);
-		size_t hq10 = Zf(huffman_encode)(NULL, 0, q10i, logn);
+		// Check size before enumeration (with Babai though)
+		size_t eq10 = Zf(encode_q10)(NULL, 0, iq10, logn, 2047, 8);
+		size_t hq10 = Zf(huffman_encode)(NULL, 0, iq10, logn);
 		printf("Size before: %zu, %zu\n", eq10, hq10);
-		result.encodeB += eq10;
-		result.huffmanB += hq10;
+		result.kgEnc += eq10;
+		result.kgHuf += hq10;
 
-		Zf(int8_to_fft)(rt1, f, logn);
-		Zf(int8_to_fft)(rt2, g, logn);
-		Zf(int8_to_fft)(rt3, F, logn);
-		Zf(int8_to_fft)(rt4, G, logn);
+		// Improve F, G with enumeration
+		Zf(int16_to_fft)(q00, iq00, logn);
+		Zf(int16_to_fft)(q10, iq10, logn);
+		do_enumeration(f, g, F, G, q00, q10, iq00, iq10);
 
-		// now try to optimize F, G with babai.
-		Zf(ffBabai_reduce)(rt1, rt2, rt3, rt4, F, G, logn, tmp_babai);
-
-		// q10 = F*adj(f) + G*adj(g)
-		Zf(poly_add_muladj_fft)(q10, rt3, rt4, rt1, rt2, logn);
-		Zf(fft_to_int16)(q10i, q10, logn);
-
-		size_t epq10 = Zf(encode_q10)(NULL, 0, q10i, logn, 2047, 8);
-		size_t hpq10 = Zf(huffman_encode)(NULL, 0, q10i, logn);
+		// Check size after enumeration
+		size_t epq10 = Zf(encode_q10)(NULL, 0, iq10, logn, 2047, 8);
+		size_t hpq10 = Zf(huffman_encode)(NULL, 0, iq10, logn);
 		printf("Size after:  %zu, %zu\n", epq10, hpq10);
-		result.encodeBB += epq10;
-		result.huffmanBB += hpq10;
-
-		do_enumeration(f, g, F, G, q00, q10, q00i, q10i);
-
-		epq10 = Zf(encode_q10)(NULL, 0, q10i, logn, 2047, 8);
-		hpq10 = Zf(huffman_encode)(NULL, 0, q10i, logn);
-		printf("Size after:  %zu, %zu\n", epq10, hpq10);
+		result.enumEnc += epq10;
+		result.enumHuf += hpq10;
 	}
 
 	gettimeofday(&t1, NULL);
@@ -547,10 +530,10 @@ int main()
 	printf("Average time per keygen: %.3f ms\n", kg_duration / 1000.0);
 
 	printf("# iterations = %lld\n", final_result.num_iters);
-	printf("# encodeB  = %lld (%.1f B)\n", final_result.encodeB,   (double)final_result.encodeB  / final_result.num_iters);
-	printf("# huffmanB = %lld (%.1f B)\n", final_result.huffmanB,  (double)final_result.huffmanB / final_result.num_iters);
-	printf("# encodeB' = %lld (%.1f B)\n", final_result.encodeBB,  (double)final_result.encodeBB / final_result.num_iters);
-	printf("# huffmanB'= %lld (%.1f B)\n", final_result.huffmanBB, (double)final_result.huffmanBB/ final_result.num_iters);
+	printf("# kgEnc   = %lld (%.1f B)\n", final_result.kgEnc,   (double)final_result.kgEnc  / final_result.num_iters);
+	printf("# kgHuf   = %lld (%.1f B)\n", final_result.kgHuf,  (double)final_result.kgHuf / final_result.num_iters);
+	printf("# enumEnc = %lld (%.1f B)\n", final_result.enumEnc,  (double)final_result.enumEnc / final_result.num_iters);
+	printf("# enumHuf = %lld (%.1f B)\n", final_result.enumHuf, (double)final_result.enumHuf/ final_result.num_iters);
 	return 0;
 }
 

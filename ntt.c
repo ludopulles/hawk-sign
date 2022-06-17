@@ -596,9 +596,79 @@ Zf(mq_iNTT)(uint16_t *a, unsigned logn)
 
 /* see inner.h */
 void
+Zf(mq_int8_to_NTT)(uint16_t *restrict p, const int8_t *restrict f, unsigned logn)
+{
+	size_t n, u;
+
+	n = MKN(logn);
+	for (u = 0; u < n; u++) {
+		p[u] = Zf(mq_conv_small)(f[u]);
+	}
+	Zf(mq_NTT)(p, logn);
+}
+
+/* see inner.h */
+void
+Zf(NTT_NTRU)(
+	const int8_t *restrict f, const int8_t *restrict g,
+	const int8_t *restrict F, const int8_t *restrict G,
+	uint16_t *restrict bf, uint16_t *restrict bg,
+	uint16_t *restrict bF, uint16_t *restrict bG, unsigned logn)
+{
+	size_t n, u;
+
+	n = MKN(logn);
+
+	Zf(mq_int8_to_NTT)(bf, f, logn);
+	Zf(mq_int8_to_NTT)(bg, g, logn);
+	Zf(mq_int8_to_NTT)(bF, F, logn);
+
+	if (G == NULL) {
+		/*
+		 * Compute (in NTT representation) G = (1 + gF) / f.
+		 */
+		for (u = 0; u < n; u++) {
+			bG[u] = Zf(mq_mul)(bg[u], bF[u]);
+			bG[u] = Zf(mq_add)(1, bG[u]);
+		}
+		Zf(mq_poly_div)(bG, bf, logn);
+	} else {
+		Zf(mq_int8_to_NTT)(bG, G, logn);
+	}
+}
+
+/* see inner.h */
+void
+Zf(mq_poly_muladj)(uint16_t *restrict a, const uint16_t *restrict b,
+	unsigned logn)
+{
+	size_t n, u;
+
+	n = MKN(logn);
+	for (u = 0; u < n; u++) {
+		a[u] = (uint16_t) Zf(mq_mul)(a[u], b[n - 1 - u]);
+	}
+}
+
+/* see inner.h */
+void
+Zf(mq_poly_mulselfadj)(uint16_t *a, unsigned logn)
+{
+	size_t n, hn, u;
+
+	n = MKN(logn);
+	hn = n >> 1;
+	for (u = 0; u < hn; u++) {
+		a[u] = (uint16_t) Zf(mq_mul)(a[u], a[n - 1 - u]);
+		a[n - 1 - u] = a[u];
+	}
+}
+
+/* see inner.h */
+void
 Zf(mq_poly_tomonty)(uint16_t *f, unsigned logn)
 {
-	size_t u, n;
+	size_t n, u;
 
 	n = MKN(logn);
 	for (u = 0; u < n; u ++) {
@@ -610,7 +680,7 @@ Zf(mq_poly_tomonty)(uint16_t *f, unsigned logn)
 void
 Zf(mq_poly_div)(uint16_t *f, uint16_t *g, unsigned logn)
 {
-	size_t u, n;
+	size_t n, u;
 
 	n = MKN(logn);
 	for (u = 0; u < n; u ++) {

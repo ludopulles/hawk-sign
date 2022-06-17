@@ -3994,56 +3994,49 @@ solve_NTRU(unsigned logn, int8_t *F, int8_t *G,
 void
 Zf(make_public)(const int8_t *restrict f, const int8_t *restrict g,
 	const int8_t *restrict F, const int8_t *restrict G,
-	fpr *restrict q00, fpr *restrict q10, fpr *restrict q11,
+	int16_t *restrict iq00, int16_t *restrict iq10,
 	unsigned logn, uint8_t *restrict tmp)
 {
-	size_t n;
-	fpr *bg, *bG, *bq11;
+	size_t n, u;
+	uint16_t *q00, *q10, *reg0, *reg1;
 
 	n = MKN(logn);
-	bg = (fpr *)tmp;
-	bG = bg + n;
+	q00 = (uint16_t *)iq00;
+	q10 = (uint16_t *)iq10;
+	reg0 = (uint16_t *)tmp;
+	reg1 = reg0 + n;
 
-	if (q11 == NULL) {
-		bq11 = bG + n;
-	} else {
-		bq11 = q11;
+	Zf(NTT_NTRU)(f, g, F, G, q00, reg0, q10, reg1, logn);
+
+	/*
+	 * First store F*adj(f) in q10 and G*adj(g) in reg1.
+	 * Then calculate q10 = F*adj(f) + G*adj(g)
+	 */
+	Zf(mq_poly_muladj)(q10, q00, logn);
+	Zf(mq_poly_muladj)(reg1, reg0, logn);
+	for (u = 0; u < n; u++) {
+		q10[u] = Zf(mq_add)(q10[u], reg1[u]);
 	}
 
-	Zf(int8_to_fft)(q00, f, logn);
-	Zf(int8_to_fft)(bg, g, logn);
-	Zf(int8_to_fft)(bq11, F, logn);
-
-	if (G == NULL) {
-		size_t u, hn;
-
-		/*
-		 * Compute G = (1 + gF) / f, where all polynomials are in FFT
-		 * representation.
-		 */
-		hn = MKN(logn) >> 1;
-		Zf(poly_prod_fft)(bG, bg, bq11, logn);
-		for (u = 0; u < hn; u++) {
-			bG[u] = fpr_add(bG[u], fpr_one);
-		}
-		Zf(poly_div_fft)(bG, q00, logn);
-	} else {
-		Zf(int8_to_fft)(bG, G, logn);
+	/*
+	 * Then calculate q00 = f*adj(f) + g*adj(g).
+	 */
+	Zf(mq_poly_mulselfadj)(q00, logn);
+	Zf(mq_poly_mulselfadj)(reg0, logn);
+	for (u = 0; u < n; u++) {
+		q00[u] = Zf(mq_add)(q00[u], reg0[u]);
 	}
 
-	// q10 = F*adj(f) + G*adj(g)
-	Zf(poly_add_muladj_fft)(q10, bq11, bG, q00, bg, logn);
+	Zf(mq_iNTT)(q00, logn);
+	Zf(mq_iNTT)(q10, logn);
 
-	// q00 = f*adj(f) + g*adj(g)
-	Zf(poly_mulselfadj_fft)(q00, logn); // f*adj(f)
-	Zf(poly_mulselfadj_fft)(bg, logn); // g*adj(g)
-	Zf(poly_add)(q00, bg, logn);
-
-	if (q11 != NULL) {
-		// q11 = F*bar(F) + G*bar(G)
-		Zf(poly_mulselfadj_fft)(bq11, logn); // F*adj(F)
-		Zf(poly_mulselfadj_fft)(bG, logn); // G*adj(G)
-		Zf(poly_add)(bq11, bG, logn);
+	/*
+	 * Store result in iq00, iq10 while actually overwriting these memory
+	 * locations.
+	 */
+	for (u = 0; u < n; u++) {
+		iq00[u] = Zf(mq_conv_signed)(q00[u]);
+		iq10[u] = Zf(mq_conv_signed)(q10[u]);
 	}
 }
 
@@ -4056,7 +4049,7 @@ void
 Zf(keygen)(inner_shake256_context *rng,
 	int8_t *restrict f, int8_t *restrict g,
 	int8_t *restrict F, int8_t *restrict G,
-	fpr *restrict q00, fpr *restrict q10, fpr *restrict q11,
+	int16_t *restrict iq00, int16_t *restrict iq10,
 	unsigned logn, uint8_t *restrict tmp)
 {
 	/*
@@ -4169,7 +4162,7 @@ Zf(keygen)(inner_shake256_context *rng,
 			continue;
 		}
 
-		Zf(make_public)(f, g, F, G, q00, q10, q11, logn, tmp);
+		Zf(make_public)(f, g, F, G, iq00, iq10, logn, tmp);
 		/*
 		 * A valid key pair is generated.
 		 */

@@ -134,7 +134,6 @@ has_short_trace(const fpr *restrict t0, const fpr *restrict t1,
 	 * Check whether the norm is in range [0, 2^31). Signature is valid iff
 	 * squared norm of (t0, t1) w.r.t. Q is at most bound.
 	 */
-	
 	return !fpr_lt(trace, fpr_zero)
 		&& fpr_lt(trace, fpr_ptwo31m1)
 		&& (uint32_t)fpr_rint(trace) <= L2BOUND(logn);

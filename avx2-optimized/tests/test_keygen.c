@@ -417,7 +417,7 @@ void
 keygen_count_fails(inner_shake256_context *rng,
 	int8_t *restrict f, int8_t *restrict g,
 	int8_t *restrict F, int8_t *restrict G,
-	fpr *restrict q00, fpr *restrict q10, fpr *restrict q11,
+	int16_t *restrict iq00, int16_t *restrict iq10,
 	unsigned logn, uint8_t *restrict tmp,
 	int *normfg_even_fails, int *normfg_fails,
 	int *norminvq00_fails, int *NTRU_fails)
@@ -542,7 +542,7 @@ keygen_count_fails(inner_shake256_context *rng,
 			continue;
 		}
 
-		Zf(make_public)(f, g, F, G, q00, q10, q11, logn, tmp);
+		Zf(make_public)(f, g, F, G, iq00, iq10, logn, tmp);
 		/*
 		 * A valid key pair is generated.
 		 */
@@ -558,8 +558,8 @@ const size_t logn = 10, n = MKN(logn);
 void measure_keygen() {
 	uint8_t b[48 << logn];
 	int8_t f[n], g[n], F[n], G[n];
-	fpr q00[n], q10[n], q11[n];
-	int16_t q00n[n], q10n[n];
+	fpr q00[n], q10[n];
+	int16_t iq00[n], iq10[n];
 	unsigned char seed[48];
 	inner_shake256_context sc;
 
@@ -581,15 +581,15 @@ void measure_keygen() {
 	int norminvq00_fails = 0, NTRU_fails = 0;
 	for (int i = 0; i < n_repetitions; i++) {
 		// Generate key pair.
-		keygen_count_fails(&sc, f, g, F, G, q00, q10, q11, logn, b,
+		keygen_count_fails(&sc, f, g, F, G, iq00, iq10, logn, b,
 			&normfg_even_fails, &normfg_fails, &norminvq00_fails, &NTRU_fails);
 
-		Zf(fft_to_int16)(q00n, q00, logn);
-		Zf(fft_to_int16)(q10n, q10, logn);
+		Zf(fft_to_int16)(iq00, q00, logn);
+		Zf(fft_to_int16)(iq10, q10, logn);
 
-		size_t pubkey_sz_hq00 = Zf(huffman_encode_q00)(NULL, 0, q00n, logn);
-		size_t pubkey_sz_hq10 = Zf(huffman_encode_q10)(NULL, 0, q10n, logn);
-		size_t pubkey_sz_enc = Zf(encode_pubkey)(NULL, 0, q00n, q10n, logn);
+		size_t pubkey_sz_hq00 = Zf(huffman_encode_q00)(NULL, 0, iq00, logn);
+		size_t pubkey_sz_hq10 = Zf(huffman_encode_q10)(NULL, 0, iq10, logn);
+		size_t pubkey_sz_enc = Zf(encode_pubkey)(NULL, 0, iq00, iq10, logn);
 
 		if (!pubkey_sz_hq00 || !pubkey_sz_hq10 || !pubkey_sz_enc) {
 			printf("Encoding failed at step %d\n", i);
