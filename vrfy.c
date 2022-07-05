@@ -894,7 +894,7 @@ verify_norm_NTT(const uint8_t *restrict h,
 	}
 
 	norm0 = norm;
-	for (v = 1; v < 3; v++) {
+	for (v = 1; v < 2; v++) {
 		norm = 0;
 		p = PRIMES[v].p;
 		p0i = modp_ninv31(p);
