@@ -29,7 +29,6 @@ void measure_keygen(size_t n_repetitions, size_t logn) {
 	for (size_t i = 0; i < n_repetitions; i++) {
 		// Generate key pair.
 		Zf(keygen)(&sc, f, g, F, G, iq00, iq10, logn, b);
-		Zf(complete_pubkey)(iq00, iq10, q00, q10, q11, logn);
 
 		for (size_t u = 0; u < MKN(logn); u++) {
 			fg_sumsq[logn] += f[u]*f[u] + g[u]*g[u];
@@ -52,6 +51,11 @@ void measure_keygen(size_t n_repetitions, size_t logn) {
 		sk_sumsq[logn] += sk_sz * sk_sz;
 		if (sk_sz < sk_min[logn]) sk_min[logn] = sk_sz;
 		if (sk_sz > sk_max[logn]) sk_max[logn] = sk_sz;
+
+		Zf(complete_pubkey)(iq00, iq10, q00, q10, q11, logn);
+		Zf(iFFT)(q00, logn);
+		Zf(iFFT)(q10, logn);
+		Zf(iFFT)(q11, logn);
 
 		for  (size_t u = 0; u < MKN(logn); u++) {
 			long long x = fpr_rint(q00[u]);

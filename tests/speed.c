@@ -267,11 +267,11 @@ test_speed_hawk(unsigned logn, double threshold)
 
 	bc.logn = logn;
 
-	// shake256_init_prng_from_seed(&bc.rng, "test", 4);
 	if (shake256_init_prng_from_system(&bc.rng) != 0) {
 		fprintf(stderr, "random seeding failed\n");
 		exit(EXIT_FAILURE);
 	}
+	// shake256_init_prng_from_seed(&bc.rng, "test", 4);
 	shake256_flip(&bc.rng);
 
 	bc.sk = xmalloc(HAWK_SECKEY_SIZE(logn));

@@ -9,7 +9,7 @@
 
 #include "../inner.h"
 
-#define MAXLOGN (9)
+#define MAXLOGN (10)
 #define MAXN MKN(MAXLOGN)
 
 union {
@@ -63,7 +63,7 @@ int main() {
 	 * For smaller values of logn, an all-zeros signature might verify to a
 	 * certain hash, but we claim no security for them anyway.
 	 */
-	for (unsigned logn = 6; logn <= 9; logn++) {
+	for (unsigned logn = 6; logn <= MAXLOGN; logn++) {
 		printf("%d", logn);
 		fflush(stdout);
 		test_simple_forgeries(logn);
