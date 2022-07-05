@@ -33,7 +33,7 @@ void test_simple_forgeries(unsigned logn)
 
 	// Generate key pair.
 	Zf(keygen)(&sc, f, g, F, G, iq00, iq10, logn, tmp.b);
-	Zf(complete_pubkey)(iq00, iq10, q00, q10, q11, logn);
+	// Zf(complete_pubkey)(iq00, iq10, q00, q10, q11, logn);
 	Zf(expand_seckey)(exp_sk, f, g, F, logn);
 
 	for (int rep = 0; rep < 500; rep++) {
@@ -42,19 +42,24 @@ void test_simple_forgeries(unsigned logn)
 
 		// Compute the signature.
 		while (!Zf(sign)(&sc, sig, exp_sk, h, logn, tmp.b)) {}
+		// while (!Zf(sign_NTT)(&sc, sig, f, g, F, G, h, logn, tmp.b)) {}
 
-		assert(Zf(verify)(h, sig, q00, q10, q11, logn, tmp.b));
+		// assert(Zf(verify)(h, sig, q00, q10, q11, logn, tmp.b));
+		assert(Zf(verify_NTT)(h, sig, iq00, iq10, logn, tmp.b));
+
 		for (size_t u = 0; u < n; u ++)
 			sig[u] = 0;
-		assert(!Zf(verify)(h, sig, q00, q10, q11, logn, tmp.b));
+		// assert(!Zf(verify)(h, sig, q00, q10, q11, logn, tmp.b));
+		assert(!Zf(verify_NTT)(h, sig, iq00, iq10, logn, tmp.b));
 	}
 }
 
 int main() {
-	unsigned char seed[48];
+	unsigned char seed[48] = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
 	// Initialize a RNG.
 	Zf(get_seed)(seed, sizeof seed);
+
 	inner_shake256_init(&sc);
 	inner_shake256_inject(&sc, seed, sizeof seed);
 	inner_shake256_flip(&sc);
