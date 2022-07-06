@@ -1303,7 +1303,7 @@ fpr32_add(fpr32 x, fpr32 y)
 	 * the following edge case: abs(x) = abs(y), and x and y have
 	 * opposite sign bits; in that case, the result shall be +0
 	 * even if the sign bit of x is 1. To handle this case properly,
-	 * we do the swap is abs(x) = abs(y) AND the sign of x is 1.
+	 * we do the swap if abs(x) = abs(y) AND the sign of x is 1.
 	 */
 	m = ((uint32_t)1 << 31) - 1;
 	za = (x & m) - (y & m);
@@ -1362,7 +1362,7 @@ fpr32_add(fpr32 x, fpr32 y)
 	FPR_NORM32(xu, ex);
 
 	/*
-	 * Scale down the value to 2^25..s^26-1, handling the last bit
+	 * Scale down the value to 2^25..2^26-1, handling the last bit
 	 * as sticky.
 	 */
 	xu |= ((uint32_t)xu & 0x3F) + 0x3F;
@@ -1391,7 +1391,6 @@ fpr32_add(fpr32 x, fpr32 y)
 	 * properly clamps values to zero when the exponent is too
 	 * low, but does not alter the sign in that case.
 	 */
-
 	return FPR32(sx, ex, xu);
 }
 
@@ -1471,7 +1470,6 @@ fpr32_mul(fpr32 x, fpr32 y)
 	/*
 	 * FPR32() packs the result and applies proper rounding.
 	 */
-
 	return FPR32(s, e, zu);
 }
 
@@ -1559,7 +1557,6 @@ fpr32_div(fpr32 x, fpr32 y)
 	/*
 	 * FPR32() packs the result and applies proper rounding.
 	 */
-
 	return FPR32(s, e, q);
 }
 
