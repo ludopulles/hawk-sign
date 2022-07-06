@@ -56,7 +56,7 @@ build/shake.o: shake.c $(HEAD)
 	$(CC) $(CFLAGS) -c -o build/shake.o shake.c
 build/sign.o: sign.c $(HEAD)
 	$(CC) $(CFLAGS) -c -o build/sign.o sign.c
-build/vrfy.o: vrfy.c $(HEAD)
+build/vrfy.o: vrfy.c fpp.c fpr32.c $(HEAD)
 	$(CC) $(CFLAGS) -c -o build/vrfy.o vrfy.c
 
 build/hawk.o: hawk.c hawk.h $(HEAD)
