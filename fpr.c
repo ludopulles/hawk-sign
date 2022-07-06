@@ -153,7 +153,7 @@ fpr_add(fpr x, fpr y)
 	 * the following edge case: abs(x) = abs(y), and x and y have
 	 * opposite sign bits; in that case, the result shall be +0
 	 * even if the sign bit of x is 1. To handle this case properly,
-	 * we do the swap is abs(x) = abs(y) AND the sign of x is 1.
+	 * we do the swap if abs(x) = abs(y) AND the sign of x is 1.
 	 */
 	m = ((uint64_t)1 << 63) - 1;
 	za = (x & m) - (y & m);
@@ -212,7 +212,7 @@ fpr_add(fpr x, fpr y)
 	FPR_NORM64(xu, ex);
 
 	/*
-	 * Scale down the value to 2^54..s^55-1, handling the last bit
+	 * Scale down the value to 2^54..2^55-1, handling the last bit
 	 * as sticky.
 	 */
 	xu |= ((uint32_t)xu & 0x1FF) + 0x1FF;
@@ -296,7 +296,7 @@ fpr_mul(fpr x, fpr y)
 	zu |= ((z0 | z1) + 0x01FFFFFF) >> 25;
 
 	/*
-	 * We normalize zu to the 2^54..s^55-1 range: it could be one
+	 * We normalize zu to the 2^54..2^55-1 range: it could be one
 	 * bit too large at this point. This is done with a conditional
 	 * right-shift that takes into account the sticky bit.
 	 */
