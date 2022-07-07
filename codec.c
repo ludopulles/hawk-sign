@@ -33,394 +33,9 @@
 
 #include "inner.h"
 
-
-#define MAX_Q00 (512) // ~6*sigma
-#define ENCODING_LEN_Q00 (52) // max path in the tree
-// #define MAX_Q10 (2048) // sufficient enough
-// #define ENCODING_LEN_Q10 (21) // max path in the tree
-#define MAX_Q10 (4096)
-#define ENCODING_LEN_Q10 (56)
-
-#define MAX_S1 (512)
-#define ENCODING_LEN_S1 (64)
-
-// a[i]: { left child of i, right child of i }
-// p[i]: parent of node i
-static struct {
-	uint16_t a[MAX_Q00][2], p[2*MAX_Q00];
-} tree_q00 = { { {0, 0}}, {} };
-static struct {
-	uint16_t a[MAX_Q10][2], p[2*MAX_Q10];
-} tree_q10 = { { {0, 0}}, {} };
-static struct {
-	uint16_t a[MAX_S1][2], p[2*MAX_S1];
-} tree_s1 = {{{0, 0}},{}};
-
-
-static void
-init_huffman_trees() {
-	// TODO: make this work with multiple threads
-	if (tree_q00.a[0][0]) {
-		// initialization is already performed
-		return;
-	}
-
-	// initialize tree_q00 and tree_q10
-
-	float freq[2*MAX_Q10];
-	uint16_t u, l, r, v;
-
-#define BUILD_TREE(T, N, sigma)                                               \
-	/* calculate PDF of normal distribution */                                \
-	for (u = 0; u < N; u++)                                                   \
-		freq[N + u] = exp((float)-u * u / (2.0 * sigma * sigma));             \
-	/* construct the tree */                                                  \
-	for (u = N; --u >= 1; ) {                                                 \
-		l = r = 0; /* find 2 nodes with smallest frequencies */               \
-		for (v = 2*N; --v > u; ) {                                            \
-			if (freq[v] < 0) continue; /* v is already used */                \
-			if (!l || freq[v] < freq[l]) r = l, l = v;                        \
-			else if (!r || freq[v] < freq[r]) r = v;                          \
-		}                                                                     \
-		freq[u] = freq[l] + freq[r];                                          \
-		freq[l] = freq[r] = -1; /* mark l and r as used */                    \
-		T.p[l] = T.p[r] = u;                                                  \
-		T.a[u][0] = r;                                                        \
-		T.a[u][1] = l;                                                        \
-	}
-
-	BUILD_TREE(tree_q00, MAX_Q00, 64.00);
-	BUILD_TREE(tree_q10, MAX_Q10, 512.0);
-
-	// This has a too large std.dev. to be optimal:
-	// BUILD_TREE(tree_s1, MAX_S1, 58.0);
-	BUILD_TREE(tree_s1, MAX_S1, 64.0);
-
-	/* size_t len[2*MAX_Q10];
-	memset(len, 0, sizeof len);
-	for (u = 2*MAX_S1; --u > 1; )
-		if (len[u]+1 > len[tree_s1.p[u]]) len[tree_s1.p[u]] = len[u]+1;
-	printf("Longest length: %u\n", len[1]); */
-
-/*
-#define DEBUG_TREE(T, N, L) \
-	for (uint16_t x = 0; x < N; x++) { \
-		size_t steps = 0; \
-		memset(len, 0, sizeof len); \
-		for (int16_t idx = x + N; idx > 1; ) { \
-			int16_t next_idx = T.p[idx]; \
-			len[steps++] = T.a[next_idx][1] == idx ? 1 : 0; \
-			idx = next_idx; \
-		} \
-		assert(steps <= L); \
-		printf("%d: ", x); \
-		while (steps --> 0) printf("%d", len[steps]); \
-		printf("\n"); \
-	}
-
-	DEBUG_TREE(tree_q00, MAX_Q00, ENCODING_LEN_Q00);
-	DEBUG_TREE(tree_q10, MAX_Q10, ENCODING_LEN_Q10);
-*/
-	
-	// mark the tree generation as done:
-	tree_q00.a[0][0] = 1;
-}
-
-size_t
-Zf(encode_pubkey_huffman)(void *out, size_t max_out_len,
-	const int16_t *q00, const int16_t *q10, unsigned logn)
-{
-	uint8_t *buf;
-	size_t n, u, v;
-	uint8_t acc, acc_len, steps[ENCODING_LEN_Q10];
-
-	/*
-	 * Within one byte, the oldest bits are the most significant bits of
-	 * the byte, while in the buffer, the oldest bytes are the first ones.
-	 * Thus, byte-ordering is little-endian, while bit-ordering is
-	 * big-endian.
-	 */
-#define ADDBIT(x) {                                                           \
-	acc = (acc << 1) | (x);                                                   \
-	if (++acc_len == 8) {                                                     \
-		if (buf != NULL) {                                                    \
-			if (max_out_len <= v) return 0;                                   \
-			buf[v] = acc;                                                     \
-		}                                                                     \
-		acc_len = acc = 0; /* reset acc */                                    \
-		v++;                                                                  \
-	}                                                                         \
-}
-
-	buf = (uint8_t *)out;
-	n = MKN(logn);
-	v = 0;
-	acc = acc_len = 0;
-
-	/*
-	 * The constant coefficient of q00 follows a chi-squared distribution, has
-	 * a mean of roughly sigma_pk^2 2n and is quite concentrated by [1] so will
-	 * surely fit in a uint16_t. Thus, print q00[0] in little-endian format.
-	 *
-	 * [1] https://en.wikipedia.org/wiki/Chi-squared_distribution#Concentration
-	 */
-
-	init_huffman_trees();
-
-	for (u = 1; u < n/2; u ++)
-		if (q00[u] <= -MAX_Q00 || q00[u] >= MAX_Q00) return 0;
-	for (u = 0; u < n; u ++)
-		if (q10[u] <= -MAX_Q10 || q10[u] >= MAX_Q10) return 0;
-
-	/*
-	 * First output q00 using q00 is self-adjoint:
-	 * - output q00[0] in little-endian format (2 bytes)
-	 * - output q00[1] ... q00[n/2 - 1] using the first Huffman tree
-	 */
-	if (buf != NULL) {
-		if (max_out_len < 2) return 0;
-		buf[0] = (uint8_t)q00[0];
-		buf[1] = ((uint16_t)q00[0]) >> 8;
-	}
-	v += 2;
-
-	for (u = 1; u < n/2; u ++) {
-		uint16_t t, s;
-		size_t nsteps;
-
-		ADDBIT(q00[u] >> 15); // push the sign bit
-		t = (uint16_t)(q00[u] < 0 ? (-q00[u]) : q00[u]); // absolute value
-		nsteps = 0; // store the steps to go up the tree in the buffer
-		for (t += MAX_Q00; t > 1; t = s) {
-			s = tree_q00.p[t];
-			steps[nsteps++] = (tree_q00.a[s][1] == t);
-		}
-
-		// print the bits in reverse order, i.e. from root to leaf
-		while (nsteps --> 0) {
-			ADDBIT(steps[nsteps]);
-		}
-	}
-
-	/*
-	 * Then output q10 using the second Huffman tree.
-	 */
-	for (u = 0; u < n; u ++) {
-		uint16_t t, s;
-		size_t nsteps;
-
-		ADDBIT(q10[u] >> 15); // push the sign bit
-		t = (uint16_t)(q10[u] < 0 ? (-q10[u]) : q10[u]); // absolute value
-		nsteps = 0; // store the steps to go up the tree in the buffer
-		for (t += MAX_Q10; t > 1; t = s) {
-			s = tree_q10.p[t];
-			steps[nsteps++] = (tree_q10.a[s][1] == t);
-		}
-
-		// print the bits in reverse order, i.e. from root to leaf
-		while (nsteps --> 0) {
-			ADDBIT(steps[nsteps]);
-		}
-	}
-
-	// Flush remaining bits (if any) and pad with zeros.
-	if (acc_len > 0) {
-		if (buf != NULL) {
-			if (max_out_len <= v) return 0;
-			buf[v] = (uint8_t)(acc << (8 - acc_len));
-		}
-		v++;
-	}
-	return v;
-}
-
-size_t
-Zf(decode_pubkey_huffman)(int16_t *q00, int16_t *q10,
-	const void *in, size_t max_in_len, unsigned logn)
-{
-	const uint8_t *buf;
-	size_t n, u, v;
-	uint8_t acc, acc_len;
-
-#define ENSUREBIT()                                                           \
-	if (acc_len == 0) {                                                       \
-		if (max_in_len <= v) return 0; /* not enough bits */                  \
-		acc = buf[v++];                                                       \
-		acc_len = 8;                                                          \
-	}
-
-#define GETBIT() ((acc >> (--acc_len)) & 1)
-
-
-	buf = (uint8_t *)in;
-	n = MKN(logn);
-	v = 0;
-	acc = acc_len = 0;
-
-	init_huffman_trees();
-
-	/*
-	 * First read q00[0].
-	 */
-	if (max_in_len < 2) return 0;
-	uint16_t q00_0 = ((uint16_t)buf[0] << 8) | (uint16_t) buf[1];
-	q00[0] = q00_0;
-	v += 2;
-
-	/*
-	 * Read q00[1] ... q00[n/2 - 1].
-	 */
-	for (u = 1; u < n/2; u ++) {
-		uint16_t s, val;
-
-		ENSUREBIT();
-		s = GETBIT();
-
-		/*
-		 * First, val is an index in the Huffman tree. After that, it is
-		 * the value of the u'th coefficient of q00.
-		 */
-		val = 1;
-		while (val < MAX_Q00) {
-			ENSUREBIT();
-			val = tree_q00.a[val][GETBIT()];
-		}
-		val -= MAX_Q00;
-
-		/*
-		 * "-0" is forbidden.
-		 */
-		if (s && val == 0) {
-			return 0;
-		}
-
-		q00[u] = s ? -(int16_t)val : (int16_t)val;
-	}
-	/*
-	 * Since q00 is self-adjoint, we can recover q00[n / 2] ... q00[n - 1]
-	 * now.
-	 */
-	q00[n/2] = 0;
-	for (u = n/2 + 1; u < n; u ++)
-		q00[u] = -q00[n - u];
-
-	/*
-	 * Read q10[0] ... q10[n - 1].
-	 */
-	for (u = 0; u < n; u ++) {
-		uint16_t s, val;
-
-		ENSUREBIT();
-		s = GETBIT();
-
-		/*
-		 * First, val is an index in the Huffman tree. After that, it is
-		 * the value of the u'th coefficient of q00.
-		 */
-		val = 1;
-		while (val < MAX_Q10) {
-			ENSUREBIT();
-			val = tree_q10.a[val][GETBIT()];
-		}
-		val -= MAX_Q10;
-
-		/*
-		 * "-0" is forbidden.
-		 */
-		if (s && val == 0) {
-			return 0;
-		}
-
-		q10[u] = s ? -(int16_t)val : (int16_t)val;
-	}
-
-	/*
-	 * Unused bits in the last byte must be zero.
-	 */
-	if ((acc & ((1u << acc_len) - 1u)) != 0) {
-		return 0;
-	}
-	return v;
-#undef ENSUREBIT
-#undef GETBIT
-}
-
-/* see inner.h */
-size_t
-Zf(encode_sig_huffman)(void *out, size_t max_out_len,
-	const int16_t *x, unsigned logn)
-{
-	uint8_t *buf;
-	size_t n, u, v;
-	uint8_t acc, acc_len, steps[ENCODING_LEN_S1];
-
-	/*
-	 * Within one byte, the oldest bits are the most significant bits of
-	 * the byte, while in the buffer, the oldest bytes are the first ones.
-	 * Thus, byte-ordering is little-endian, while bit-ordering is
-	 * big-endian.
-	 */
-#define ADDBIT(x) {                                                           \
-	acc = (acc << 1) | (x);                                                   \
-	if (++acc_len == 8) {                                                     \
-		if (buf != NULL) {                                                    \
-			if (max_out_len <= v) return 0;                                   \
-			buf[v] = acc;                                                     \
-		}                                                                     \
-		acc_len = acc = 0; /* reset acc */                                    \
-		v++;                                                                  \
-	}                                                                         \
-}
-
-
-	buf = (uint8_t *)out;
-	n = MKN(logn);
-	v = 0;
-	acc = acc_len = 0;
-
-	init_huffman_trees();
-
-	for (u = 0; u < n; u ++)
-		if (x[u] <= -MAX_S1 || x[u] >= MAX_S1) return 0;
-
-	for (u = 0; u < n; u ++) {
-		uint16_t t, s;
-		size_t nsteps;
-
-		ADDBIT(x[u] >> 15); // push the sign bit
-		t = (uint16_t)(x[u] < 0 ? (-x[u]) : x[u]); // absolute value
-		nsteps = 0; // store the steps to go up the tree in the buffer
-		for (t += MAX_S1; t > 1; t = s) {
-			s = tree_s1.p[t];
-			steps[nsteps++] = (tree_s1.a[s][1] == t);
-		}
-
-		// print the bits in reverse order, i.e. from root to leaf
-		while (nsteps --> 0) {
-			ADDBIT(steps[nsteps]);
-		}
-	}
-
-	/*
-	 * Flush remaining bits (if any).
-	 */
-	if (acc_len > 0) {
-		if (buf != NULL) {
-			if (v >= max_out_len) {
-				return 0;
-			}
-			buf[v] = (uint8_t)(acc << (8 - acc_len));
-		}
-		v ++;
-	}
-
-	return v;
-}
-
-
-/* =============================================================================
- * Encoding/decoding that will be used with the signature scheme, as the gain of
- * a Huffman table is not significant but makes the code more complex.
+/* ============================================================================
+ * Encoding/decoding that will be used with the signature scheme, as the gain
+ * of a Huffman table is not significant but makes the code more complex.
  */
 
 #define BOUND_S0(logn) ((logn) == 10 ? 8192 : 2048)
@@ -598,6 +213,15 @@ Zf(encode_pubkey)(void *out, size_t max_out_len,
 	return v;
 }
 
+#define ENSUREBIT()                                                           \
+	if (acc_len == 0) {                                                       \
+		if (v >= max_in_len) return 0; /* not enough bits */                  \
+		acc = buf[v++];                                                       \
+		acc_len = 8;                                                          \
+	}
+
+#define GETBIT() ((acc >> (--acc_len)) & 1)
+
 /* see inner.h */
 size_t
 Zf(decode_pubkey)(int16_t *q00, int16_t *q10,
@@ -608,15 +232,6 @@ Zf(decode_pubkey)(int16_t *q00, int16_t *q10,
 	uint64_t acc;
 	uint16_t low_mask, high_inc;
 	unsigned acc_len;
-
-#define ENSUREBIT()                                                           \
-	if (acc_len == 0) {                                                       \
-		if (v >= max_in_len) return 0; /* not enough bits */                  \
-		acc = buf[v++];                                                       \
-		acc_len = 8;                                                          \
-	}
-
-#define GETBIT() ((acc >> (--acc_len)) & 1)
 
 	buf = (uint8_t *)in;
 	n = MKN(logn);
@@ -750,8 +365,6 @@ Zf(decode_pubkey)(int16_t *q00, int16_t *q10,
 	}
 
 	return v;
-#undef ENSUREBIT
-#undef GETBIT
 }
 
 /* see inner.h */
@@ -886,15 +499,6 @@ Zf(decode_uncomp_sig)(int16_t *s0, int16_t *s1,
 	uint64_t acc;
 	unsigned acc_len;
 
-#define ENSUREBIT()                                                           \
-	if (acc_len == 0) {                                                       \
-		if (v >= max_in_len) return 0; /* not enough bits */                  \
-		acc = buf[v++];                                                       \
-		acc_len = 8;                                                          \
-	}
-
-#define GETBIT() ((acc >> (--acc_len)) & 1)
-
 	buf = (uint8_t *)in;
 	n = MKN(logn);
 	acc = 0;
@@ -996,8 +600,6 @@ Zf(decode_uncomp_sig)(int16_t *s0, int16_t *s1,
 	}
 
 	return v;
-#undef ENSUREBIT
-#undef GETBIT
 }
 
 /* see inner.h */
@@ -1097,15 +699,6 @@ Zf(decode_sig)(int16_t *s1, const void *in, size_t max_in_len, unsigned logn,
 	uint16_t acc;
 	unsigned acc_len;
 
-#define ENSUREBIT()                                                           \
-	if (acc_len == 0) {                                                       \
-		if (v >= max_in_len) return 0; /* not enough bits */                  \
-		acc = buf[v++];                                                       \
-		acc_len = 8;                                                          \
-	}
-
-#define GETBIT() ((acc >> (--acc_len)) & 1)
-
 	buf = (uint8_t *)in;
 	n = MKN(logn);
 	acc = 0;
@@ -1164,8 +757,6 @@ Zf(decode_sig)(int16_t *s1, const void *in, size_t max_in_len, unsigned logn,
 	}
 
 	return v;
-#undef ENSUREBIT
-#undef GETBIT
 }
 
 /*
@@ -1296,3 +887,6 @@ Zf(decode_seckey)(int8_t *f, int8_t *g, int8_t *F,
 	return in_len;
 #undef POLY_DEC
 }
+
+#undef ENSUREBIT
+#undef GETBIT

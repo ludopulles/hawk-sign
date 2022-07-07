@@ -540,18 +540,6 @@ size_t Zf(decode_uncomp_sig)(int16_t *s0, int16_t *s1,
 size_t Zf(decode_sig)(int16_t *s1, const void *in, size_t max_in_len,
 	unsigned logn, size_t lo_bits);
 
-/*
- * TODO: remove Huffman-table compression
- */
-size_t Zf(encode_pubkey_huffman)(void *out, size_t max_out_len,
-	const int16_t *q00, const int16_t *q10, unsigned logn);
-
-size_t Zf(decode_pubkey_huffman)(int16_t *q00, int16_t *q10,
-	const void *in, size_t max_in_len, unsigned logn);
-
-size_t Zf(encode_sig_huffman)(void *out, size_t max_out_len, const int16_t *x,
-	unsigned logn);
-
 /* ==================================================================== */
 /*
  * Number Theoretic Transform (ntt.c)
