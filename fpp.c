@@ -2,7 +2,7 @@
 #include <limits.h>
 #include <math.h>
 
-#define ACCURACY (8)
+#define ACCURACY (16)
 
 /*
  * This datastructure resembles a fixed-point precision number,
@@ -301,13 +301,14 @@ const int64_t fpp_gm_tab[] = {
 
 fpp ffp_mul(fpp x, int64_t rt)
 {
-	int64_t aa, bb;
+	int64_t alo, ahi;
 
-	aa = x;
-	bb = rt;
+	ahi = x >> 32;
+	alo = x & 0xFFFFFFFF;
 
-	aa *= bb;
-	return aa >> 20;
+	alo = (alo * rt) >> 20;
+	ahi = (ahi * rt) << 12;
+	return alo + ahi;
 }
 
 void
