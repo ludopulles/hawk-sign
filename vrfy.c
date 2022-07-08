@@ -1311,7 +1311,7 @@ verify_norm_NTT(const uint8_t *restrict h,
  * Fixed point precision
  *
  *****************************************************************************/
-#define ACCURACY (8)
+#define ACCURACY (22)
 
 /*
  * This datastructure resembles a fixed-point precision number,
@@ -1319,7 +1319,12 @@ verify_norm_NTT(const uint8_t *restrict h,
  */
 typedef int64_t fpp;
 
-static inline fpp fpp_of(int m) { return (int64_t)m * (int64_t)(1 << ACCURACY); }
+// static inline fpp fpp_of(int m) { return (int64_t)m * (int64_t)(1 << ACCURACY); }
+static inline fpp fpp_of(int m, unsigned shift) {
+	if (shift >= ACCURACY)
+		return m >> (shift - ACCURACY);
+	return (int64_t)m * (int64_t)(1 << (ACCURACY - shift));
+}
 static inline int32_t fpp_rint(fpp x) { return (x + (1 << (ACCURACY-1))) >> ACCURACY; }
 static inline fpp fpp_neg(fpp x) { return -x; }
 static inline fpp fpp_half(fpp x) { return x>>1; }
@@ -1588,15 +1593,15 @@ const int64_t fpp_gm_tab[] = {
 
 fpp ffp_mul(fpp x, int64_t rt)
 {
-	return (x * rt) / (1 << 20);
-	/* int64_t alo, ahi;
+	// return (x * rt) / (1 << 20);
+	int64_t alo, ahi;
 
 	ahi = x >> 32;
 	alo = x & 0xFFFFFFFF;
 
 	alo = (alo * rt) >> 20;
 	ahi = (ahi * rt) << 12;
-	return alo + ahi; */
+	return alo + ahi;
 }
 
 void
@@ -1862,12 +1867,15 @@ int Zf(verify_NTT)(const uint8_t *restrict h,
 	 */
 	modp_iNTT2(s1_i32, vrfy_igms[0], logn, p, p0i);
 
+	int shift_num = 2*logn + 2;
+	int shift_den = logn + 2;
+
 	for (u = 0; u < n; u++) {
-		t0[u] = fpp_of(modp_norm(s1_i32[u], p));
+		t0[u] = fpp_of(modp_norm(s1_i32[u], p), shift_num);
 	}
 
 	for (u = 0; u < n; u++) {
-		t1[u] = fpp_of(q00[u]);
+		t1[u] = fpp_of(q00[u], shift_den);
 	}
 	fpp_FFT(t0, logn);
 	fpp_FFT(t1, logn);
@@ -1877,6 +1885,9 @@ int Zf(verify_NTT)(const uint8_t *restrict h,
 		t0[u + hn] = fpp_div(t0[u + hn], t1[u]);
 	}
 	fpp_iFFT(t0, logn);
+	for (u = 0; u < n; u++) {
+		t0[u] <<= (shift_num - shift_den);
+	}
 
 	/*
 	 * verify_norm_NTT expects that q10 is in NTT representation in the second
@@ -1891,14 +1902,14 @@ int Zf(verify_NTT)(const uint8_t *restrict h,
 	if (logn <= 3) {
 		h0 = h[0];
 		for (u = 0; u < n; u ++) {
-			s0[u] = fpp_rint(fpp_half(fpp_add(fpp_of(h0 & 1), t0[u])));
+			s0[u] = fpp_rint(fpp_half(fpp_add(fpp_of(h0 & 1, 0), t0[u])));
 			h0 >>= 1;
 		}
 	} else {
 		for (u = 0, w = 0; w < n; u ++) {
 			h0 = h[u];
 			for (v = 0; v < 8; v ++, w ++) {
-				s0[w] = fpp_rint(fpp_half(fpp_add(fpp_of(h0 & 1), t0[w])));
+				s0[w] = fpp_rint(fpp_half(fpp_add(fpp_of(h0 & 1, 0), t0[w])));
 				h0 >>= 1;
 			}
 		}
