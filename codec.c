@@ -41,13 +41,6 @@
 #define BOUND_S0(logn) ((logn) == 10 ? 8192 : 2048)
 #define BOUND_S1(logn) ((logn) == 10 ? 1024 : 512)
 
-static const int16_t bound_q00[11] = {
-	0, 0 /* unused */, 64, 64, 128, 128, 256, 256, 512, 512, 1024
-};
-static const int16_t bound_q10[11] = {
-	0 /* unused */, 32, 64, 128, 256, 256, 512, 1024, 2048, 4096, 16384
-};
-
 static const size_t low_bits_q00[11] = {
 	0 /* unused */, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6
 };
@@ -74,7 +67,7 @@ Zf(encode_pubkey)(void *out, size_t max_out_len,
 	 * Make sure no coefficient is too large.
 	 */
 	for (u = 1; u < n/2; u ++) {
-		if (q00[u] < -bound_q00[logn] || q00[u] >= bound_q00[logn]) {
+		if (q00[u] < -Zf(bound_q00)[logn] || q00[u] >= Zf(bound_q00)[logn]) {
 			return 0;
 		}
 	}
@@ -83,7 +76,7 @@ Zf(encode_pubkey)(void *out, size_t max_out_len,
 	 * Make sure no coefficient is too large.
 	 */
 	for (u = 0; u < n; u ++) {
-		if (q10[u] < -bound_q10[logn] || q10[u] >= bound_q10[logn]) {
+		if (q10[u] < -Zf(bound_q10)[logn] || q10[u] >= Zf(bound_q10)[logn]) {
 			return 0;
 		}
 	}
@@ -284,7 +277,7 @@ Zf(decode_pubkey)(int16_t *q00, int16_t *q10,
 				break;
 			}
 			w += high_inc;
-			if (w >= bound_q00[logn]) {
+			if (w >= Zf(bound_q00)[logn]) {
 				return 0;
 			}
 		}
@@ -349,7 +342,7 @@ Zf(decode_pubkey)(int16_t *q00, int16_t *q10,
 				break;
 			}
 			w += high_inc;
-			if (w >= bound_q10[logn]) {
+			if (w >= Zf(bound_q10)[logn]) {
 				return 0;
 			}
 		}

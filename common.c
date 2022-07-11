@@ -17,6 +17,17 @@ const uint32_t Zf(l2bound_1024)[11] = {
 
 
 /* see inner.h */
+const int16_t Zf(bound_q00)[11] = {
+	0, 1 /* unused */, 64, 64, 128, 128, 256, 256, 512, 512, 1024
+};
+const int16_t Zf(bound_q10)[11] = {
+	0 /* unused */, 32, 64, 128, 256, 256, 512, 1024, 2048, 4096, 16384
+};
+const int32_t Zf(bound_q11)[11] = {
+	0, 1 /* unused */, 64, 128, 256, 512, 1024, 4096, 8192, 32768, 131072
+};
+
+/* see inner.h */
 void
 Zf(int8_to_fft)(fpr *p, const int8_t *x, unsigned logn)
 {

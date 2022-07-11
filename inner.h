@@ -452,6 +452,17 @@ extern const uint32_t Zf(l2bound_1024)[11];
 #define L2BOUND(logn) ((logn) == 10 ? Zf(l2bound_1024)[logn] : Zf(l2bound_512)[logn])
 
 /*
+ * A public key Q = [[q00,q01],[q10,q11]] should be rejected whenever one of
+ * q00, q10, q11 has a coefficient with absolute value greater than or equal to
+ * its respective bound with index logn, with the exception of the constant
+ * coefficient in q00 and q11 as these follow a chi-squared distribution and
+ * are therefore concentrated around their averages.
+ */
+extern const int16_t Zf(bound_q00)[11];
+extern const int16_t Zf(bound_q10)[11];
+extern const int32_t Zf(bound_q11)[11];
+
+/*
  * Convert an integer polynomial (with small values) to floating point numbers.
  * This also works correctly when p and x overlap.
  */

@@ -3859,7 +3859,7 @@ solve_NTRU_binary_depth0(unsigned logn,
 	Zf(poly_div_autoadj_fft)(rt3, rt2, logn);
 
 	/*
-	 * Babai (F, G) with respect to the GSO of (f, g) using Ducas-Prest's Fast
+	 * Babai (F, G) with respect to the GSO of (f, g) using Ducas--Prest's Fast
 	 * Fourier Orthogonalization ffNP routine.
 	 * Comment out if you don't want to perform ffNP.
 	 */
@@ -4077,16 +4077,20 @@ Zf(keygen)(inner_shake256_context *rng,
 	 *
 	 *  - Calculate the Gram matrix of the basis [[f, g], [F, G]].
 	 */
-	size_t n, u;
+	size_t n, hn, u;
 	uint8_t fg_okay;
-	int32_t norm;
+	int32_t norm, x;
 	prng p;
-	fpr *rt1, *rt2, *rt3;
+	fpr *rt1, *rt2, *rt3, *rt4, *rt5;
 
 	n = MKN(logn);
+	hn = n >> 1;
+
 	rt1 = (fpr *)tmp;
 	rt2 = rt1 + n;
 	rt3 = rt2 + n;
+	rt4 = rt3 + n;
+	rt5 = rt4 + n;
 
 	for (;;) {
 		/*
@@ -4173,7 +4177,69 @@ Zf(keygen)(inner_shake256_context *rng,
 			continue;
 		}
 
-		Zf(make_public)(f, g, F, G, iq00, iq10, logn, tmp);
+		/*
+		 * Calculate the public key.
+		 */
+		Zf(int8_to_fft)(rt1, f, logn);
+		Zf(int8_to_fft)(rt2, g, logn);
+		Zf(int8_to_fft)(rt3, F, logn);
+		Zf(int8_to_fft)(rt4, G, logn);
+
+		/*
+		 * Compute q10 = F*adj(f) + G*adj(g).
+		 */
+		Zf(poly_add_muladj_fft)(rt5, rt3, rt4, rt1, rt2, logn);
+
+		/*
+		 * Compute q00 = f*adj(f) + g*adj(g).
+		 */
+		Zf(poly_mulselfadj_fft)(rt1, logn);
+		Zf(poly_mulselfadj_fft)(rt2, logn);
+		Zf(poly_add)(rt1, rt2, logn);
+
+		/*
+		 * Compute q11 = F*adj(F) + G*adj(G).
+		 */
+		Zf(poly_mulselfadj_fft)(rt3, logn);
+		Zf(poly_mulselfadj_fft)(rt4, logn);
+		Zf(poly_add)(rt3, rt4, logn);
+
+		/*
+		 * Apply inverse FFT on q00, q10, q11, and also put values of q00, q10
+		 * in iq00, iq10 respectively.
+		 */
+		Zf(fft_to_int16)(iq00, rt1, logn);
+		Zf(iFFT)(rt3, logn);
+		Zf(fft_to_int16)(iq10, rt5, logn);
+
+		/*
+		 * Check the bounds on q00 and q11.
+		 */
+		for (u = 1; u < hn; u++) {
+			x = fpr_rint(rt1[u]);
+			fg_okay &= (x - Zf(bound_q00)[logn]) >> 31;
+			fg_okay &= (-Zf(bound_q00)[logn] - x) >> 31;
+			fg_okay &= x == -fpr_rint(rt1[n - u]);
+
+			x = fpr_rint(rt3[u]);
+			fg_okay &= (x - Zf(bound_q11)[logn]) >> 31;
+			fg_okay &= (-Zf(bound_q11)[logn] - x) >> 31;
+			fg_okay &= x == -fpr_rint(rt3[n - u]);
+		}
+
+		for (u = 0; u < n; u++) {
+			x = fpr_rint(rt5[u]);
+			fg_okay &= (x - Zf(bound_q10)[logn]) >> 31;
+			fg_okay &= (-Zf(bound_q10)[logn] - x) >> 31;
+		}
+
+		if (fg_okay == 0) {
+			/*
+			 * There was a coefficient that was too large.
+			 */
+			continue;
+		}
+
 		/*
 		 * A valid key pair is generated.
 		 */
