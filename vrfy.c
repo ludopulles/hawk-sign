@@ -1224,6 +1224,7 @@ verify_norm_NTT(const uint8_t *restrict h,
 	 * Store q00 in r0_i32 and assume q10 is in r1_i32 (NTT representation).
 	 */
 	int16_to_ntt(r0_i32, q00, gm, p, p0i, logn);
+	int16_to_ntt(r1_i32, q10, gm, p, p0i, logn);
 
 	// s0* q00 s0
 	for (u = 0; u < hn; u++) {
@@ -1311,7 +1312,7 @@ verify_norm_NTT(const uint8_t *restrict h,
  * Fixed point precision
  *
  *****************************************************************************/
-#define ACCURACY (22)
+#define ACCURACY (20)
 
 /*
  * This datastructure resembles a fixed-point precision number,
@@ -1330,6 +1331,7 @@ static inline fpp fpp_neg(fpp x) { return -x; }
 static inline fpp fpp_half(fpp x) { return x>>1; }
 static inline fpp fpp_add(fpp a, fpp b) { return a + b; }
 static inline fpp fpp_sub(fpp a, fpp b) { return a - b; }
+static inline fpp fpp_mul(fpp a, fpp b) { return (a * b) / (1 << ACCURACY); }
 static inline fpp fpp_div(fpp a, fpp b) { return a * (int64_t)(1 << ACCURACY) / b; }
 
 const int64_t fpp_gm_tab[] = {
@@ -1599,8 +1601,8 @@ fpp ffp_mul(fpp x, int64_t rt)
 	ahi = x >> 32;
 	alo = x & 0xFFFFFFFF;
 
-	alo = (alo * rt) >> 20;
-	ahi = (ahi * rt) << 12;
+	alo = (alo * rt) / (1 << 20);
+	ahi = (ahi * rt) * (1 << 12);
 	return alo + ahi;
 }
 
@@ -1687,7 +1689,7 @@ fpp_FFT(fpp *f, unsigned logn)
 		}
 		t = ht;
 
-		if (u % 2 == 0) {
+		if (u & 1) {
 			for (j1 = 0; j1 < n; j1++)
 				f[j1] >>= 1;
 		}
@@ -1782,8 +1784,10 @@ fpp_iFFT(fpp *f, unsigned logn)
 		t = dt;
 		m = hm;
 
-		for (j1 = 0; j1 < n; j1++)
-			f[j1] >>= 1;
+		if (u & 1) {
+			for (j1 = 0; j1 < n; j1++)
+				f[j1] >>= 1;
+		}
 	}
 
 	/*
@@ -1805,16 +1809,6 @@ Zf(uncompressed_verify_NTT)(const uint8_t *restrict h,
 	const int16_t *restrict q00, const int16_t *restrict q10,
 	unsigned logn, uint8_t *restrict tmp)
 {
-	size_t n;
-	uint32_t *q10_i32, p, p0i;
-
-	n = MKN(logn);
-
-	p = PRIMES[0];
-	p0i = modp_ninv31(p);
-	q10_i32 = ((uint32_t *)tmp) + 3*n;
-	int16_to_ntt(q10_i32, q10, vrfy_gms[0], p, p0i, logn);
-
 	return verify_norm_NTT(h, s0, s1, q00, q10, logn, tmp);
 }
 
@@ -1831,69 +1825,61 @@ int Zf(verify_NTT)(const uint8_t *restrict h,
 	 *
 	 * Use floats only here...
 	 */
-
 	size_t n, hn, u, v, w;
-	int16_t *s0;
-	uint32_t p, p0i, R2, *q10_i32, *s1_i32;
-	const uint32_t *gm;
-	fpp *t0, *t1;
+	fpp *t0, *t1, *t2;
 	uint8_t h0;
+	int16_t *s0;
+	const uint8_t *h1;
 
 	n = MKN(logn);
 	hn = n >> 1;
 
 	t0 = (fpp *)tmp;
 	t1 = t0 + n;
-
-	gm = vrfy_gms[0];
-
-	s0 = (int16_t *)(tmp + 16*n);
-	q10_i32 = (uint32_t *)s0;
-	s1_i32 = ((uint32_t *)tmp) + 3*n;
-
-	p = PRIMES[0];
-	p0i = modp_ninv31(p);
-	R2 = modp_R2(p, p0i);
-
-	int16_to_ntt(q10_i32, q10, gm, p, p0i, logn);
-	hash_to_ntt(s1_i32, SECOND_HASH(h, logn), s1, gm, R2, p, p0i, logn);
-	for (u = 0; u < n; u++) {
-		s1_i32[u] = modp_montymul(s1_i32[u], q10_i32[u], p, p0i);
-	}
+	t2 = t1 + n;
+	h1 = SECOND_HASH(h, logn);
+	s0 = (int16_t *)tmp;
 
 	/*
-	 * Convert (h1 - 2 s1) q10, calculated in NTT, to FFT format, so we can do
-	 * division and rounding.
+	 * Convert (h1 - 2 s1) q10, to FFT format, so we can do division and rounding.
 	 */
-	modp_iNTT2(s1_i32, vrfy_igms[0], logn, p, p0i);
 
-	int shift_num = 2*logn + 2;
-	int shift_den = logn + 2;
-
-	for (u = 0; u < n; u++) {
-		t0[u] = fpp_of(modp_norm(s1_i32[u], p), shift_num);
-	}
+	int shift_s1 = (logn >> 1) + 3;
+	// int shift_s1 = (logn + 1) >> 1;
+	int shift_q10 = logn;
+	int shift_den = logn;
 
 	for (u = 0; u < n; u++) {
+		int32_t hs = ((h1[u>>3] >> (u & 7)) & 1) - 2 * s1[u];
+
+		t0[u] = fpp_of(hs, shift_s1);
 		t1[u] = fpp_of(q00[u], shift_den);
+		t2[u] = fpp_of(q10[u], shift_q10);
 	}
 	fpp_FFT(t0, logn);
 	fpp_FFT(t1, logn);
+	fpp_FFT(t2, logn);
+
+	for (u = 0; u < hn; u++) {
+		int32_t a_re, a_im;
+
+		a_re = fpp_sub(fpp_mul(t0[u], t2[u]), fpp_mul(t0[u + hn], t2[u + hn]));
+		a_im = fpp_add(fpp_mul(t0[u], t2[u + hn]), fpp_mul(t0[u + hn], t2[u]));
+
+		t0[u] = a_re;
+		t0[u + hn] = a_im;
+	}
 
 	for (u = 0; u < hn; u++) {
 		t0[u] = fpp_div(t0[u], t1[u]);
 		t0[u + hn] = fpp_div(t0[u + hn], t1[u]);
 	}
-	fpp_iFFT(t0, logn);
-	for (u = 0; u < n; u++) {
-		t0[u] <<= (shift_num - shift_den);
-	}
 
-	/*
-	 * verify_norm_NTT expects that q10 is in NTT representation in the second
-	 * half of t1.
-	 */
-	memcpy(s1_i32, q10_i32, n * sizeof *q10_i32);
+	fpp_iFFT(t0, logn);
+
+	for (u = 0; u < n; u++) {
+		t0[u] *= (1 << (shift_s1 + shift_q10 - shift_den));
+	}
 
 	/*
 	 * Recover s0 with s0 = round(h0 / 2 + (h1 / 2 - s1) q10 / q00).
@@ -1915,5 +1901,5 @@ int Zf(verify_NTT)(const uint8_t *restrict h,
 		}
 	}
 
-	return verify_norm_NTT(h, s0, s1, q00, q10, logn, tmp);
+	return verify_norm_NTT(h, s0, s1, q00, q10, logn, (uint8_t*)(s0 + n));
 }

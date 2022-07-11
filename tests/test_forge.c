@@ -54,6 +54,35 @@ void test_simple_forgeries(unsigned logn)
 	}
 }
 
+
+
+const int num_keygen = 100;
+const int signs_per_kg = 100;
+const int totalruns = num_keygen * signs_per_kg;
+
+int count_fails(unsigned logn)
+{
+	size_t num_fails = 0;
+
+	// Generate key pair.
+	for (size_t u = 0; u < num_keygen; u++) {
+		Zf(keygen)(&sc, f, g, F, G, iq00, iq10, logn, tmp.b);
+		Zf(expand_seckey)(exp_sk, f, g, F, logn);
+
+		for (int rep = 0; rep < totalruns/num_keygen; rep++) {
+			// make a signature of a random message...
+			inner_shake256_extract(&sc, h, sizeof h);
+
+			// Compute the signature.
+			// while (!Zf(sign)(&sc, sig, exp_sk, h, logn, tmp.b)) {}
+			while (!Zf(sign_NTT)(&sc, sig, f, g, F, G, h, logn, tmp.b)) {}
+
+			num_fails += !Zf(verify_NTT)(h, sig, iq00, iq10, logn, tmp.b);
+		}
+	}
+	return num_fails;
+}
+
 int main() {
 	unsigned char seed[48] = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
@@ -69,9 +98,11 @@ int main() {
 	 * certain hash, but we claim no security for them anyway.
 	 */
 	for (unsigned logn = 6; logn <= MAXLOGN; logn++) {
-		printf("%d", logn);
-		fflush(stdout);
-		test_simple_forgeries(logn);
+		// printf("%d", logn);
+		// fflush(stdout);
+		// test_simple_forgeries(logn);
+		printf("%d: %d/%d fails\n",
+			logn, count_fails(logn), totalruns);
 	}
 
 	printf("\nNo simple forgeries were possible.\n");
