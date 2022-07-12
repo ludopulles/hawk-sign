@@ -932,7 +932,7 @@ modp_mkgm2(uint32_t *restrict gm, uint32_t *restrict igm, unsigned logn,
 	unsigned k;
 	uint32_t ig, x1, x2, R2;
 
-	n = (size_t)1 << logn;
+	n = MKN(logn);
 
 	/*
 	 * We want g such that g^(2N) = 1 mod p, but the provided
@@ -971,7 +971,7 @@ modp_NTT2_ext(uint32_t *a, size_t stride, const uint32_t *gm, unsigned logn,
 	if (logn == 0) {
 		return;
 	}
-	n = (size_t)1 << logn;
+	n = MKN(logn);
 	t = n;
 	for (m = 1; m < n; m <<= 1) {
 		size_t ht, u, v1;
@@ -1012,7 +1012,7 @@ modp_iNTT2_ext(uint32_t *a, size_t stride, const uint32_t *igm, unsigned logn,
 	if (logn == 0) {
 		return;
 	}
-	n = (size_t)1 << logn;
+	n = MKN(logn);
 	t = 1;
 	for (m = n; m > 1; m >>= 1) {
 		size_t hm, dt, u, v1;
@@ -1078,7 +1078,7 @@ modp_poly_rec_res(uint32_t *f, unsigned logn,
 {
 	size_t hn, u;
 
-	hn = (size_t)1 << (logn - 1);
+	hn = MKN(logn - 1);
 	for (u = 0; u < hn; u ++) {
 		uint32_t w0, w1;
 
@@ -2466,7 +2466,7 @@ make_fg_step(uint32_t *data, unsigned logn, unsigned depth,
 	uint32_t *fd, *gd, *fs, *gs, *gm, *igm, *t1;
 	const small_prime *primes;
 
-	n = (size_t)1 << logn;
+	n = MKN(logn);
 	hn = n >> 1;
 
 	if (logn + depth == 10) {
@@ -2717,7 +2717,7 @@ solve_NTRU_intermediate(unsigned logn_top,
 	const small_prime *primes;
 
 	logn = logn_top - depth;
-	n = (size_t)1 << logn;
+	n = MKN(logn);
 	hn = n >> 1;
 
 	/*
@@ -3278,9 +3278,9 @@ solve_NTRU_binary_depth1(unsigned logn_top,
 	uint32_t *x, *y;
 
 	depth = 1;
-	n_top = (size_t)1 << logn_top;
+	n_top = MKN(logn_top);
 	logn = logn_top - depth;
-	n = (size_t)1 << logn;
+	n = MKN(logn);
 	hn = n >> 1;
 
 	/*
@@ -3655,7 +3655,7 @@ solve_NTRU_binary_depth0(unsigned logn,
 	uint32_t *gm, *igm, *ft, *gt;
 	fpr *rt2, *rt3;
 
-	n = (size_t)1 << logn;
+	n = MKN(logn);
 	hn = n >> 1;
 
 	/*

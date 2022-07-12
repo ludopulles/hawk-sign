@@ -214,7 +214,7 @@ Zf(FFT)(fpr *f, unsigned logn)
 	 * Subsequent iterations are truncated to use only the first
 	 * half of values.
 	 */
-	n = (size_t)1 << logn;
+	n = MKN(logn);
 	hn = n >> 1;
 	t = hn;
 	for (u = 1, m = 2; u < logn; u ++, m <<= 1) {
@@ -296,7 +296,7 @@ Zf(iFFT)(fpr *f, unsigned logn)
 	 */
 	size_t u, n, hn, t, m;
 
-	n = (size_t)1 << logn;
+	n = MKN(logn);
 	t = 1;
 	m = n;
 	hn = n >> 1;
@@ -352,7 +352,7 @@ Zf(poly_add)(
 {
 	size_t n, u;
 
-	n = (size_t)1 << logn;
+	n = MKN(logn);
 	for (u = 0; u < n; u ++) {
 		a[u] = fpr_add(a[u], b[u]);
 	}
@@ -365,7 +365,7 @@ Zf(poly_sub)(
 {
 	size_t n, u;
 
-	n = (size_t)1 << logn;
+	n = MKN(logn);
 	for (u = 0; u < n; u ++) {
 		a[u] = fpr_sub(a[u], b[u]);
 	}
@@ -377,7 +377,7 @@ Zf(poly_neg)(fpr *a, unsigned logn)
 {
 	size_t n, u;
 
-	n = (size_t)1 << logn;
+	n = MKN(logn);
 	for (u = 0; u < n; u ++) {
 		a[u] = fpr_neg(a[u]);
 	}
@@ -389,7 +389,7 @@ Zf(poly_adj_fft)(fpr *a, unsigned logn)
 {
 	size_t n, u;
 
-	n = (size_t)1 << logn;
+	n = MKN(logn);
 	for (u = (n >> 1); u < n; u ++) {
 		a[u] = fpr_neg(a[u]);
 	}
@@ -402,7 +402,7 @@ Zf(poly_mul_fft)(
 {
 	size_t n, hn, u;
 
-	n = (size_t)1 << logn;
+	n = MKN(logn);
 	hn = n >> 1;
 	for (u = 0; u < hn; u ++) {
 		fpr a_re, a_im, b_re, b_im;
@@ -422,7 +422,7 @@ Zf(poly_prod_fft)(fpr *restrict d,
 {
 	size_t n, hn, u;
 
-	n = (size_t)1 << logn;
+	n = MKN(logn);
 	hn = n >> 1;
 	for (u = 0; u < hn; u ++) {
 		fpr a_re, a_im, b_re, b_im;
@@ -442,7 +442,7 @@ Zf(poly_muladj_fft)(
 {
 	size_t n, hn, u;
 
-	n = (size_t)1 << logn;
+	n = MKN(logn);
 	hn = n >> 1;
 	for (u = 0; u < hn; u ++) {
 		fpr a_re, a_im, b_re, b_im;
@@ -465,7 +465,7 @@ Zf(poly_mulselfadj_fft)(fpr *a, unsigned logn)
 	 */
 	size_t n, hn, u;
 
-	n = (size_t)1 << logn;
+	n = MKN(logn);
 	hn = n >> 1;
 	for (u = 0; u < hn; u ++) {
 		fpr a_re, a_im;
@@ -488,7 +488,7 @@ Zf(poly_prod_selfadj_fft)(fpr *restrict d, const fpr *restrict a,
 	 */
 	size_t n, hn, u;
 
-	n = (size_t)1 << logn;
+	n = MKN(logn);
 	hn = n >> 1;
 	for (u = 0; u < hn; u ++) {
 		fpr a_re, a_im;
@@ -506,7 +506,7 @@ Zf(poly_mulconst)(fpr *a, fpr x, unsigned logn)
 {
 	size_t n, u;
 
-	n = (size_t)1 << logn;
+	n = MKN(logn);
 	for (u = 0; u < n; u ++) {
 		a[u] = fpr_mul(a[u], x);
 	}
@@ -519,7 +519,7 @@ Zf(poly_div_fft)(
 {
 	size_t n, hn, u;
 
-	n = (size_t)1 << logn;
+	n = MKN(logn);
 	hn = n >> 1;
 	for (u = 0; u < hn; u ++) {
 		fpr a_re, a_im, b_re, b_im;
@@ -539,7 +539,7 @@ Zf(poly_invnorm2_fft)(fpr *restrict d,
 {
 	size_t n, hn, u;
 
-	n = (size_t)1 << logn;
+	n = MKN(logn);
 	hn = n >> 1;
 	for (u = 0; u < hn; u ++) {
 		fpr a_re, a_im;
@@ -563,7 +563,7 @@ Zf(poly_add_muladj_fft)(fpr *restrict d,
 {
 	size_t n, hn, u;
 
-	n = (size_t)1 << logn;
+	n = MKN(logn);
 	hn = n >> 1;
 	for (u = 0; u < hn; u ++) {
 		fpr F_re, F_im, G_re, G_im;
@@ -594,7 +594,7 @@ Zf(poly_add_mul_fft)(fpr *restrict d,
 {
 	size_t n, hn, u;
 
-	n = (size_t)1 << logn;
+	n = MKN(logn);
 	hn = n >> 1;
 	for (u = 0; u < hn; u ++) {
 		fpr F_re, F_im, G_re, G_im;
@@ -624,7 +624,7 @@ Zf(poly_mul_autoadj_fft)(
 {
 	size_t n, hn, u;
 
-	n = (size_t)1 << logn;
+	n = MKN(logn);
 	hn = n >> 1;
 	for (u = 0; u < hn; u ++) {
 		a[u] = fpr_mul(a[u], b[u]);
@@ -639,7 +639,7 @@ Zf(poly_div_autoadj_fft)(
 {
 	size_t n, hn, u;
 
-	n = (size_t)1 << logn;
+	n = MKN(logn);
 	hn = n >> 1;
 	for (u = 0; u < hn; u ++) {
 		fpr ib;
@@ -658,7 +658,7 @@ Zf(poly_LDL_fft)(
 {
 	size_t n, hn, u;
 
-	n = (size_t)1 << logn;
+	n = MKN(logn);
 	hn = n >> 1;
 	for (u = 0; u < hn; u ++) {
 		fpr g00_re, g00_im, g01_re, g01_im, g11_re, g11_im;
@@ -687,7 +687,7 @@ Zf(poly_LDLmv_fft)(
 {
 	size_t n, hn, u;
 
-	n = (size_t)1 << logn;
+	n = MKN(logn);
 	hn = n >> 1;
 	for (u = 0; u < hn; u ++) {
 		fpr g00_re, g00_im, g01_re, g01_im, g11_re, g11_im;
@@ -721,7 +721,7 @@ Zf(poly_split_fft)(
 	 */
 	size_t n, hn, qn, u;
 
-	n = (size_t)1 << logn;
+	n = MKN(logn);
 	hn = n >> 1;
 	qn = hn >> 1;
 
@@ -764,7 +764,7 @@ Zf(poly_merge_fft)(
 {
 	size_t n, hn, qn, u;
 
-	n = (size_t)1 << logn;
+	n = MKN(logn);
 	hn = n >> 1;
 	qn = hn >> 1;
 
@@ -808,7 +808,7 @@ Zf(poly_merge_fft)(
 {
 	size_t n, hn, u;
 
-	n = (size_t)1 << logn;
+	n = MKN(logn);
 	hn = n >> 1;
 	for (u = 0; u < hn; u ++) {
 		fpr y0_re, y0_im, y1_re, y1_im;
