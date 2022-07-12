@@ -419,8 +419,8 @@ keygen_count_fails(inner_shake256_context *rng,
 	int8_t *restrict F, int8_t *restrict G,
 	int16_t *restrict iq00, int16_t *restrict iq10,
 	unsigned logn, uint8_t *restrict tmp,
-	int *normfg_even_fails, int *normfg_fails,
-	int *norminvq00_fails, int *NTRU_fails)
+	int *normfg_even_fails, int *normfg_fails, int *norminvq00_fails,
+	int *NTRU_fails, int *coeff_error)
 {
 	/*
 	 * Algorithm is the following:
@@ -436,16 +436,20 @@ keygen_count_fails(inner_shake256_context *rng,
 	 *
 	 *  - Calculate the Gram matrix of the basis [[f, g], [F, G]].
 	 */
-	size_t n, u;
+	size_t n, hn, u;
 	uint8_t fg_okay;
-	int32_t norm;
+	int32_t norm, x;
 	prng p;
-	fpr *rt1, *rt2, *rt3;
+	fpr *rt1, *rt2, *rt3, *rt4, *rt5;
 
 	n = MKN(logn);
+	hn = n >> 1;
+
 	rt1 = (fpr *)tmp;
 	rt2 = rt1 + n;
 	rt3 = rt2 + n;
+	rt4 = rt3 + n;
+	rt5 = rt4 + n;
 
 	for (;;) {
 		/*
@@ -463,10 +467,7 @@ keygen_count_fails(inner_shake256_context *rng,
 		 * We require that N(f) and N(g) are both odd (the binary GCD in the
 		 * NTRU solver requires it), so we require (fg_okay & 1) == 1.
 		 */
-		// fg_okay = poly_small_mkgauss(&p, f, logn) & poly_small_mkgauss(&p, g, logn) & 1u;
-		while (!poly_small_mkgauss(&p, f, logn)) {};
-		while (!poly_small_mkgauss(&p, g, logn)) {};
-		fg_okay = 1u;
+		fg_okay = poly_small_mkgauss(&p, f, logn) & poly_small_mkgauss(&p, g, logn) & 1u;
 
 		if (fg_okay == 0u) {
 			(*normfg_even_fails)++;
@@ -542,7 +543,70 @@ keygen_count_fails(inner_shake256_context *rng,
 			continue;
 		}
 
-		Zf(make_public)(f, g, F, G, iq00, iq10, logn, tmp);
+		/*
+		 * Calculate the public key.
+		 */
+		Zf(int8_to_fft)(rt1, f, logn);
+		Zf(int8_to_fft)(rt2, g, logn);
+		Zf(int8_to_fft)(rt3, F, logn);
+		Zf(int8_to_fft)(rt4, G, logn);
+
+		/*
+		 * Compute q10 = F*adj(f) + G*adj(g).
+		 */
+		Zf(poly_add_muladj_fft)(rt5, rt3, rt4, rt1, rt2, logn);
+
+		/*
+		 * Compute q00 = f*adj(f) + g*adj(g).
+		 */
+		Zf(poly_mulselfadj_fft)(rt1, logn);
+		Zf(poly_mulselfadj_fft)(rt2, logn);
+		Zf(poly_add)(rt1, rt2, logn);
+
+		/*
+		 * Compute q11 = F*adj(F) + G*adj(G).
+		 */
+		Zf(poly_mulselfadj_fft)(rt3, logn);
+		Zf(poly_mulselfadj_fft)(rt4, logn);
+		Zf(poly_add)(rt3, rt4, logn);
+
+		/*
+		 * Apply inverse FFT on q00, q10, q11, and also put values of q00, q10
+		 * in iq00, iq10 respectively.
+		 */
+		Zf(fft_to_int16)(iq00, rt1, logn);
+		Zf(iFFT)(rt3, logn);
+		Zf(fft_to_int16)(iq10, rt5, logn);
+
+		/*
+		 * Check the bounds on q00 and q11.
+		 */
+		for (u = 1; u < hn; u++) {
+			x = fpr_rint(rt1[u]);
+			fg_okay &= (x - Zf(bound_q00)[logn]) >> 31;
+			fg_okay &= (-Zf(bound_q00)[logn] - x) >> 31;
+			fg_okay &= x == -fpr_rint(rt1[n - u]);
+
+			x = fpr_rint(rt3[u]);
+			fg_okay &= (x - Zf(bound_q11)[logn]) >> 31;
+			fg_okay &= (-Zf(bound_q11)[logn] - x) >> 31;
+			fg_okay &= x == -fpr_rint(rt3[n - u]);
+		}
+
+		for (u = 0; u < n; u++) {
+			x = fpr_rint(rt5[u]);
+			fg_okay &= (x - Zf(bound_q10)[logn]) >> 31;
+			fg_okay &= (-Zf(bound_q10)[logn] - x) >> 31;
+		}
+
+		if (fg_okay == 0) {
+			/*
+			 * There was a coefficient that was too large.
+			 */
+			*coeff_error++;
+			continue;
+		}
+
 		/*
 		 * A valid key pair is generated.
 		 */
@@ -558,7 +622,6 @@ const size_t logn = 10, n = MKN(logn);
 void measure_keygen() {
 	uint8_t b[48 << logn];
 	int8_t f[n], g[n], F[n], G[n];
-	fpr q00[n], q10[n];
 	int16_t iq00[n], iq10[n];
 	unsigned char seed[48];
 	inner_shake256_context sc;
@@ -577,15 +640,13 @@ void measure_keygen() {
 	size_t tot_h00 = 0, tot_h10 = 0, tot_enc = 0;
 	size_t sq_h00 = 0, sq_h10 = 0, sq_enc = 0;
 
-	int normfg_even_fails = 0, normfg_fails = 0;
-	int norminvq00_fails = 0, NTRU_fails = 0;
+	int normfg_even_fails = 0, normfg_fails = 0, norminvq00_fails = 0,
+		NTRU_fails = 0, coeff_error = 0;
 	for (int i = 0; i < n_repetitions; i++) {
 		// Generate key pair.
 		keygen_count_fails(&sc, f, g, F, G, iq00, iq10, logn, b,
-			&normfg_even_fails, &normfg_fails, &norminvq00_fails, &NTRU_fails);
-
-		Zf(fft_to_int16)(iq00, q00, logn);
-		Zf(fft_to_int16)(iq10, q10, logn);
+			&normfg_even_fails, &normfg_fails, &norminvq00_fails, &NTRU_fails,
+			&coeff_error);
 
 		size_t pubkey_sz_hq00 = Zf(huffman_encode_q00)(NULL, 0, iq00, logn);
 		size_t pubkey_sz_hq10 = Zf(huffman_encode_q10)(NULL, 0, iq10, logn);
@@ -612,9 +673,8 @@ void measure_keygen() {
 	 * Crunch analysis on what may fail during basis completion, once f, g are
 	 * generated.
 	 */
-	int samples = n_repetitions
-		+ normfg_even_fails + normfg_fails
-		+ norminvq00_fails + NTRU_fails;
+	int samples = n_repetitions + normfg_even_fails + normfg_fails
+		+ norminvq00_fails + NTRU_fails + coeff_error;
 	printf("Pr[ N(f) or N(g) even       ] = %.2f%%\n",
 		100.0 * normfg_even_fails / samples);
 	printf("Pr[ || (f,g) ||^2 too small ] = %.2f%%\n",
@@ -623,6 +683,8 @@ void measure_keygen() {
 		100.0 * norminvq00_fails / samples);
 	printf("Pr[ NTRU_solve fails        ] = %.2f%%\n",
 		100.0 * NTRU_fails / samples);
+	printf("Pr[ coeff too large         ] = %.2f%%\n",
+		100.0 * coeff_error / samples);
 	printf("Pr[ keygen works            ] = %.2f%%\n",
 		100.0 * n_repetitions / samples);
 
