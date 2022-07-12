@@ -32,6 +32,7 @@
  * ===========================(LICENSE END)=============================
  *
  * @author   Thomas Pornin <thomas.pornin@nccgroup.com>
+ * @author   Ludo Pulles <ludo.pulles@cwi.nl>
  */
 
 /*
