@@ -188,7 +188,7 @@ void measure_sign_speed()
 	nr_cor = 0;
 	gettimeofday(&t0, NULL);
 	for (int rep = 0; rep < num_samples; rep++) {
-		nr_cor += Zf(verify_nearest_plane)(pregen_h[rep], s0, pregen_s[rep], q00, q10, q11, logn, b);
+		nr_cor += Zf(verify_nearest_plane)(pregen_h[rep], pregen_s[rep], q00, q10, q11, logn, b);
 	}
 	gettimeofday(&t1, NULL);
 	ll vnp_us = time_diff(&t0, &t1);

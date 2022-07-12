@@ -239,7 +239,7 @@ Zf(recover_and_verify)(const uint8_t *restrict h,
 /* see inner.h */
 int
 Zf(verify_nearest_plane)(const uint8_t *restrict h,
-	int16_t *restrict s0, const int16_t *restrict s1,
+	const int16_t *restrict s1,
 	const fpr *restrict q00, const fpr *restrict q10, const fpr *restrict q11,
 	unsigned logn, uint8_t *restrict tmp)
 {
@@ -250,11 +250,13 @@ Zf(verify_nearest_plane)(const uint8_t *restrict h,
 	 */
 
 	size_t n;
+	int16_t *restrict s0;
 	fpr *t0, *t1;
 
 	n = MKN(logn);
 	t0 = (fpr *)tmp;
 	t1 = t0 + n;
+	s0 = (int16_t *)(t1 + n);
 
 	hash_to_fft(t0, h, NULL, logn);
 	hash_to_fft(t1, SECOND_HASH(h, logn), s1, logn);
@@ -274,8 +276,7 @@ Zf(verify_nearest_plane)(const uint8_t *restrict h,
 	/*
 	 * Now run the casual verification.
 	 */
-	return Zf(in_positive_half)(s1, SECOND_HASH(h, logn), logn)
-		&& Zf(uncompressed_verify)(h, s0, s1, q00, q10, q11, logn, tmp);
+	return Zf(uncompressed_verify)(h, s0, s1, q00, q10, q11, logn, tmp);
 }
 
 /* see inner.h */

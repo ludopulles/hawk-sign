@@ -422,7 +422,6 @@ extern const size_t HAWK_PUBKEY_SIZE[11];
 #define HAWK_TMPSIZE_UNCOMPRESSED_SIGN_NTT(logn) \
 	(HAWK_HASH_SIZE(logn) + (15u << (logn)) + 7) // 7 in hawk.c, 4*2 in sign
 
-
 /*
  * Temporary buffer size for dynamically generating a signature.
  */
