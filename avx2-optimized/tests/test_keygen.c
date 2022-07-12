@@ -603,7 +603,7 @@ keygen_count_fails(inner_shake256_context *rng,
 			/*
 			 * There was a coefficient that was too large.
 			 */
-			*coeff_error++;
+			(*coeff_error)++;
 			continue;
 		}
 
