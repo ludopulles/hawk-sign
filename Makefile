@@ -8,7 +8,9 @@ CFLAGS = -W -Wall -Wshadow -O2 -fdiagnostics-color=always -DHAWK_RECOVER_CHECK
 LIBS = -lm
 
 OBJ = build/common.o build/codec.o build/fft.o build/ffo.o build/fpr.o build/keygen.o build/ntt.o build/rng.o build/shake.o build/sign.o build/vrfy.o
-PROGS = bin/test_forge bin/speed bin/test_codec bin/test_sampler
+PROGS = \
+	bin/test_forge bin/speed bin/test_codec bin/test_sampler \
+
 
 HEAD = fpr.h inner.h
 
@@ -23,17 +25,19 @@ clean:
 	-rm -f $(OBJ) build/hawk.o $(PROGS)
 
 # Binaries:
+
+# C
 bin/test_forge: tests/test_forge.c $(OBJ)
 	$(CC) $(CFLAGS) -o bin/test_forge $(OBJ) tests/test_forge.c $(LIBS)
-
 bin/speed: tests/speed.c build/hawk.o $(OBJ)
 	$(CC) $(CFLAGS) -o bin/speed tests/speed.c build/hawk.o $(OBJ) $(LIBS)
-
 bin/test_codec: tests/test_codec.c $(OBJ)
 	$(CC) $(CFLAGS) -o bin/test_codec tests/test_codec.c $(OBJ) $(LIBS)
-
 bin/test_sampler: tests/test_sampler.c build/rng.o build/shake.o
 	$(CC) $(CFLAGS) -o bin/test_sampler tests/test_sampler.c $(LIBS)
+
+# C++
+
 
 # Object files:
 build/common.o: common.c $(HEAD)

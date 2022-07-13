@@ -10,7 +10,9 @@ CXX = g++
 CXXFLAGS = --std=c++17 $(CFLAGS)
 
 OBJ = build/common.o build/codec.o build/fft.o build/ffo.o build/fpr.o build/keygen.o build/ntt.o build/rng.o build/shake.o build/sign.o build/vrfy.o
-PROGS = bin/test_keygen bin/test_sign bin/config_fg bin/config_FG bin/test_babai bin/test_enum bin/signature_size bin/speed bin/test_decompress_sig bin/skpk_size
+PROGS = \
+	bin/test_keygen bin/config_fg bin/config_FG bin/speed bin/skpk_size \
+	bin/test_sign bin/test_babai bin/test_enum bin/signature_size bin/test_decompress_sig bin/fixedpoint
 
 HEAD = fpr.h inner.h
 
@@ -48,7 +50,9 @@ bin/test_enum: tests/test_enum.cpp $(OBJ)
 bin/signature_size: tests/signature_size.cpp $(OBJ)
 	$(CXX) $(CXXFLAGS) -o bin/signature_size $(OBJ) tests/signature_size.cpp $(LIBS)
 bin/test_decompress_sig: tests/test_decompress_sig.cpp $(OBJ)
-	$(CXX) $(CFLAGS) -o bin/test_decompress_sig tests/test_decompress_sig.cpp $(OBJ) $(LIBS)
+	$(CXX) $(CXXFLAGS) -o bin/test_decompress_sig tests/test_decompress_sig.cpp $(OBJ) $(LIBS)
+bin/fixedpoint: tests/fixedpoint.cpp $(OBJ)
+	$(CXX) $(CXXFLAGS) -o bin/fixedpoint tests/fixedpoint.cpp $(OBJ) $(LIBS)
 
 # Object files:
 build/common.o: common.c $(HEAD)
