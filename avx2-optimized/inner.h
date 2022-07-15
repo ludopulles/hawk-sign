@@ -497,6 +497,7 @@ prng_get_80_bits(prng *p, uint16_t *bit16, uint64_t *bit64)
  *   fpr fpr_ptwo63m1          2^63-1
  *   fpr fpr_mtwo63m1          -(2^63-1)
  *   fpr fpr_ptwo63            2^63
+ *   fpr fpr_almost_one        0.98
  */
 #include "fpr.h"
 

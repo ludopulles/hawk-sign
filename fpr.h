@@ -235,6 +235,7 @@ static const fpr fpr_mtwo31m1 = 13970166044099084288U;
 static const fpr fpr_ptwo63m1 = 4890909195324358656;
 static const fpr fpr_mtwo63m1 = 14114281232179134464U;
 static const fpr fpr_ptwo63 = 4890909195324358656;
+static const fpr fpr_almost_one = 4607002274814922588;
 
 static inline int64_t
 fpr_rint(fpr x)

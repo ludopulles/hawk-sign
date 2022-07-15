@@ -546,8 +546,6 @@ Zf(uncompressed_sign)(inner_shake256_context *rng,
 	return norm_okay;
 }
 
-static const fpr almost_one = { 0.99 };
-
 /* see inner.h */
 int
 Zf(sign_dyn)(inner_shake256_context *rng, int16_t *restrict s1,
@@ -597,7 +595,7 @@ Zf(sign_dyn)(inner_shake256_context *rng, int16_t *restrict s1,
 	Zf(iFFT)(bF, logn);
 
 	for (u = 0; u < n; u++) {
-		if (!fpr_lt(fpr_neg(almost_one), bF[u]) || !fpr_lt(bF[u], almost_one)) {
+		if (!fpr_lt(fpr_neg(fpr_almost_one), bF[u]) || !fpr_lt(bF[u], fpr_almost_one)) {
 			return 0;
 		}
 	}
@@ -673,7 +671,7 @@ Zf(sign)(inner_shake256_context *rng, int16_t *restrict s1,
 	Zf(iFFT)(res, logn);
 
 	for (u = 0; u < n; u++) {
-		if (!fpr_lt(fpr_neg(almost_one), res[u]) || !fpr_lt(res[u], almost_one)) {
+		if (!fpr_lt(fpr_neg(fpr_almost_one), res[u]) || !fpr_lt(res[u], fpr_almost_one)) {
 			return 0;
 		}
 	}
