@@ -1675,7 +1675,7 @@ fpp_FFT(fpp *f, unsigned logn)
 		t = ht;
 
 		for (j1 = 0; j1 < n; j1++) {
-			f[j1] >>= 1;
+			f[j1] /= 2;
 		}
 	}
 }
@@ -1767,13 +1767,16 @@ fpp_iFFT(fpp *f, unsigned logn)
 		m = hm;
 
 		for (j1 = 0; j1 < n; j1++) {
-			f[j1] >>= 1;
+			f[j1] /= 2;
 		}
 	}
 }
 // =============================================================================
 
 /* see inner.h */
+static const int16_t bound_s0_bits[11] = {
+	0 /* unused */, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13
+};
 static const int16_t bound_s1_bits[11] = {
 	0 /* unused */, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10
 };
@@ -1798,7 +1801,8 @@ int Zf(verify_NTT)(const uint8_t *restrict h,
 	 * Use floats only here...
 	 */
 	size_t n, hn, u, v, w;
-	fpp *t0, *t1, *t2, cst_term;
+	fpp *t0, *t1, *t2;
+	int64_t cst_term;
 	uint8_t hash, *atmp;
 	int16_t *s0;
 
@@ -1820,7 +1824,15 @@ int Zf(verify_NTT)(const uint8_t *restrict h,
 	unsigned shift_s1  = 30 - (1 + bound_s1_bits[logn]);
 	unsigned shift_q10 = 30 - bound_q10_bits[logn];
 	unsigned shift_q00 = 30 - bound_q00_bits[logn];
-	unsigned shift_back = shift_s1 + shift_q10 - shift_q00 - (logn - 1);
+
+	unsigned shift_s0 = shift_s1 + shift_q10 - shift_q00;
+	unsigned before_inverse = 30 - (1 + bound_s0_bits[logn]);
+
+	unsigned shift_back = shift_s0 - (logn - 1);
+	if (before_inverse < shift_s0) {
+		shift_back = before_inverse - (logn - 1);
+	}
+
 
 	/*
 	 * Throughout FFT, the following quantities are bounded in size as follows:
@@ -1859,16 +1871,21 @@ int Zf(verify_NTT)(const uint8_t *restrict h,
 	fpp_FFT(t1, logn);
 	fpp_FFT(t2, logn);
 
-	cst_term = (fpp)q00[0] * (1 << (shift_q00 - (logn - 1)));
+	cst_term = (int64_t)q00[0] * (1 << (shift_q00 - (logn - 1)));
 	for (u = 0; u < hn; u++) {
-		int64_t re, im;
+		int64_t re, im, div;
 
-		re = (int64_t)t0[u] * t1[u     ] - (int64_t)t0[u + hn] * t1[u + hn];
-		im = (int64_t)t0[u] * t1[u + hn] + (int64_t)t0[u + hn] * t1[u     ];
+		div = cst_term + (int64_t)t2[u];
+		re = ((int64_t)t0[u] * t1[u     ] - (int64_t)t0[u + hn] * t1[u + hn]) / div;
+		im = ((int64_t)t0[u] * t1[u + hn] + (int64_t)t0[u + hn] * t1[u     ]) / div;
 
-		t2[u] += cst_term;
-		t0[u     ] = re / t2[u];
-		t0[u + hn] = im / t2[u];
+		if (before_inverse < shift_s0) {
+			re /= 1 << (shift_s0 - before_inverse);
+			im /= 1 << (shift_s0 - before_inverse);
+		}
+
+		t0[u     ] = re;
+		t0[u + hn] = im;
 	}
 
 	fpp_iFFT(t0, logn);

@@ -546,6 +546,7 @@ Zf(uncompressed_sign)(inner_shake256_context *rng,
 	return norm_okay;
 }
 
+static const fpr almost_one = { 0.99 };
 
 /* see inner.h */
 int
@@ -596,7 +597,7 @@ Zf(sign_dyn)(inner_shake256_context *rng, int16_t *restrict s1,
 	Zf(iFFT)(bF, logn);
 
 	for (u = 0; u < n; u++) {
-		if (!fpr_lt(fpr_neg(fpr_one), bF[u]) || !fpr_lt(bF[u], fpr_one)) {
+		if (!fpr_lt(fpr_neg(almost_one), bF[u]) || !fpr_lt(bF[u], almost_one)) {
 			return 0;
 		}
 	}
@@ -615,6 +616,8 @@ Zf(sign_dyn)(inner_shake256_context *rng, int16_t *restrict s1,
 	flag = (uint16_t)Zf(in_positive_half)(s1, SECOND_HASH(h, logn), logn);
 	conditional_flip(flag, s1, SECOND_HASH(h, logn), logn);
 
+	if (logn <= 6 && !Zf(in_positive_half)(s1, SECOND_HASH(h, logn), logn))
+		return 0;
 	return norm_okay;
 }
 
@@ -670,7 +673,7 @@ Zf(sign)(inner_shake256_context *rng, int16_t *restrict s1,
 	Zf(iFFT)(res, logn);
 
 	for (u = 0; u < n; u++) {
-		if (!fpr_lt(fpr_neg(fpr_one), res[u]) || !fpr_lt(res[u], fpr_one)) {
+		if (!fpr_lt(fpr_neg(almost_one), res[u]) || !fpr_lt(res[u], almost_one)) {
 			return 0;
 		}
 	}
@@ -689,6 +692,8 @@ Zf(sign)(inner_shake256_context *rng, int16_t *restrict s1,
 	flag = (uint16_t)Zf(in_positive_half)(s1, SECOND_HASH(h, logn), logn);
 	conditional_flip(flag, s1, SECOND_HASH(h, logn), logn);
 
+	if (logn <= 6 && !Zf(in_positive_half)(s1, SECOND_HASH(h, logn), logn))
+		return 0;
 	return norm_okay;
 }
 
