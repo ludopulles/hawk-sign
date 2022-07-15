@@ -13,8 +13,8 @@ extern "C" {
 using namespace std;
 
 constexpr int MAXN = 1024;
-constexpr int n_repetitions = 1 << 20;
-constexpr int spread_keygen = 1 << 7;
+constexpr int n_repetitions = 1 << 14;
+constexpr int spread_keygen = 1 << 6;
 
 double max_sizes[4][11][11] = {};
 
@@ -71,16 +71,14 @@ void _FFT(double *f, unsigned logn, int type)
 		}
 		t = ht;
 
-		if (u & 1) {
-			for (j1 = 0; j1 < n; j1++) {
-				f[j1] /= 2;
-			}
-		}
-
 		for (size_t i = 0; i < n; i++) {
 			double x = fabs(f[i]);
 			if (x > max_sizes[type][logn][u])
 				max_sizes[type][logn][u] = x;
+		}
+
+		for (j1 = 0; j1 < n; j1++) {
+			f[j1] /= 2;
 		}
 	}
 }
@@ -96,8 +94,8 @@ void _iFFT(double *f, unsigned logn)
 
 	for (size_t i = 0; i < n; i++) {
 		double x = fabs(f[i]);
-		if (x > max_sizes[3][logn][logn])
-			max_sizes[3][logn][logn] = x;
+		if (x > max_sizes[3][logn][logn - 1])
+			max_sizes[3][logn][logn - 1] = x;
 	}
 
 	for (u = logn; u > 1; u --) {
@@ -132,15 +130,10 @@ void _iFFT(double *f, unsigned logn)
 		t = dt;
 		m = hm;
 
-		if (u & 1) {
-			for (j1 = 0; j1 < n; j1++)
-				f[j1] /= 2;
-		}
-
 		for (size_t i = 0; i < n; i++) {
 			double x = fabs(f[i]);
-			if (x > max_sizes[3][logn][u - 1])
-				max_sizes[3][logn][u - 1] = x;
+			if (x > max_sizes[3][logn][u - 2])
+				max_sizes[3][logn][u - 2] = x;
 		}
 	}
 }
@@ -149,12 +142,13 @@ void measure_sizes(unsigned logn) {
 	uint8_t b[48 * MAXN], h[MAXN / 4];
 	int8_t f[MAXN], g[MAXN], F[MAXN], G[MAXN];
 	int16_t iq00[MAXN], iq10[MAXN], s1[MAXN];
-	size_t n;
+	size_t n, hn;
 	double t0[MAXN], t1[MAXN], t2[MAXN];
 	unsigned char seed[48];
 	inner_shake256_context sc;
 
 	n = MKN(logn);
+	hn = n >> 1;
 
 	// Initialize a RNG.
 	Zf(get_seed)(seed, sizeof seed);
@@ -184,11 +178,21 @@ void measure_sizes(unsigned logn) {
 		_FFT(t0, logn, 0);
 		_FFT(t1, logn, 1);
 		_FFT(t2, logn, 2);
-		for (size_t u = 0; u < n; u++)	
-			t2[u] += (double)iq00[0] / (1 << (logn/2));
+		for (size_t u = 0; u < hn; u++) {
+			t2[u] += (double)iq00[0] / (1 << (logn - 1));
+		}
 
-		for (size_t u = 0; u < n; u++)
-			t0[u] = t0[u] * t1[u] / t2[u];
+		for (size_t u = 0; u < hn; u++) {
+			double re = t0[u] * t1[u] - t0[u + hn] * t1[u + hn];
+			double im = t0[u] * t1[u + hn] + t0[u + hn] * t1[u];
+			t0[u] = re / t2[u];
+			t0[u + hn] = im / t2[u];
+		}
+
+		for (size_t u = 0; u < n; u++) {
+			printf("%.3f ", t0[u]);
+		}
+		printf("\n");
 
 		_iFFT(t0, logn);
 	}

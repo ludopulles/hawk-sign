@@ -1674,9 +1674,8 @@ fpp_FFT(fpp *f, unsigned logn)
 		}
 		t = ht;
 
-		if (u & 1) {
-			for (j1 = 0; j1 < n; j1++)
-				f[j1] >>= 1;
+		for (j1 = 0; j1 < n; j1++) {
+			f[j1] >>= 1;
 		}
 	}
 }
@@ -1767,13 +1766,23 @@ fpp_iFFT(fpp *f, unsigned logn)
 		t = dt;
 		m = hm;
 
-		if (u & 1) {
-			for (j1 = 0; j1 < n; j1++)
-				f[j1] >>= 1;
+		for (j1 = 0; j1 < n; j1++) {
+			f[j1] >>= 1;
 		}
 	}
 }
 // =============================================================================
+
+/* see inner.h */
+static const int16_t bound_s1_bits[11] = {
+	0 /* unused */, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10
+};
+static const int16_t bound_q00_bits[11] = {
+	0 /* unused */, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10
+};
+static const int16_t bound_q10_bits[11] = {
+	0 /* unused */, 5, 6, 7, 8, 8, 9, 10, 11, 12, 14
+};
 
 /* see inner.h */
 int Zf(verify_NTT)(const uint8_t *restrict h,
@@ -1808,10 +1817,10 @@ int Zf(verify_NTT)(const uint8_t *restrict h,
 	 * approximate division and rounding.
 	 */
 
-	unsigned shift_s1  = 17 + (10 - logn)/2;
-	unsigned shift_q10 = 14 + (10 - logn)/2;
-	unsigned shift_q00 = 17 + (10 - logn)/2;
-	unsigned shift_back = shift_s1 + shift_q10 - shift_q00;
+	unsigned shift_s1  = 30 - (1 + bound_s1_bits[logn]);
+	unsigned shift_q10 = 30 - bound_q10_bits[logn];
+	unsigned shift_q00 = 30 - bound_q00_bits[logn];
+	unsigned shift_back = shift_s1 + shift_q10 - shift_q00 - (logn - 1);
 
 	/*
 	 * Throughout FFT, the following quantities are bounded in size as follows:
@@ -1850,7 +1859,7 @@ int Zf(verify_NTT)(const uint8_t *restrict h,
 	fpp_FFT(t1, logn);
 	fpp_FFT(t2, logn);
 
-	cst_term = (fpp)q00[0] * (1 << (shift_q00 - (logn >> 1)));
+	cst_term = (fpp)q00[0] * (1 << (shift_q00 - (logn - 1)));
 	for (u = 0; u < hn; u++) {
 		int64_t re, im;
 
