@@ -17,6 +17,107 @@ extern "C" {
 
 #define S1_LOBITS(logn) ((logn) == 10 ? 6u : 5u)
 
+static const size_t low_bits_q00[11] = {
+	0 /* unused */, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6
+};
+static const size_t low_bits_q01[11] = {
+	0 /* unused */, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10
+};
+
+size_t encode_q00(const int16_t *q00, unsigned logn)
+{
+	size_t n, u, v;
+	uint16_t w, low_mask;
+	int16_t bound;
+	uint64_t acc;
+	unsigned acc_len;
+
+	n = MKN(logn);
+	low_mask = (1U << low_bits_q00[logn]) - 1;
+	bound = (int16_t)(1U << Zf(bits_q00)[logn]);
+
+	/*
+	 * Make sure no coefficient is too large.
+	 */
+	for (u = 1; u < n/2; u ++) {
+		if (q00[u] < -bound || q00[u] >= bound) {
+			return 0;
+		}
+	}
+
+	acc = 0;
+	acc_len = 0;
+
+	v = 2;
+	for (u = 1; u < n/2; u ++) {
+		w = (uint16_t) q00[u];
+		acc = (acc << 1) | (w >> 15);
+		w ^= -(w >> 15);
+
+		acc = (acc << low_bits_q00[logn]) | (w & low_mask);
+		w >>= low_bits_q00[logn];
+		acc_len += low_bits_q00[logn] + 1;
+
+		acc <<= (w + 1);
+		acc |= 1;
+		acc_len += w + 1;
+
+		while (acc_len >= 8) {
+			acc_len -= 8;
+			v ++;
+		}
+	}
+	if (acc_len > 0) v ++;
+	return v;
+}
+
+size_t encode_q01(const int16_t *q01, unsigned logn)
+{
+	size_t n, u, v;
+	uint16_t w, low_mask;
+	int16_t bound;
+	uint64_t acc;
+	unsigned acc_len;
+
+	n = MKN(logn);
+	low_mask = (1U << low_bits_q00[logn]) - 1;
+	bound = (int16_t)(1U << Zf(bits_q01)[logn]);
+
+	for (u = 1; u < n/2; u ++) {
+		if (q01[u] < -bound || q01[u] >= bound) {
+			return 0;
+		}
+	}
+
+	acc = 0;
+	acc_len = 0;
+
+	v = 0;
+	low_mask = (1U << low_bits_q01[logn]) - 1;
+	for (u = 0; u < n; u ++) {
+		w = (uint16_t) q01[u];
+		acc = (acc << 1) | (w >> 15);
+		w ^= -(w >> 15);
+
+		acc = (acc << low_bits_q01[logn]) | (w & low_mask);
+		w >>= low_bits_q01[logn];
+		acc_len += low_bits_q01[logn] + 1;
+
+		acc <<= (w + 1);
+		acc |= 1;
+		acc_len += w + 1;
+
+		while (acc_len >= 8) {
+			acc_len -= 8;
+			v ++;
+		}
+	}
+
+	if (acc_len > 0) v ++;
+	return v;
+}
+
+
 #include "platform.h"
 #include "rans_byte.h"
 
@@ -97,9 +198,8 @@ void SymbolStats::normalize_freqs(uint32_t target_total)
     }
 }
 
-void report_ANS_size(unsigned logn, const vector<vector<int>> &data) {
-
-    static const uint32_t prob_bits = 20;
+void report_ANS_size(const vector<vector<int>> &data, int lobits) {
+    static const uint32_t prob_bits = 16;
     static const uint32_t prob_scale = 1 << prob_bits;
 
     SymbolStats stats;
@@ -124,6 +224,7 @@ void report_ANS_size(unsigned logn, const vector<vector<int>> &data) {
 	int sumsz = 0, squsz = 0;
 
     printf("rANS encode:\n");
+
     for (const vector<int> &v : data) {
         RansState rans;
         RansEncInit(&rans);
@@ -137,9 +238,8 @@ void report_ANS_size(unsigned logn, const vector<vector<int>> &data) {
         rans_begin = ptr;
 
 		int head_bytes = (int) (out_buf + out_max_size - rans_begin);
-		// printf("rANS: %d bytes\n", head_bytes);
-
-		int x = (((S1_LOBITS(logn) + 1) << logn) + 7) / 8;
+		int x = (((lobits + 1) * v.size()) + 7) / 8;
+		// printf("rANS: %d bytes (%d total)\n", head_bytes, x);
 
 		x += head_bytes;
 		sumsz += x;
@@ -156,30 +256,69 @@ void report_ANS_size(unsigned logn, const vector<vector<int>> &data) {
 }
 
 int main(int argc, char **argv) {
-	if (argc != 2) {
-		printf("Usage: ./file logn\n");
+	if (argc != 3) {
+		printf("Usage: ./file logn nsamples\n");
 		return 1;
 	}
+
 	unsigned logn = atoi(argv[1]);
 	assert(1 <= logn && logn <= MAXLOGN);
+	int nsamples = atoi(argv[2]);
+	assert(1 <= nsamples && nsamples <= 1000 * 1000);
 
-	size_t num_sig;
-	cin >> num_sig;
+	int n = MKN(logn);
+	unsigned char seed[48];
+	inner_shake256_context sc;
 
-	vector<vector<int16_t>> sigs(num_sig, vector<int16_t>(1 << logn));
-	for (vector<int16_t> &v : sigs)
-		for (int16_t &x : v) cin >> x;
+	// Initialize a RNG.
+	Zf(get_seed)(seed, sizeof seed);
+	inner_shake256_init(&sc);
+	inner_shake256_inject(&sc, seed, sizeof seed);
+	inner_shake256_flip(&sc);
 
-	vector<vector<int>> data(num_sig, vector<int>(1 << logn));
-	for (int i = 0; i < num_sig; i++) {
-		for (int u = 0; u < (1<<logn); u++) {
-			uint16_t w = (uint16_t) sigs[i][u];
+	vector<vector<int16_t>> iq00(nsamples, vector<int16_t>(n)), iq01(nsamples, vector<int16_t>(n));
+	vector<vector<int>> dq00(nsamples, vector<int>(n/2 - 1)), dq01(nsamples, vector<int>(n));
+	for (int s = 0; s < nsamples; s++) {
+		int8_t f[MAXN], g[MAXN], F[MAXN], G[MAXN];
+		uint8_t tmp[44 * MAXN];
+
+		Zf(keygen)(&sc, f, g, F, G, &*iq00[s].begin(), &*iq01[s].begin(), logn, tmp);
+
+		for (int i = 1; i < n/2; i++) {
+			uint16_t w = (uint16_t) iq00[s][i];
 			w ^= -(w >> 15);
-			data[i][u] = w >> S1_LOBITS(logn);
-			assert(data[i][u] < 256);
+			dq00[s][i - 1] = w >> low_bits_q00[logn];
+		}
+		for (int i = 0; i < n; i++) {
+			uint16_t w = (uint16_t) iq01[s][i];
+			w ^= -(w >> 15);
+			dq01[s][i] = w >> low_bits_q01[logn];
 		}
 	}
 
-	report_ANS_size(logn, data);
+	int sumsz = 0, squsz = 0;
+	for (int s = 0; s < nsamples; s++) {
+		int x = encode_q00(&*iq00[s].begin(), logn);
+		sumsz += x;
+		squsz += x * x;
+	}
+
+	double avg = double(sumsz) / nsamples;
+	double var = double(squsz) / nsamples - avg * avg;
+	printf("Golomb-Rice(q00) ~ %.3f +/- %.3f\n", avg, sqrt(var));
+
+	report_ANS_size(dq00, low_bits_q00[logn]);
+
+	sumsz = 0; squsz = 0;
+	for (int s = 0; s < nsamples; s++) {
+		int x = encode_q01(&*iq01[s].begin(), logn);
+		sumsz += x;
+		squsz += x * x;
+	}
+
+	avg = double(sumsz) / nsamples;
+	var = double(squsz) / nsamples - avg * avg;
+	printf("Golomb-Rice(q01) ~ %.3f +/- %.3f\n", avg, sqrt(var));
+	report_ANS_size(dq01, low_bits_q01[logn]);
 	return 0;
 }
