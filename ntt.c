@@ -454,42 +454,62 @@ mq_div(uint32_t x, uint32_t y)
 {
 	/*
 	 * We invert y by computing y^(q-2) mod q.
-	 * We do not use an addition chain for e = q-2, but it may be more time efficient.
+	 *
+	 * We use the following addition chain for exponent e = 12287:
+	 *
+	 *   e0 = 1
+	 *   e1 = 2 * e0 = 2
+	 *   e2 = e1 + e0 = 3
+	 *   e3 = 2 * e2 = 6
+	 *   e4 = e3 + e0 = 7
+	 *   e5 = 2 * e4 = 14
+	 *   e6 = 2 * e5 = 28
+	 *   e7 = e6 + e4 = 35
+	 *   e8 = e7 + e6 = 63
+	 *   e9 = 2 * e8 = 126
+	 *   e10 = 2 * e9 = 252
+	 *   e11 = e10 + e7 = 287
+	 *   e12 = 2 * e11 = 574
+	 *   e13 = 2 * e12 = 1148
+	 *   e14 = 2 * e13 = 2296
+	 *   e15 = 2 * e14 = 4592
+	 *   e16 = 2 * e15 = 9184
+	 *   e17 = 2 * e16 = 18368
+	 *   e18 = e17 + e8 = 18431
+	 *
+	 * Additions on exponents are converted to Montgomery
+	 * multiplications. We define all intermediate results as so
+	 * many local variables, and let the C compiler work out which
+	 * must be kept around.
 	 */
-	uint32_t b, r;
+	uint32_t y0, y1, y2, y3, y4, y5, y6, y7, y8, y9;
+	uint32_t y10, y11, y12, y13, y14, y15, y16, y17, y18;
 
-	r = Zf(mq_montymul)(y, R2);
-	b = mq_montysqr(r);
-	r = Zf(mq_montymul)(r, b);
-	b = mq_montysqr(b);
-	r = Zf(mq_montymul)(r, b);
-	b = mq_montysqr(b);
-	r = Zf(mq_montymul)(r, b);
-	b = mq_montysqr(b);
-	r = Zf(mq_montymul)(r, b);
-	b = mq_montysqr(b);
-	r = Zf(mq_montymul)(r, b);
-	b = mq_montysqr(b);
-	r = Zf(mq_montymul)(r, b);
-	b = mq_montysqr(b);
-	r = Zf(mq_montymul)(r, b);
-	b = mq_montysqr(b);
-	r = Zf(mq_montymul)(r, b);
-	b = mq_montysqr(b);
-	r = Zf(mq_montymul)(r, b);
-	b = mq_montysqr(b);
-	r = Zf(mq_montymul)(r, b);
-	b = mq_montysqr(b);
-	b = mq_montysqr(b);
-	b = mq_montysqr(b);
-	b = mq_montysqr(b);
-	r = Zf(mq_montymul)(r, b);
+	y0 = Zf(mq_montymul)(y, R2);
+	y1 = mq_montysqr(y0);
+	y2 = Zf(mq_montymul)(y1, y0);
+	y3 = mq_montysqr(y2);
+	y4 = Zf(mq_montymul)(y3, y0);
+	y5 = mq_montysqr(y4);
+	y6 = mq_montysqr(y5);
+	y7 = Zf(mq_montymul)(y6, y4);
+	y8 = Zf(mq_montymul)(y7, y6);
+	y9 = mq_montysqr(y8);
+	y10 = mq_montysqr(y9);
+	y11 = Zf(mq_montymul)(y10, y7);
+	y12 = mq_montysqr(y11);
+	y13 = mq_montysqr(y12);
+	y14 = mq_montysqr(y13);
+	y15 = mq_montysqr(y14);
+	y16 = mq_montysqr(y15);
+	y17 = mq_montysqr(y16);
+	y18 = Zf(mq_montymul)(y17, y8);
 
 	/*
 	 * Final multiplication with x, which is not in Montgomery
 	 * representation, computes the correct division result.
 	 */
-	return Zf(mq_montymul)(r, x);
+	return Zf(mq_montymul)(y18, x);
 }
 
 /* see inner.h */
