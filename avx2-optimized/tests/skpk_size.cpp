@@ -154,6 +154,31 @@ void work(unsigned logn, const unsigned char *seed, int seed_len)
 	}
 }
 
+
+/* return entropy of a single Discrete Gaussian with mean 0 and stddev sigma */
+double entropy(double sigma) {
+    int tau = (int) (1 + sigma * 10.0);
+    double *prob = (double *)malloc(tau * sizeof(double));
+    for (int i = 0; i < tau; i++)
+        prob[i] = exp(-0.5 * i * i / sigma / sigma);
+
+    double sum = 0;
+    for (int i = 0; i < tau; i++)
+        sum += prob[i];
+    sum = 2 * sum - prob[0];
+    for (int i = 0; i < tau; i++)
+        prob[i] /= sum;
+
+    double H = 0.0;
+    for (int i = 0; i < tau; i++)
+        H += 2 * prob[i] * log2(prob[i]);
+    H -= prob[0] * log2(prob[0]);
+
+    free(prob);
+    return -H;
+}
+
+
 int main() {
 	unsigned char seed[48] = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 	inner_shake256_context sc;
@@ -218,5 +243,23 @@ int main() {
 		printf("%4d | %7.2f +/- %6.2f | %4lld | %4lld | %7.2f\n",
 			(int) logn, avg, std, totals[logn].pkmin, totals[logn].pkmax, avg + 6 * std);
 	}
+
+	printf("\n-----+- Entropy+---------+---------\n");
+	// Public key
+	for (size_t logn = 2; logn <= MAXLOGN; logn++) {
+		unsigned n = MKN(logn);
+		int ncc = n/2 - 1, reps = totals[logn].iterations;
+		double sigma_q00 = VAR0(totals[logn].q00sq, reps * ncc);
+		double sigma_q01 = VAR0(totals[logn].q01sq, reps * n);
+
+		double Hq00 = entropy(sigma_q00), Hq01 = entropy(sigma_q01);
+
+		printf("%4d | %7.2f | %7.2f | %7.2f\n",
+			(int) logn,
+			(Hq00 * (n/2 - 1) + Hq01 * n + 7) / 8,
+			(Hq00 * (n/2 - 1) + 7) / 8,
+			(Hq01 * n + 7) / 8);
+	}
+
 	return 0;
 }
