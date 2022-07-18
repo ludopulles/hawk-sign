@@ -1111,8 +1111,7 @@ modp_iNTT2(uint32_t *a, const uint32_t *igm, unsigned logn,
 				x = *r1;
 				y = *r2;
 				*r1 = modp_add(x, y, p);
-				*r2 = modp_montymul(
-					modp_sub(x, y, p), s, p, p0i);
+				*r2 = modp_montymul(modp_sub(x, y, p), s, p, p0i);
 			}
 		}
 		t = dt;

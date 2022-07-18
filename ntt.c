@@ -670,3 +670,22 @@ Zf(mq_poly_div)(uint16_t *f, uint16_t *g, unsigned logn)
 	}
 }
 
+/* see inner.h */
+int
+Zf(mq_is_invertible)(int8_t *f, unsigned logn, uint8_t *restrict tmp)
+{
+	uint16_t *p;
+	size_t n, u;
+	int res;
+
+	n = MKN(logn);
+	p = (uint16_t*)tmp;
+	res = 1;
+	Zf(mq_int8_to_NTT)(p, f, logn);
+	for (u = 0; u < n; u++) {
+		// res &= (p[u] > 0)
+		res &= 1U - ((p[u] - 1U) >> 15);
+	}
+	return res;
+}
+

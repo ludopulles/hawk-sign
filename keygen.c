@@ -4058,7 +4058,7 @@ static const int32_t l2bound_ssec_1024[11] = {
 
 /* see inner.h */
 void
-Zf(keygen)(inner_shake256_context *rng,
+Zf(keygen)(inner_shake256_context *sc,
 	int8_t *restrict f, int8_t *restrict g,
 	int8_t *restrict F, int8_t *restrict G,
 	int16_t *restrict iq00, int16_t *restrict iq10,
@@ -4081,7 +4081,8 @@ Zf(keygen)(inner_shake256_context *rng,
 	size_t n, hn, u;
 	uint8_t fg_okay;
 	int32_t norm, x;
-	prng p;
+	uint32_t p, p0i, *gm, *igm, *rf1, *rf2;
+	prng rng;
 	fpr *rt1, *rt2, *rt3, *rt4, *rt5;
 
 	n = MKN(logn);
@@ -4093,13 +4094,21 @@ Zf(keygen)(inner_shake256_context *rng,
 	rt4 = rt3 + n;
 	rt5 = rt4 + n;
 
+	gm = (uint32_t *)tmp;
+	igm = gm + n;
+	rf1 = igm + n;
+	rf2 = rf1 + n;
+
+	p = PRIMES[0].p;
+	p0i = modp_ninv31(p);
+
 	for (;;) {
 		/*
 		 * The coefficients of polynomials f and g will be generated from a
 		 * discrete gaussian that draws random numbers from a fast PRNG that is
-		 * seeded from a SHAKE context ('rng').
+		 * seeded from a SHAKE context ('sc').
 		 */
-		Zf(prng_init)(&p, rng);
+		Zf(prng_init)(&rng, sc);
 
 		/*
 		 * The coefficients of f and g are generated independently of each
@@ -4109,8 +4118,10 @@ Zf(keygen)(inner_shake256_context *rng,
 		 * We require that N(f) and N(g) are both odd (the binary GCD in the
 		 * NTRU solver requires it), so we require (fg_okay & 1) == 1.
 		 */
-		fg_okay = poly_small_mkgauss(&p, f, logn)
-			& poly_small_mkgauss(&p, g, logn) & 1u;
+		fg_okay = poly_small_mkgauss(&rng, f, logn)
+			& poly_small_mkgauss(&rng, g, logn) & 1u;
+
+		fg_okay &= Zf(mq_is_invertible)(f, logn, tmp);
 
 		Zf(int8_to_fft)(rt2, f, logn);
 		Zf(int8_to_fft)(rt3, g, logn);
@@ -4133,6 +4144,25 @@ Zf(keygen)(inner_shake256_context *rng,
 			 * with probability of 0.9%.
 			 */
 			fg_okay &= fpr_lt(rt1[0], fpr_inv(fpr_of(3000)));
+		}
+
+		/*
+		 * If NTT_p(q00) has a zero, we cannot invert it in
+		 * Zf(uncompressed_verify_NTT), so remove this key.
+		 */
+		modp_mkgm2(gm, igm, logn, PRIMES[0].g, p, p0i);
+		for (u = 0; u < n; u++) {
+			rf1[u] = modp_set((int32_t)f[u], p);
+			rf2[u] = modp_set((int32_t)g[u], p);
+		}
+		modp_NTT2(rf1, gm, logn, p, p0i);
+		modp_NTT2(rf2, gm, logn, p, p0i);
+		for (u = 0; u < hn; u++) {
+			uint32_t prod;
+
+			prod = modp_add(modp_montymul(rf1[u], rf1[n - 1 - u], p, p0i),
+							modp_montymul(rf2[u], rf2[n - 1 - u], p, p0i), p);
+			fg_okay &= (1U - prod) >> 31;
 		}
 
 		/*

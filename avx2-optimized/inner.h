@@ -714,6 +714,12 @@ void Zf(mq_poly_tomonty)(uint16_t *f, unsigned logn);
  */
 void Zf(mq_poly_div)(uint16_t *f, uint16_t *g, unsigned logn);
 
+/*
+ * Return whether f is invertible in NTT representation, meaning NTT(f) has no
+ * nonzero entries.
+ */
+int Zf(mq_is_invertible)(int8_t *f, unsigned logn, uint8_t *restrict tmp);
+
 /* ==================================================================== */
 /*
  * Fast Fourier Transform (fft.c)
