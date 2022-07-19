@@ -31,6 +31,21 @@ struct WorkerResult {
 
 const long long num_kg = 50, signs_per_kg = 10;
 
+void print_poly(const int8_t *p, unsigned logn)
+{
+	size_t n, u;
+
+	n = MKN(logn);
+	printf("{ ");
+	for (u = 0; u < n; u++) {
+		if (u) printf(",");
+		printf("%d", p[u]);
+	}
+	printf(" },\n");
+}
+
+std::mutex mx;
+
 WorkerResult run(unsigned logn, const unsigned char *seed, size_t seed_len)
 {
 	union {
@@ -56,6 +71,7 @@ WorkerResult run(unsigned logn, const unsigned char *seed, size_t seed_len)
 		Zf(keygen)(&sc, f, g, F, G, iq00, iq10, logn, tmp.b);
 		Zf(expand_seckey)(exp_sk, f, g, F, logn);
 
+		long long last_fail = result.fails;
 		for (size_t rep = 0; rep < signs_per_kg; rep++) {
 			// Make a signature of a random message.
 			inner_shake256_extract(&sc, h, sizeof h);
@@ -65,6 +81,23 @@ WorkerResult run(unsigned logn, const unsigned char *seed, size_t seed_len)
 
 			result.fails += !Zf(verify_NTT)(h, sig, iq00, iq10, logn, tmp.b);
 		}
+
+		if (last_fail < result.fails) {
+			// There were one or more failures, maybe this depends on the public key?
+
+			/* acquire mutex lock */
+			std::lock_guard<std::mutex> guard(mx);
+
+			printf("\n");
+			print_poly(f, logn);
+			print_poly(g, logn);
+			print_poly(F, logn);
+			print_poly(G, logn);
+			printf("\n");
+			fflush(stdout);
+
+			/* release mutex lock */
+		}
 	}
 
 	result.iterations = num_kg * signs_per_kg;
@@ -72,7 +105,6 @@ WorkerResult run(unsigned logn, const unsigned char *seed, size_t seed_len)
 }
 
 WorkerResult tot;
-std::mutex mx;
 
 void work(unsigned logn, const unsigned char *seed, int seed_len)
 {
@@ -101,6 +133,10 @@ int main() {
 
 	inner_shake256_extract(&sc, seeds, nthreads * 48);
 
+	time_t my_time = time(NULL);
+	printf("%s", ctime(&my_time));
+	fflush(stdout);
+
 	for (unsigned logn = 1; logn <= MAXLOGN; logn++) {
 		tot = WorkerResult();
 
@@ -111,9 +147,11 @@ int main() {
 		for (int i = 0; i < nthreads-1; i++) pool[i]->join(), delete pool[i];
 
 		printf("%u: %lld/%lld ~ %.6f%% fails\n", logn, tot.fails, tot.iterations, 100.0 * tot.fails / tot.iterations);
-	}
 
-	printf("\nNo simple forgeries were possible.\n");
+		my_time = time(NULL);
+		printf("%s", ctime(&my_time));
+		fflush(stdout);
+	}
 
 	return 0;
 }
