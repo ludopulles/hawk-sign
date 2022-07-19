@@ -29,12 +29,12 @@ struct WorkerResult {
 	}
 };
 
-const long long num_kg = 2500, signs_per_kg = 100;
+const long long num_kg = 50, signs_per_kg = 10;
 
 WorkerResult run(unsigned logn, const unsigned char *seed, size_t seed_len)
 {
 	union {
-		uint8_t b[48 * MAXN];
+		uint8_t b[44 * MAXN];
 		uint64_t dummy_u64;
 		fpr dummy_fpr;
 	} tmp;
@@ -95,7 +95,7 @@ int main() {
 	inner_shake256_inject(&sc, seed, sizeof seed);
 	inner_shake256_flip(&sc);
 
-	const int nthreads = 40;
+	const int nthreads = 2;
 	std::thread* pool[nthreads-1];
 	unsigned char seeds[nthreads * 48];
 
