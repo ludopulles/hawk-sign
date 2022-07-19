@@ -1820,12 +1820,12 @@ int Zf(verify_NTT)(const uint8_t *restrict h,
 	 * approximate division and rounding.
 	 */
 
-	unsigned shift_s1  = 30 - (1 + bound_s1_bits[logn]);
-	unsigned shift_q10 = 30 - bound_q10_bits[logn];
-	unsigned shift_q00 = 30 - bound_q00_bits[logn];
+	unsigned shift_s1  = 29 - (1 + bound_s1_bits[logn]);
+	unsigned shift_q10 = 29 - bound_q10_bits[logn];
+	unsigned shift_q00 = 29 - bound_q00_bits[logn];
 
 	unsigned shift_s0 = shift_s1 + shift_q10 - shift_q00;
-	unsigned before_inverse = 30 - (1 + bound_s0_bits[logn]);
+	unsigned before_inverse = 29 - (1 + bound_s0_bits[logn]);
 
 	unsigned shift_back = shift_s0 - (logn - 1);
 	if (before_inverse < shift_s0) {
