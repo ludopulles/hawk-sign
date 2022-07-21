@@ -925,7 +925,7 @@ void Zf(make_public)(const int8_t *restrict f, const int8_t *restrict g,
  * is used to generate coefficients of f and g. It is allowed to pass a null
  * pointer for q11.
  *
- * Note: tmp[] must have space for at least 44 * 2^logn bytes.
+ * Note: tmp[] must have space for at least 40 * 2^logn bytes.
  */
 void Zf(keygen)(inner_shake256_context *rng,
 	int8_t *restrict f, int8_t *restrict g,

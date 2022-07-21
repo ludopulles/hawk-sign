@@ -30,6 +30,8 @@
  * @author   Ludo Pulles <ludo.pulles@cwi.nl>
  */
 
+#include <assert.h>
+
 #include "inner.h"
 
 /* ==================================================================== */
@@ -3653,7 +3655,7 @@ solve_NTRU_binary_depth0(unsigned logn,
 	uint32_t p, p0i, R2;
 	uint32_t *Fp, *Gp, *t1, *t2, *t3, *t4, *t5;
 	uint32_t *gm, *igm, *ft, *gt;
-	fpr *rt2, *rt3;
+	fpr *rt1, *rt2, *rt3;
 
 	n = MKN(logn);
 	hn = n >> 1;
@@ -3745,10 +3747,11 @@ solve_NTRU_binary_depth0(unsigned logn,
 	t5 = t4 + n;
 
 	/*
-	 * Compute the NTT tables in t1 and t2. We do not keep t2
-	 * (we'll recompute it later on).
+	 * Compute the NTT tables in t1 and t5.
 	 */
-	modp_mkgm2(t1, t2, logn, PRIMES[0].g, p, p0i);
+	memmove(t1, gm, n * sizeof *gm);
+	memmove(t5, igm, n * sizeof *igm);
+	// modp_mkgm2(t1, t5, logn, PRIMES[0].g, p, p0i);
 
 	/*
 	 * Convert F and G to NTT.
@@ -3757,16 +3760,12 @@ solve_NTRU_binary_depth0(unsigned logn,
 	modp_NTT2(Gp, t1, logn, p, p0i);
 
 	/*
-	 * Load f and adj(f) in t4 and t5, and convert them to NTT
-	 * representation.
+	 * Load f in t4 and convert it to NTT representation.
 	 */
-	t4[0] = t5[0] = modp_set(f[0], p);
-	for (u = 1; u < n; u ++) {
+	for (u = 0; u < n; u ++) {
 		t4[u] = modp_set(f[u], p);
-		t5[n - u] = modp_set(-f[u], p);
 	}
 	modp_NTT2(t4, t1, logn, p, p0i);
-	modp_NTT2(t5, t1, logn, p, p0i);
 
 	/*
 	 * Compute F*adj(f) in t2, and f*adj(f) in t3.
@@ -3774,22 +3773,18 @@ solve_NTRU_binary_depth0(unsigned logn,
 	for (u = 0; u < n; u ++) {
 		uint32_t w;
 
-		w = modp_montymul(t5[u], R2, p, p0i);
+		w = modp_montymul(t4[n - 1 - u], R2, p, p0i);
 		t2[u] = modp_montymul(w, Fp[u], p, p0i);
 		t3[u] = modp_montymul(w, t4[u], p, p0i);
 	}
 
 	/*
-	 * Load g and adj(g) in t4 and t5, and convert them to NTT
-	 * representation.
+	 * Load g in t4, and convert it to NTT representation.
 	 */
-	t4[0] = t5[0] = modp_set(g[0], p);
-	for (u = 1; u < n; u ++) {
+	for (u = 0; u < n; u ++) {
 		t4[u] = modp_set(g[u], p);
-		t5[n - u] = modp_set(-g[u], p);
 	}
 	modp_NTT2(t4, t1, logn, p, p0i);
-	modp_NTT2(t5, t1, logn, p, p0i);
 
 	/*
 	 * Add G*adj(g) to t2, and g*adj(g) to t3.
@@ -3797,7 +3792,7 @@ solve_NTRU_binary_depth0(unsigned logn,
 	for (u = 0; u < n; u ++) {
 		uint32_t w;
 
-		w = modp_montymul(t5[u], R2, p, p0i);
+		w = modp_montymul(t4[n - 1 - u], R2, p, p0i);
 		t2[u] = modp_add(t2[u],
 			modp_montymul(w, Gp[u], p, p0i), p);
 		t3[u] = modp_add(t3[u],
@@ -3806,13 +3801,10 @@ solve_NTRU_binary_depth0(unsigned logn,
 
 	/*
 	 * Convert back t2 and t3 to normal representation (normalized
-	 * around 0), and then
-	 * move them to t1 and t2. We first need to recompute the
-	 * inverse table for NTT.
+	 * around 0), and then move them to t1 and t2.
 	 */
-	modp_mkgm2(t1, t4, logn, PRIMES[0].g, p, p0i);
-	modp_iNTT2(t2, t4, logn, p, p0i);
-	modp_iNTT2(t3, t4, logn, p, p0i);
+	modp_iNTT2(t2, t5, logn, p, p0i);
+	modp_iNTT2(t3, t5, logn, p, p0i);
 	for (u = 0; u < n; u ++) {
 		t1[u] = (uint32_t)modp_norm(t2[u], p);
 		t2[u] = (uint32_t)modp_norm(t3[u], p);
@@ -3831,44 +3823,35 @@ solve_NTRU_binary_depth0(unsigned logn,
 	 */
 
 	/*
-	 * Get f*adj(f)+g*adj(g) in FFT representation. Since this
-	 * polynomial is auto-adjoint, all its coordinates in FFT
-	 * representation are actually real, so we can truncate off
-	 * the imaginary parts.
+	 * Get F*adj(f)+G*adj(g) and f*adj(f)+g*adj(g) in FFT representation.
 	 */
-	rt3 = align_fpr(tmp, t3);
-	for (u = 0; u < n; u ++) {
-		rt3[u] = fpr_of(((int32_t *)t2)[u]);
-	}
-	Zf(FFT)(rt3, logn);
-	rt2 = align_fpr(tmp, t2);
-	memmove(rt2, rt3, n * sizeof *rt3);
-
-	/*
-	 * Convert F*adj(f)+G*adj(g) in FFT representation.
-	 */
+	rt1 = align_fpr(tmp, t1);
+	rt2 = rt1 + n;
 	rt3 = rt2 + n;
 	for (u = 0; u < n; u ++) {
-		rt3[u] = fpr_of(((int32_t *)t1)[u]);
+		rt3[u] = fpr_of(((int32_t *)t2)[u]);
+		rt2[u] = fpr_of(((int32_t *)t1)[u]);
 	}
+	Zf(FFT)(rt2, logn);
 	Zf(FFT)(rt3, logn);
+	memmove(rt1, rt3, n * sizeof *rt3);
 
 	/*
 	 * Compute (F*adj(f)+G*adj(g))/(f*adj(f)+g*adj(g)) and get
 	 * its rounded normal representation in t1.
 	 */
-	Zf(poly_div_autoadj_fft)(rt3, rt2, logn);
+	Zf(poly_div_autoadj_fft)(rt2, rt1, logn);
 
 	/*
 	 * Babai (F, G) with respect to the GSO of (f, g) using Ducas--Prest's Fast
 	 * Fourier Orthogonalization ffNP routine.
 	 * Comment out if you don't want to perform ffNP.
 	 */
-	Zf(ffNearestPlane_dyn)(rt3, rt2, logn, rt3 + n);
+	Zf(ffNearestPlane_dyn)(rt2, rt1, logn, rt3);
 
-	Zf(iFFT)(rt3, logn);
+	Zf(iFFT)(rt2, logn);
 	for (u = 0; u < n; u ++) {
-		t1[u] = modp_set((int32_t)fpr_rint(rt3[u]), p);
+		t1[u] = modp_set((int32_t)fpr_rint(rt2[u]), p);
 	}
 
 	/*
@@ -3880,10 +3863,6 @@ solve_NTRU_binary_depth0(unsigned logn,
 	 *
 	 * We want to compute F-k*f, and G-k*g.
 	 */
-	t2 = t1 + n;
-	t3 = t2 + n;
-	t4 = t3 + n;
-	t5 = t4 + n;
 	modp_mkgm2(t2, t3, logn, PRIMES[0].g, p, p0i);
 	for (u = 0; u < n; u ++) {
 		t4[u] = modp_set(f[u], p);
