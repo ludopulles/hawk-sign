@@ -516,7 +516,11 @@ hawk_uncompressed_sign_finish(shake256_context *rng, void *sig, size_t *sig_len,
 	hm = (uint8_t *)(F + n);
 	s0 = align_i16(hm + HAWK_HASH_SIZE(logn));
 	s1 = s0 + n;
+#ifdef HAWK_AVX
 	atmp = (uint8_t *)align_fpr(s1 + n);
+#else
+	atmp = (uint8_t *)(s1 + n);
+#endif
 
 	if (Zf(decode_seckey)(f, g, F, seckey + 1, seckey_len - 1, logn) == 0) {
 		return HAWK_ERR_FORMAT;
