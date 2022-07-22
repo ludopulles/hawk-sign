@@ -1020,7 +1020,7 @@ int Zf(sign)(inner_shake256_context *rng, int16_t *restrict sig,
  * close to (h0, h1) / 2 with respect to the quadratic form Q.
  * Return if the signature has small enough norm.
  *
- * Note: tmp[] must have space for at least 8 * 2^logn bytes.
+ * Note: tmp[] must have space for at least 24 * 2^logn bytes.
  */
 int Zf(uncompressed_sign_NTT)(inner_shake256_context *rng,
 	int16_t *restrict s0, int16_t *restrict s1,
@@ -1037,7 +1037,7 @@ int Zf(uncompressed_sign_NTT)(inner_shake256_context *rng,
  *
  * This function does not use any floating point numbers.
  *
- * Note: tmp[] must have space for at least 10 * 2^logn bytes.
+ * Note: tmp[] must have space for at least 24 * 2^logn bytes.
  */
 int Zf(sign_NTT)(inner_shake256_context *rng, int16_t *restrict sig,
 	const int8_t *restrict f, const int8_t *restrict g,
