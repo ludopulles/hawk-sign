@@ -96,16 +96,22 @@ int main() {
 	}
 	printf("\n");
 
-	printf("logn | sigma f,g | sigma F,G | sigma q00 | sigma q10 | sigma q11\n");
+	// secret key size is exact!
+	for (size_t logn = 1; logn <= MAX_LOGN; logn++) {
+		assert(sk_min[logn] == sk_max[logn]);
+	}
+
+	printf("logn | sigma f,g | sigma F,G | sigma q00 | sigma q10 | sigma q11 | |sk|\n");
 	for (size_t logn = 1; logn <= MAX_LOGN; logn++) {
 		// printf("logn = %d: sigma_{f,g} ~ %.8f, sigma_{F,G} ~ %.8f, sig_{q00} ~ %.8f, sig_{q10} ~ %.8f, sig_{q11} ~ %.8f\n",
-		printf("%4d | %.7f | %.7f | %9.4f | %9.4f | %9.4f\n",
+		printf("%4d | %9.7f | %9.6f | %9.4f | %9.4f | %9.3f | %4lld\n",
 			(int) logn,
 			sqrt(fg_sumsq[logn] / (2.0 * nreps[logn] * MKN(logn))),
 			sqrt(FG_sumsq[logn] / (2.0 * nreps[logn] * MKN(logn))),
 			sqrt(q00_sumsq[logn] / (double) nreps[logn] / (MKN(logn-1) - 1)),
 			sqrt(q10_sumsq[logn] / (double) nreps[logn] / MKN(logn)),
-			sqrt(q11_sumsq[logn] / (double) nreps[logn] / (MKN(logn-1) - 1))
+			sqrt(q11_sumsq[logn] / (double) nreps[logn] / (MKN(logn-1) - 1)),
+			sk_min[logn]
 		);
 	}
 
@@ -119,26 +125,18 @@ int main() {
 		fflush(stdout);
 	} */
 
-	printf("\nIterations performed: %u", (unsigned) nreps[MAX_LOGN]);
-	printf("\nlogn | Average +/- stddev | min  | max\n");
+	printf("\nIterations performed: %u\n", (unsigned) nreps[MAX_LOGN]);
+	printf("-----+- Public key -------+------+-----+--------\n");
+	printf("logn | Average +/- stddev | min  | max | 6sigma \n");
 	double avg, std;
 
-	printf("-----+- Secret key -------+------+-----\n");
-	// Secret key
-	for (size_t logn = 1; logn <= MAX_LOGN; logn++) {
-		avg = (double) sk_sum[logn] / nreps[logn];
-		std = sqrt( (double) sk_sumsq[logn] / nreps[logn] - avg*avg );
-		printf("%4d | %7.2f +/- %6.2f | %4lld | %4lld\n",
-			(int) logn, avg, std, sk_min[logn], sk_max[logn]);
-	}
-
-	printf("-----+- Public key -------+------+-----\n");
 	// Public key
 	for (size_t logn = 1; logn <= MAX_LOGN; logn++) {
 		avg = (double) pk_sum[logn] / nreps[logn];
 		std = sqrt( (double) pk_sumsq[logn] / nreps[logn] - avg*avg );
-		printf("%4d | %7.2f +/- %6.2f | %4lld | %4lld\n",
-			(int) logn, avg, std, pk_min[logn], pk_max[logn]);
+		printf("%4d | %7.2f +/- %6.2f | %4lld | %4lld | %6.2f\n",
+			(int) logn, avg, std, pk_min[logn], pk_max[logn],
+			avg + 6 * std);
 	}
 	return 0;
 }
