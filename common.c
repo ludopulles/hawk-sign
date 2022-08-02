@@ -46,10 +46,10 @@ const uint32_t Zf(l2bound_1024)[11] = {
 
 /* see inner.h */
 const unsigned Zf(bits_q00)[11] = {
-	0 /* unused */, 5, 6, 6, 7, 7, 8,  8,  9,  9, 10
+	0 /* unused */, 5, 6, 6, 7, 7,  8,  8,  9,  9, 10
 };
 const unsigned Zf(bits_q10)[11] = {
-	0 /* unused */, 5, 6, 7, 8, 8, 9, 10, 11, 12, 14
+	0 /* unused */, 5, 6, 7, 8, 8,  9, 10, 11, 12, 14
 };
 const unsigned Zf(bits_q11)[11] = {
 	0 /* unused */, 5, 6, 7, 8, 9, 10, 12, 13, 15, 17
@@ -60,7 +60,7 @@ const unsigned Zf(bits_s0)[11] = {
 	0 /* unused */, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13
 };
 const unsigned Zf(bits_s1)[11] = {
-	0 /* unused */, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10
+	0 /* unused */, 5, 6, 6, 7, 7, 8,  8,  9,  9, 10
 };
 
 /* see inner.h */

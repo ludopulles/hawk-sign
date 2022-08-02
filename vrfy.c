@@ -29,7 +29,6 @@
  * @author   Thomas Pornin <thomas.pornin@nccgroup.com>
  * @author   Ludo Pulles <ludo.pulles@cwi.nl>
  */
-#include <assert.h>
 
 #include "inner.h"
 

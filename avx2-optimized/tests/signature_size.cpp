@@ -256,7 +256,8 @@ WorkerResult measure_signatures(unsigned logn) {
 		}
 
 		for (int lobits = 5; lobits < 11; lobits++) {
-			size_t sz = Zf(encode_uncomp_sig)(NULL, 0, s0, s1, logn, lobits, logn - 4);
+			// size_t sz = Zf(encode_uncomp_sig)(NULL, 0, s0, s1, logn, lobits, logn/2 + 1);
+			size_t sz = cost_golomb(s0, logn, lobits) + cost_golomb(s1, logn, logn/2 + 1);
 			result.cadd(sz, lobits);
 		}
 		size_t cszh = encoding_length(logn == 10 ? huffman_1024_s0 : huffman_512_s0, s0, logn)
@@ -352,7 +353,7 @@ int main() {
 			var_sz = (double)tot.csz_sq[lb] / (runs - tot.csig_failed[lb]) - avg_sz * avg_sz;
 			printf("(%2u, %d) | %7lld | %.1f (std %5.1f) | %5lld\n",
 				lb,
-				logn - 4,
+				logn/2 + 1,
 				salt_and_header + tot.maxcsz[lb],
 				salt_and_header + avg_sz,
 				sqrt(var_sz),

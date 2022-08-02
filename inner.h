@@ -74,9 +74,7 @@
  *    function does nothing, so it can be called systematically.
  */
 
-
 #include <stdint.h>
-#include <stdlib.h>
 #include <string.h>
 
 /*
@@ -549,28 +547,26 @@ size_t Zf(decode_pubkey)(int16_t *q00, int16_t *q10,
  * Encode a signature (s0, s1) with Golomb-Rice encoding.
  */
 size_t Zf(encode_uncomp_sig)(void *out, size_t max_out_len,
-	const int16_t *s0, const int16_t *s1, unsigned logn,
-	size_t lo_bits_s0, size_t lo_bits_s1);
+	const int16_t *s0, const int16_t *s1, unsigned logn);
 
 /*
  * Encode a signature s1 by outputting 'lo_bits' bits of the lowest signficant
  * bits of x[i] and using unary for the other most significant bits.
  */
 size_t Zf(encode_sig)(void *out, size_t max_out_len, const int16_t *s1,
-	unsigned logn, size_t lo_bits);
+	unsigned logn);
 
 /*
  * Decode a signature (s0, s1) with Golomb-Rice encoding.
  */
 size_t Zf(decode_uncomp_sig)(int16_t *s0, int16_t *s1,
-	const void *in, size_t max_in_len, unsigned logn,
-	size_t lo_bits_s0, size_t lo_bits_s1);
+	const void *in, size_t max_in_len, unsigned logn);
 
 /*
  * Decode a signature s1.
  */
 size_t Zf(decode_sig)(int16_t *s1, const void *in, size_t max_in_len,
-	unsigned logn, size_t lo_bits);
+	unsigned logn);
 
 /* ==================================================================== */
 /*

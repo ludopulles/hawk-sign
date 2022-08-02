@@ -74,9 +74,7 @@
  *    function does nothing, so it can be called systematically.
  */
 
-
 #include <stdint.h>
-#include <stdlib.h>
 #include <string.h>
 
 /*
@@ -531,7 +529,7 @@ extern const uint32_t Zf(l2bound_1024)[11];
  * are therefore concentrated around their averages.
  *
  * Values are expressed as number of bits after the sign.
- * e.g.: |q00[u]| < 2^bits_q00[logn] must hold for all 0 < u < n.
+ * e.g.: |q00[u]| < 2^Zf(bits_q00)[logn] must hold for all 0 < u < n.
  *
  * Note, 1 << Zf(bits_q00)[logn] and 1 << Zf(bits_q10)[logn] can be of type
  * int16_t, but 1 << Zf(bits_q11)[logn] needs to be of type (at least) int32_t.
@@ -541,12 +539,11 @@ extern const unsigned Zf(bits_q10)[11];
 extern const unsigned Zf(bits_q11)[11];
 
 /*
- * A signature (s1) should be rejected whenever one of its coefficients has an
- * absolute value greater than or equal to its respective bound with index
- * logn.
+ * A signature (s1) should be rejected whenever one of its coefficients has a
+ * value x with x >= B or x < -B, with B the respective bound with index logn.
  *
- * In the uncompressed version, one should also check coefficients of s0 with
- * the bound for s0.
+ * In the uncompressed version, one should also check coefficients of s0 for a
+ * signature (s0, s1) with the bound for s0.
  *
  * Values are expressed as number of bits after the sign.
  * e.g.: |s1[u]| < 2^Zf(bits_s1)[logn] must hold for all 0 <= u < n.
@@ -620,28 +617,26 @@ size_t Zf(decode_pubkey)(int16_t *q00, int16_t *q10,
  * Encode a signature (s0, s1) with Golomb-Rice encoding.
  */
 size_t Zf(encode_uncomp_sig)(void *out, size_t max_out_len,
-	const int16_t *s0, const int16_t *s1, unsigned logn,
-	size_t lo_bits_s0, size_t lo_bits_s1);
+	const int16_t *s0, const int16_t *s1, unsigned logn);
 
 /*
  * Encode a signature s1 by outputting 'lo_bits' bits of the lowest signficant
  * bits of x[i] and using unary for the other most significant bits.
  */
 size_t Zf(encode_sig)(void *out, size_t max_out_len, const int16_t *s1,
-	unsigned logn, size_t lo_bits);
+	unsigned logn);
 
 /*
  * Decode a signature (s0, s1) with Golomb-Rice encoding.
  */
 size_t Zf(decode_uncomp_sig)(int16_t *s0, int16_t *s1,
-	const void *in, size_t max_in_len, unsigned logn,
-	size_t lo_bits_s0, size_t lo_bits_s1);
+	const void *in, size_t max_in_len, unsigned logn);
 
 /*
  * Decode a signature s1.
  */
 size_t Zf(decode_sig)(int16_t *s1, const void *in, size_t max_in_len,
-	unsigned logn, size_t lo_bits);
+	unsigned logn);
 
 /* ==================================================================== */
 /*

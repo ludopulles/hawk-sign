@@ -46,10 +46,6 @@ const size_t HAWK_PUBKEY_SIZE[11] = {
 	0 /* unused */, 7, 13, 23, 41, 77, 143, 276, 528, 1026, 2390
 };
 
-// TODO: set 5 in the codec.c code (depending on logn!).
-#define S0_LOBITS(logn) ((logn) == 10 ? 9u : 8u)
-#define S1_LOBITS(logn) ((logn) == 10 ? 6u : 5u)
-
 /* ========================================================================= */
 
 /* see hawk.h */
@@ -571,8 +567,7 @@ hawk_uncompressed_sign_finish(shake256_context *rng, void *sig, size_t *sig_len,
 		 */
 		memcpy(es + 1, salt, HAWK_SALT_SIZE(logn));
 
-		v = Zf(encode_uncomp_sig)(es + u, es_len - u, s0, s1, logn,
-				S0_LOBITS(logn), S1_LOBITS(logn));
+		v = Zf(encode_uncomp_sig)(es + u, es_len - u, s0, s1, logn);
 		if (sig_type == HAWK_SIG_COMPACT) {
 			if (v == 0) {
 				return HAWK_ERR_SIZE;
@@ -721,7 +716,7 @@ hawk_sign_dyn_finish(shake256_context *rng, void *sig, size_t *sig_len,
 		 */
 		memcpy(es + 1, salt, HAWK_SALT_SIZE(logn));
 
-		v = Zf(encode_sig)(es + u, es_len - u, sv, logn, S1_LOBITS(logn));
+		v = Zf(encode_sig)(es + u, es_len - u, sv, logn);
 		if (sig_type == HAWK_SIG_COMPACT) {
 			if (v == 0) {
 				return HAWK_ERR_SIZE;
@@ -835,7 +830,7 @@ hawk_sign_finish(shake256_context *rng, void *sig, size_t *sig_len,
 		 */
 		memcpy(es + 1, salt, HAWK_SALT_SIZE(logn));
 
-		v = Zf(encode_sig)(es + u, es_len - u, sv, logn, S1_LOBITS(logn));
+		v = Zf(encode_sig)(es + u, es_len - u, sv, logn);
 		if (sig_type == HAWK_SIG_COMPACT) {
 			if (v == 0) {
 				return HAWK_ERR_SIZE;
@@ -984,7 +979,7 @@ hawk_verify_finish(const void *sig, size_t sig_len, int sig_type,
 	 * Decode signature value.
 	 */
 	u = 1 + salt_len;
-	v = Zf(decode_sig)(sv, es + u, sig_len - u, logn, S1_LOBITS(logn));
+	v = Zf(decode_sig)(sv, es + u, sig_len - u, logn);
 	if (v == 0) {
 		return HAWK_ERR_FORMAT;
 	}
@@ -1051,7 +1046,6 @@ hawk_uncompressed_verify_finish(const void *sig, size_t sig_len, int sig_type,
 	uint8_t *hm, *atmp;
 
 #ifdef HAWK_AVX
-	// TODO: we need more RAM for AVX2 version
 	fpr *q00, *q10, *q11;
 #endif
 
@@ -1139,8 +1133,7 @@ hawk_uncompressed_verify_finish(const void *sig, size_t sig_len, int sig_type,
 	 * Decode signature value.
 	 */
 	u = 1 + salt_len;
-	v = Zf(decode_uncomp_sig)(s0, s1, es + u, sig_len - u, logn,
-		S0_LOBITS(logn), S1_LOBITS(logn));
+	v = Zf(decode_uncomp_sig)(s0, s1, es + u, sig_len - u, logn);
 	if (v == 0) {
 		return HAWK_ERR_FORMAT;
 	}

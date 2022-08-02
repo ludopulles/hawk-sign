@@ -30,9 +30,10 @@
  * @author   Ludo Pulles <ludo.pulles@cwi.nl>
  */
 
-#include <math.h>
-
 #include "inner.h"
+
+#define LOW_BITS_S0(logn) ((logn) == 10 ? 9U : 8U)
+#define LOW_BITS_S1(logn) ((logn) == 10 ? 6U : 5U)
 
 static const size_t low_bits_q00[11] = {
 	0 /* unused */, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6
@@ -115,11 +116,14 @@ Zf(encode_pubkey)(void *out, size_t max_out_len,
 
 		/*
 		 * Push as many zeros as necessary, then a one.
-		 * For n = 512: Since the absolute value is at most 511, w can only
-		 * range up to 15 at this point, thus we will add at most 16 bits here.
-		 * With the 6 bits above and possibly up to 7 bits from previous
-		 * iterations, we may go up to 28 bits, which will fit in the
-		 * accumulator, which is an uint32_t.
+		 *
+		 * HAWK-1024: Since the initial w is < 2^10, w can only range up to 15
+		 * at this point, thus we will add at most 16 bits here. With possibly
+		 * up to 7 bits from previous iterations and the 6+1 bits above, we
+		 * may go up to 30 bits, which will fit in an uint64_t accumulator.
+		 *
+		 * HAWK-512: w is <2^9/2^5 at this point and we get 5+1 bits from
+		 * above, so we may go up to 29 bits here.
 		 */
 		acc <<= (w + 1);
 		acc |= 1;
@@ -161,11 +165,15 @@ Zf(encode_pubkey)(void *out, size_t max_out_len,
 		acc_len += low_bits_q10[logn] + 1;
 
 		/*
-		 * Push as many zeros as necessary, then a one. Since the initial w is
-		 * at most 4095, w can only range up to 15 at this point, thus we will
-		 * add at most 16 bits here. With the 9 bits above and possibly up to 7
-		 * bits from previous iterations, we may go up to 32 bits, which will
-		 * fit in the accumulator, which is an uint32_t.
+		 * Push as many zeros as necessary, then a one.
+		 *
+		 * HAWK-1024: Since the initial w is < 2^14, w can only range up to 15
+		 * at this point, thus we will add at most 16 bits here. With possibly
+		 * up to 7 bits from previous iterations and the 10+1 bits above, we
+		 * may go up to 34 bits, which will fit in an uint64_t accumulator.
+		 *
+		 * HAWK-512: w is <2^12/2^9 at this point and we get 9+1 bits from
+		 * above, so we may go up to 25 bits here.
 		 */
 		acc <<= (w + 1);
 		acc |= 1;
@@ -362,8 +370,7 @@ Zf(decode_pubkey)(int16_t *q00, int16_t *q10,
 /* see inner.h */
 size_t
 Zf(encode_uncomp_sig)(void *out, size_t max_out_len,
-	const int16_t *s0, const int16_t *s1, unsigned logn,
-	size_t lo_bits_s0, size_t lo_bits_s1)
+	const int16_t *s0, const int16_t *s1, unsigned logn)
 {
 	uint8_t *buf;
 	uint16_t w;
@@ -400,10 +407,10 @@ Zf(encode_uncomp_sig)(void *out, size_t max_out_len,
 		/*
 		 * Push the lowest `lo_bits` bits of w which is equal to |x|'.
 		 */
-		acc <<= lo_bits_s0;
-		acc |= w & ((1U << lo_bits_s0) - 1);
-		w >>= lo_bits_s0;
-		acc_len += lo_bits_s0 + 1;
+		acc <<= LOW_BITS_S0(logn);
+		acc |= w & ((1U << LOW_BITS_S0(logn)) - 1);
+		acc_len += LOW_BITS_S0(logn) + 1;
+		w >>= LOW_BITS_S0(logn);
 
 		/*
 		 * Push as many zeros as necessary, then a one.
@@ -439,10 +446,10 @@ Zf(encode_uncomp_sig)(void *out, size_t max_out_len,
 		/*
 		 * Push the lowest `lo_bits` bits of w which is equal to |x|'.
 		 */
-		acc <<= lo_bits_s1;
-		acc |= w & ((1U << lo_bits_s1) - 1);
-		w >>= lo_bits_s1;
-		acc_len += lo_bits_s1 + 1;
+		acc <<= LOW_BITS_S1(logn);
+		acc |= w & ((1U << LOW_BITS_S1(logn)) - 1);
+		acc_len += LOW_BITS_S1(logn) + 1;
+		w >>= LOW_BITS_S1(logn);
 
 		/*
 		 * Push as many zeros as necessary, then a one.
@@ -485,8 +492,7 @@ Zf(encode_uncomp_sig)(void *out, size_t max_out_len,
 
 size_t
 Zf(decode_uncomp_sig)(int16_t *s0, int16_t *s1,
-	const void *in, size_t max_in_len, unsigned logn,
-	size_t lo_bits_s0, size_t lo_bits_s1)
+	const void *in, size_t max_in_len, unsigned logn)
 {
 	const uint8_t *buf;
 	uint16_t s, w;
@@ -510,13 +516,13 @@ Zf(decode_uncomp_sig)(int16_t *s0, int16_t *s1,
 		/*
 		 * Get next lo_bits bits that make up the lowest significant bits of w.
 		 */
-		if (acc_len < lo_bits_s0) {
+		if (acc_len < LOW_BITS_S0(logn)) {
 			// should be true all the time
 			if (v >= max_in_len) return 0;
 			acc = (acc << 8) | buf[v ++];
 			acc_len += 8;
 
-			if (acc_len < lo_bits_s0) {
+			if (acc_len < LOW_BITS_S0(logn)) {
 				// should be true all the time
 				if (v >= max_in_len) return 0;
 				acc = (acc << 8) | buf[v ++];
@@ -527,7 +533,7 @@ Zf(decode_uncomp_sig)(int16_t *s0, int16_t *s1,
 		/*
 		 * Get lo_bits least significant bits of w.
 		 */
-		w = (acc >> (acc_len -= lo_bits_s0)) & ((1U << lo_bits_s0) - 1);
+		w = (acc >> (acc_len -= LOW_BITS_S0(logn))) & ((1U << LOW_BITS_S0(logn)) - 1);
 
 		/*
 		 * Recover the most significant bits of w: count number of consecutive
@@ -536,7 +542,7 @@ Zf(decode_uncomp_sig)(int16_t *s0, int16_t *s1,
 		for (;;) {
 			ENSUREBIT();
 			if (GETBIT() != 0) break;
-			w += (1U << lo_bits_s0);
+			w += (1U << LOW_BITS_S0(logn));
 
 			/*
 			 * Make sure no coefficient is too large.
@@ -557,7 +563,7 @@ Zf(decode_uncomp_sig)(int16_t *s0, int16_t *s1,
 		/*
 		 * Get next lo_bits bits that make up the lowest significant bits of w.
 		 */
-		if (acc_len < lo_bits_s1) {
+		if (acc_len < LOW_BITS_S1(logn)) {
 			// should be true all the time
 			if (v >= max_in_len) return 0;
 			acc = (acc << 8) | buf[v ++];
@@ -567,7 +573,7 @@ Zf(decode_uncomp_sig)(int16_t *s0, int16_t *s1,
 		/*
 		 * Get lo_bits least significant bits of w.
 		 */
-		w = (acc >> (acc_len -= lo_bits_s1)) & ((1U << lo_bits_s1) - 1);
+		w = (acc >> (acc_len -= LOW_BITS_S1(logn))) & ((1U << LOW_BITS_S1(logn)) - 1);
 
 		/*
 		 * Recover the most significant bits of w: count number of consecutive
@@ -576,7 +582,7 @@ Zf(decode_uncomp_sig)(int16_t *s0, int16_t *s1,
 		for (;;) {
 			ENSUREBIT();
 			if (GETBIT() != 0) break;
-			w += (1U << lo_bits_s1);
+			w += (1U << LOW_BITS_S1(logn));
 
 			/*
 			 * Make sure no coefficient is too large.
@@ -599,13 +605,12 @@ Zf(decode_uncomp_sig)(int16_t *s0, int16_t *s1,
 
 /* see inner.h */
 size_t
-Zf(encode_sig)(void *out, size_t max_out_len, const int16_t *s1, unsigned logn,
-	size_t lo_bits)
+Zf(encode_sig)(void *out, size_t max_out_len, const int16_t *s1, unsigned logn)
 {
 	size_t n, u, v;
 	uint8_t *buf;
 	int16_t bound;
-	uint64_t acc;
+	uint32_t acc;
 	unsigned acc_len;
 
 	n = MKN(logn);
@@ -636,25 +641,25 @@ Zf(encode_sig)(void *out, size_t max_out_len, const int16_t *s1, unsigned logn,
 		/*
 		 * Push the lowest `lo_bits` bits of w which is equal to |x| - [x < 0].
 		 */
-		acc <<= lo_bits;
-		acc |= w & ((1U << lo_bits) - 1);
-		w >>= lo_bits;
-		acc_len += lo_bits + 1;
+		acc <<= LOW_BITS_S1(logn);
+		acc |= w & ((1U << LOW_BITS_S1(logn)) - 1);
+		w >>= LOW_BITS_S1(logn);
+		acc_len += LOW_BITS_S1(logn) + 1;
 
 		/*
-		 * TODO: assume lo_bits = 5 in the thing below.
-		 * Push as many zeros as necessary, then a one. Since the initial w is
-		 * at most 511, w can only range up to 15 at this point, thus we will
-		 * add at most 16 bits here. With the 6 bits above and possibly up to 7
-		 * bits from previous iterations, we may go up to 29 bits, which will
-		 * fit in the accumulator, which is an uint32_t.
+		 * Push as many zeros as necessary, then a one.
+		 * 
+		 * HAWK-1024: Since the initial w is < 2^10, w can only range up to 15
+		 * at this point, thus we will add at most 16 bits here. With possibly
+		 * up to 7 bits from previous iterations and the 6+1 bits from above, we
+		 * may go up to 30 bits, which will fit in an uint32_t accumulator.
+		 *
+		 * HAWK-512: w is <2^9/2^5 at this point and we get 5+1 bits from
+		 * above, so we may go up to 29 bits here.
 		 */
 		acc <<= (w + 1);
 		acc |= 1;
 		acc_len += w + 1;
-
-		// TODO: remove when this check cannot fail anymore.
-		if (acc_len >= 64) return 0; // There is an overflow
 
 		/*
 		 * Produce all full bytes.
@@ -688,12 +693,11 @@ Zf(encode_sig)(void *out, size_t max_out_len, const int16_t *s1, unsigned logn,
 }
 
 size_t
-Zf(decode_sig)(int16_t *s1, const void *in, size_t max_in_len, unsigned logn,
-	size_t lo_bits)
+Zf(decode_sig)(int16_t *s1, const void *in, size_t max_in_len, unsigned logn)
 {
 	const uint8_t *buf;
 	size_t n, u, v;
-	uint16_t acc;
+	uint32_t acc;
 	unsigned acc_len;
 
 	buf = (uint8_t *)in;
@@ -714,7 +718,7 @@ Zf(decode_sig)(int16_t *s1, const void *in, size_t max_in_len, unsigned logn,
 		/*
 		 * Get next lo_bits bits that make up the lowest significant bits of w.
 		 */
-		if (acc_len < lo_bits) {
+		if (acc_len < LOW_BITS_S1(logn)) {
 			// should be true all the time
 			if (v >= max_in_len) return 0;
 			acc = (acc << 8) | buf[v ++];
@@ -724,7 +728,7 @@ Zf(decode_sig)(int16_t *s1, const void *in, size_t max_in_len, unsigned logn,
 		/*
 		 * Get lo_bits least significant bits of w.
 		 */
-		w = (acc >> (acc_len -= lo_bits)) & ((1U << lo_bits) - 1);
+		w = (acc >> (acc_len -= LOW_BITS_S1(logn))) & ((1U << LOW_BITS_S1(logn)) - 1);
 
 		/*
 		 * Recover the most significant bits of w: count number of consecutive
@@ -735,7 +739,7 @@ Zf(decode_sig)(int16_t *s1, const void *in, size_t max_in_len, unsigned logn,
 			if (GETBIT() != 0) {
 				break;
 			}
-			w += (1U << lo_bits);
+			w += (1U << LOW_BITS_S1(logn));
 
 			/*
 			 * Make sure no coefficient is too large.

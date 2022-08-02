@@ -275,7 +275,7 @@ WorkerResult measure_signatures()
 		if (!Zf(verify)(h, s1, q00, q10, q11, logn, b))
 			result.fft_fail++;
 
-		/* size_t sig_sz = Zf(encode_sig)(NULL, 0, s1, logn, 5);
+		/* size_t sig_sz = Zf(encode_sig)(NULL, 0, s1, logn);
 		if (sig_sz == 0) {
 			result.sig_fail++;
 		} else {

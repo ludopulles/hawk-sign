@@ -30,8 +30,6 @@
  * @author   Ludo Pulles <ludo.pulles@cwi.nl>
  */
 
-#include <assert.h>
-
 #include "inner.h"
 
 /* ==================================================================== */
