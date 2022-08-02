@@ -34,14 +34,6 @@
 
 #include "inner.h"
 
-/* ============================================================================
- * Encoding/decoding that will be used with the signature scheme, as the gain
- * of a Huffman table is not significant but makes the code more complex.
- */
-
-#define BOUND_S0(logn) ((logn) == 10 ? 8192 : 2048)
-#define BOUND_S1(logn) ((logn) == 10 ? 1024 : 512)
-
 static const size_t low_bits_q00[11] = {
 	0 /* unused */, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6
 };
@@ -57,27 +49,30 @@ Zf(encode_pubkey)(void *out, size_t max_out_len,
 	uint8_t *buf;
 	size_t n, u, v;
 	uint16_t w, low_mask;
+	int16_t bound;
 	uint64_t acc;
 	unsigned acc_len;
 
 	n = MKN(logn);
 	buf = (uint8_t *)out;
 	low_mask = (1U << low_bits_q00[logn]) - 1;
+	bound = (int16_t)(1U << Zf(bits_q00)[logn]);
 
 	/*
 	 * Make sure no coefficient is too large.
 	 */
 	for (u = 1; u < n/2; u ++) {
-		if (q00[u] < -Zf(bound_q00)[logn] || q00[u] >= Zf(bound_q00)[logn]) {
+		if (q00[u] < -bound || q00[u] >= bound) {
 			return 0;
 		}
 	}
 
+	bound = (int16_t)(1U << Zf(bits_q10)[logn]);
 	/*
 	 * Make sure no coefficient is too large.
 	 */
 	for (u = 0; u < n; u ++) {
-		if (q10[u] < -Zf(bound_q10)[logn] || q10[u] >= Zf(bound_q10)[logn]) {
+		if (q10[u] < -bound || q10[u] >= bound) {
 			return 0;
 		}
 	}
@@ -91,7 +86,7 @@ Zf(encode_pubkey)(void *out, size_t max_out_len,
 	 * Encode q00.
 	 * The constant coefficient of q00 follows a chi-squared distribution, has
 	 * a mean of roughly sigma_pk^2 2n and is quite concentrated by [1] so will
-	 * surely fit in a uint16_t. Thus, print q00[0] in little-endian format.
+	 * surely fit in an uint16_t. Thus, print q00[0] in little-endian format.
 	 *
 	 * [1] https://en.wikipedia.org/wiki/Chi-squared_distribution#Concentration
 	 */
@@ -225,6 +220,7 @@ Zf(decode_pubkey)(int16_t *q00, int16_t *q10,
 	size_t n, u, v;
 	uint64_t acc;
 	uint16_t low_mask, high_inc;
+	int16_t bound;
 	unsigned acc_len;
 
 	buf = (uint8_t *)in;
@@ -232,6 +228,7 @@ Zf(decode_pubkey)(int16_t *q00, int16_t *q10,
 	acc = acc_len = 0;
 	high_inc = (1U << low_bits_q00[logn]);
 	low_mask = high_inc - 1;
+	bound = (int16_t)(1U << Zf(bits_q00)[logn]);
 
 	/*
 	 * Decode q00.
@@ -278,7 +275,7 @@ Zf(decode_pubkey)(int16_t *q00, int16_t *q10,
 				break;
 			}
 			w += high_inc;
-			if (w >= Zf(bound_q00)[logn]) {
+			if (w >= bound) {
 				return 0;
 			}
 		}
@@ -300,6 +297,7 @@ Zf(decode_pubkey)(int16_t *q00, int16_t *q10,
 	 */
 	high_inc = (1U << low_bits_q10[logn]);
 	low_mask = high_inc - 1;
+	bound = (int16_t)(1U << Zf(bits_q10)[logn]);
 	for (u = 0; u < n; u ++) {
 		uint16_t s, w;
 
@@ -343,7 +341,7 @@ Zf(decode_pubkey)(int16_t *q00, int16_t *q10,
 				break;
 			}
 			w += high_inc;
-			if (w >= Zf(bound_q10)[logn]) {
+			if (w >= bound) {
 				return 0;
 			}
 		}
@@ -369,6 +367,7 @@ Zf(encode_uncomp_sig)(void *out, size_t max_out_len,
 {
 	uint8_t *buf;
 	uint16_t w;
+	int16_t bound_s0, bound_s1;
 	size_t n, u, v;
 	uint64_t acc;
 	unsigned acc_len;
@@ -379,9 +378,11 @@ Zf(encode_uncomp_sig)(void *out, size_t max_out_len,
 	/*
 	 * Make sure no coefficient is too large.
 	 */
+	bound_s0 = (int16_t)(1U << Zf(bits_s0)[logn]);
+	bound_s1 = (int16_t)(1U << Zf(bits_s1)[logn]);
 	for (u = 0; u < n; u ++) {
-		if (s0[u] < -BOUND_S0(logn) || s0[u] >= BOUND_S0(logn) ||
-			s1[u] < -BOUND_S1(logn) || s1[u] >= BOUND_S1(logn)) return 0;
+		if (s0[u] < -bound_s0 || s0[u] >= bound_s0 ||
+			s1[u] < -bound_s1 || s1[u] >= bound_s1) return 0;
 	}
 
 	acc = 0;
@@ -540,7 +541,7 @@ Zf(decode_uncomp_sig)(int16_t *s0, int16_t *s1,
 			/*
 			 * Make sure no coefficient is too large.
 			 */
-			if (w >= BOUND_S0(logn)) return 0;
+			if (w >= (1U << Zf(bits_s0)[logn])) return 0;
 		}
 
 		s0[u] = w ^ -s;
@@ -580,7 +581,7 @@ Zf(decode_uncomp_sig)(int16_t *s0, int16_t *s1,
 			/*
 			 * Make sure no coefficient is too large.
 			 */
-			if (w >= BOUND_S1(logn)) return 0;
+			if (w >= (1U << Zf(bits_s1)[logn])) return 0;
 		}
 
 		s1[u] = w ^ -s;
@@ -601,8 +602,9 @@ size_t
 Zf(encode_sig)(void *out, size_t max_out_len, const int16_t *s1, unsigned logn,
 	size_t lo_bits)
 {
-	uint8_t *buf;
 	size_t n, u, v;
+	uint8_t *buf;
+	int16_t bound;
 	uint64_t acc;
 	unsigned acc_len;
 
@@ -612,8 +614,9 @@ Zf(encode_sig)(void *out, size_t max_out_len, const int16_t *s1, unsigned logn,
 	/*
 	 * Make sure no coefficient is too large.
 	 */
+	bound = (1U << Zf(bits_s1)[logn]);
 	for (u = 0; u < n; u ++) {
-		if (s1[u] < -BOUND_S1(logn) || s1[u] >= BOUND_S1(logn)) return 0;
+		if (s1[u] < -bound || s1[u] >= bound) return 0;
 	}
 
 
@@ -737,7 +740,7 @@ Zf(decode_sig)(int16_t *s1, const void *in, size_t max_in_len, unsigned logn,
 			/*
 			 * Make sure no coefficient is too large.
 			 */
-			if (w >= BOUND_S1(logn)) return 0;
+			if (w >= (1U << Zf(bits_s1)[logn])) return 0;
 		}
 
 		s1[u] = w ^ -s;

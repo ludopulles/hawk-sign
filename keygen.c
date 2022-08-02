@@ -4059,7 +4059,7 @@ Zf(keygen)(inner_shake256_context *sc,
 	 */
 	size_t n, hn, u;
 	uint8_t fg_okay;
-	int32_t norm, x;
+	int32_t norm, bound, x;
 	uint32_t p, p0i, *gm, *igm, *rf1, *rf2;
 	prng rng;
 	fpr *rt1, *rt2, *rt3, *rt4, *rt5;
@@ -4225,22 +4225,27 @@ Zf(keygen)(inner_shake256_context *sc,
 		/*
 		 * Check the bounds on q00 and q11.
 		 */
+		bound = (int32_t)(1U << Zf(bits_q00)[logn]);
 		for (u = 1; u < hn; u++) {
 			x = fpr_rint(rt1[u]);
-			fg_okay &= (x - Zf(bound_q00)[logn]) >> 31;
-			fg_okay &= (-Zf(bound_q00)[logn] - x) >> 31;
+			fg_okay &= (+x - bound) >> 31;
+			fg_okay &= (-x - bound) >> 31;
 			fg_okay &= x == -fpr_rint(rt1[n - u]);
+		}
 
+		bound = (int32_t)(1U << Zf(bits_q11)[logn]);
+		for (u = 1; u < hn; u++) {
 			x = fpr_rint(rt3[u]);
-			fg_okay &= (x - Zf(bound_q11)[logn]) >> 31;
-			fg_okay &= (-Zf(bound_q11)[logn] - x) >> 31;
+			fg_okay &= (+x - bound) >> 31;
+			fg_okay &= (-x - bound) >> 31;
 			fg_okay &= x == -fpr_rint(rt3[n - u]);
 		}
 
+		bound = (int32_t)(1U << Zf(bits_q10)[logn]);
 		for (u = 0; u < n; u++) {
 			x = fpr_rint(rt5[u]);
-			fg_okay &= (x - Zf(bound_q10)[logn]) >> 31;
-			fg_okay &= (-Zf(bound_q10)[logn] - x) >> 31;
+			fg_okay &= (+x - bound) >> 31;
+			fg_okay &= (-x - bound) >> 31;
 		}
 
 		if (fg_okay == 0) {

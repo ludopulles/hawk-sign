@@ -459,10 +459,29 @@ extern const uint32_t Zf(l2bound_1024)[11];
  * its respective bound with index logn, with the exception of the constant
  * coefficient in q00 and q11 as these follow a chi-squared distribution and
  * are therefore concentrated around their averages.
+ *
+ * Values are expressed as number of bits after the sign.
+ * e.g.: |q00[u]| < 2^Zf(bits_q00)[logn] must hold for all 0 < u < n.
+ *
+ * Note, 1 << Zf(bits_q00)[logn] and 1 << Zf(bits_q10)[logn] can be of type
+ * int16_t, but 1 << Zf(bits_q11)[logn] needs to be of type (at least) int32_t.
  */
-extern const int16_t Zf(bound_q00)[11];
-extern const int16_t Zf(bound_q10)[11];
-extern const int32_t Zf(bound_q11)[11];
+extern const unsigned Zf(bits_q00)[11];
+extern const unsigned Zf(bits_q10)[11];
+extern const unsigned Zf(bits_q11)[11];
+
+/*
+ * A signature (s1) should be rejected whenever one of its coefficients has a
+ * value x with x >= B or x < -B, with B the respective bound with index logn.
+ *
+ * In the uncompressed version, one should also check coefficients of s0 for a
+ * signature (s0, s1) with the bound for s0.
+ *
+ * Values are expressed as number of bits after the sign.
+ * e.g.: |s1[u]| < 2^Zf(bits_s1)[logn] must hold for all 0 <= u < n.
+ */
+extern const unsigned Zf(bits_s0)[11];
+extern const unsigned Zf(bits_s1)[11];
 
 /*
  * Convert an integer polynomial (with small values) to floating point numbers.

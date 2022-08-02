@@ -455,7 +455,7 @@ mq_div(uint32_t x, uint32_t y)
 	/*
 	 * We invert y by computing y^(q-2) mod q.
 	 *
-	 * We use the following addition chain for exponent e = 12287:
+	 * We use the following addition chain for exponent e = 18431:
 	 *
 	 *   e0 = 1
 	 *   e1 = 2 * e0 = 2
