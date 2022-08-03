@@ -37,8 +37,6 @@ bin/config_FG: tests/config_FG.c $(OBJ)
 	$(CC) $(CFLAGS) -o bin/config_FG $(filter-out build/keygen.o,$(OBJ)) tests/config_FG.c $(LIBS)
 bin/speed: tests/speed.c build/hawk.o $(OBJ)
 	$(CC) $(CFLAGS) -o bin/speed build/hawk.o $(OBJ) tests/speed.c $(LIBS)
-bin/skpk_size: tests/skpk_size.c $(OBJ)
-	$(CC) $(CFLAGS) -o bin/skpk_size $(OBJ) tests/skpk_size.c $(LIBS)
 
 # C++
 bin/test_sign: tests/test_sign.cpp $(OBJ)
@@ -53,6 +51,8 @@ bin/test_decompress_sig: tests/test_decompress_sig.cpp $(OBJ)
 	$(CXX) $(CXXFLAGS) -o bin/test_decompress_sig tests/test_decompress_sig.cpp $(OBJ) $(LIBS)
 bin/fixedpoint: tests/fixedpoint.cpp $(OBJ)
 	$(CXX) $(CXXFLAGS) -o bin/fixedpoint tests/fixedpoint.cpp $(OBJ) $(LIBS)
+bin/skpk_size: tests/skpk_size.cpp $(OBJ)
+	$(CXX) $(CXXFLAGS) -o bin/skpk_size $(OBJ) tests/skpk_size.cpp $(LIBS)
 
 # Object files:
 build/common.o: common.c $(HEAD)
