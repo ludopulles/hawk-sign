@@ -1662,7 +1662,7 @@ int Zf(verify_NTT)(const uint8_t *restrict h,
 	 */
 	size_t n, hn, u, v, w, sh_s1, sh_q00, sh_q10, sh_back;
 	uint8_t hash, *atmp;
-	int16_t *s0;
+	int16_t bound_s0, *s0;
 	int32_t *t0, *t1, *t2;
 	int64_t cst_term;
 
@@ -1753,6 +1753,26 @@ int Zf(verify_NTT)(const uint8_t *restrict h,
 				s0[w] = fpp_rint(t0[w], sh_back + 1);
 				hash >>= 1;
 			}
+		}
+	}
+
+	/*
+	 * If there is a coefficient in s0 with too large absolute value, reject
+	 * the signature. The bound is chosen such that is extremely unlikely to
+	 * reject a valid signature because of this.
+	 * However, this bound is need to do a norm check with two primes of 31
+	 * bits which does not accept invalid signatures with a squared norm that
+	 * wraps around both primes in a way that it becomes small modulo both
+	 * primes.
+	 */
+	bound_s0 = (int16_t)(1U << Zf(bits_s0)[logn]) - 1;
+	for (u = 0; u < n; u++) {
+		if (s0[u] < -bound_s0 || s0[u] >= bound_s0) {
+			/*
+			 * This does not break constant-time principle, as there are no
+			 * hidden variables used in verification.
+			 */
+			return 0;
 		}
 	}
 
