@@ -57,10 +57,10 @@ const unsigned Zf(bits_q11)[11] = {
 
 /* see inner.h */
 const unsigned Zf(bits_s0)[11] = {
-	0 /* unused */, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13
+	0 /* unused */, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14
 };
 const unsigned Zf(bits_s1)[11] = {
-	0 /* unused */, 5, 6, 6, 7, 7, 8,  8,  9,  9, 10
+	0 /* unused */, 5, 6, 6, 7, 7,  8,  8,  9,  9, 10
 };
 
 /* see inner.h */

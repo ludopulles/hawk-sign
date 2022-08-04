@@ -385,8 +385,8 @@ Zf(encode_uncomp_sig)(void *out, size_t max_out_len,
 	/*
 	 * Make sure no coefficient is too large.
 	 */
-	bound_s0 = (int16_t)(1U << Zf(bits_s0)[logn]);
-	bound_s1 = (int16_t)(1U << Zf(bits_s1)[logn]);
+	bound_s0 = (int16_t)(1U << Zf(bits_s0)[logn]) - 1;
+	bound_s1 = (int16_t)(1U << Zf(bits_s1)[logn]) - 1;
 	for (u = 0; u < n; u ++) {
 		if (s0[u] < -bound_s0 || s0[u] >= bound_s0 ||
 			s1[u] < -bound_s1 || s1[u] >= bound_s1) return 0;
@@ -496,6 +496,7 @@ Zf(decode_uncomp_sig)(int16_t *s0, int16_t *s1,
 {
 	const uint8_t *buf;
 	uint16_t s, w;
+	int16_t bound_s0, bound_s1;
 	size_t n, u, v;
 	uint64_t acc;
 	unsigned acc_len;
@@ -505,6 +506,8 @@ Zf(decode_uncomp_sig)(int16_t *s0, int16_t *s1,
 	acc = 0;
 	acc_len = 0;
 	v = 0;
+	bound_s0 = (int16_t)(1U << Zf(bits_s0)[logn]) - 1;
+	bound_s1 = (int16_t)(1U << Zf(bits_s1)[logn]) - 1;
 
 	for (u = 0; u < n; u ++) {
 		/*
@@ -547,7 +550,7 @@ Zf(decode_uncomp_sig)(int16_t *s0, int16_t *s1,
 			/*
 			 * Make sure no coefficient is too large.
 			 */
-			if (w >= (1U << Zf(bits_s0)[logn])) return 0;
+			if (w >= bound_s0) return 0;
 		}
 
 		s0[u] = w ^ -s;
@@ -587,7 +590,7 @@ Zf(decode_uncomp_sig)(int16_t *s0, int16_t *s1,
 			/*
 			 * Make sure no coefficient is too large.
 			 */
-			if (w >= (1U << Zf(bits_s1)[logn])) return 0;
+			if (w >= bound_s1) return 0;
 		}
 
 		s1[u] = w ^ -s;
@@ -619,7 +622,7 @@ Zf(encode_sig)(void *out, size_t max_out_len, const int16_t *s1, unsigned logn)
 	/*
 	 * Make sure no coefficient is too large.
 	 */
-	bound = (1U << Zf(bits_s1)[logn]);
+	bound = (1U << Zf(bits_s1)[logn]) - 1;
 	for (u = 0; u < n; u ++) {
 		if (s1[u] < -bound || s1[u] >= bound) return 0;
 	}
@@ -697,6 +700,7 @@ Zf(decode_sig)(int16_t *s1, const void *in, size_t max_in_len, unsigned logn)
 {
 	const uint8_t *buf;
 	size_t n, u, v;
+	int16_t bound;
 	uint32_t acc;
 	unsigned acc_len;
 
@@ -705,6 +709,7 @@ Zf(decode_sig)(int16_t *s1, const void *in, size_t max_in_len, unsigned logn)
 	acc = 0;
 	acc_len = 0;
 	v = 0;
+	bound = (1U << Zf(bits_s1)[logn]) - 1;
 
 	for (u = 0; u < n; u ++) {
 		uint16_t s, w;
@@ -744,7 +749,7 @@ Zf(decode_sig)(int16_t *s1, const void *in, size_t max_in_len, unsigned logn)
 			/*
 			 * Make sure no coefficient is too large.
 			 */
-			if (w >= (1U << Zf(bits_s1)[logn])) return 0;
+			if (w >= bound) return 0;
 		}
 
 		s1[u] = w ^ -s;
