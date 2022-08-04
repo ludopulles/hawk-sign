@@ -166,6 +166,7 @@ bench_keygen(void *ctx, unsigned long num)
 	return 0;
 }
 
+#ifdef HAWK_AVX
 static int
 bench_expand_seckey(void *ctx, unsigned long num)
 {
@@ -179,6 +180,7 @@ bench_expand_seckey(void *ctx, unsigned long num)
 	}
 	return 0;
 }
+#endif
 
 static int
 bench_uncompressed_sign(void *ctx, unsigned long num)
@@ -212,6 +214,7 @@ bench_sign_dyn(void *ctx, unsigned long num)
 	return 0;
 }
 
+#ifdef HAWK_AVX
 static int
 bench_sign(void *ctx, unsigned long num)
 {
@@ -227,6 +230,7 @@ bench_sign(void *ctx, unsigned long num)
 	}
 	return 0;
 }
+#endif
 
 static int
 bench_uncompressed_verify(void *ctx, unsigned long num)
@@ -288,8 +292,10 @@ test_speed_hawk(unsigned logn, double threshold)
 	printf(" %8.2f", do_bench(&bench_keygen, &bc, threshold) / 1000000.0);
 	fflush(stdout);
 
+#ifdef HAWK_AVX
 	printf(" %8.2f", do_bench(&bench_expand_seckey, &bc, threshold) / 1000.0);
 	fflush(stdout);
+#endif
 
 	// sign
 #ifdef HAWK_AVX
@@ -306,9 +312,12 @@ test_speed_hawk(unsigned logn, double threshold)
 #endif
 	printf(" %8.2f", do_bench(&bench_sign_dyn, &bc, threshold) / 1000.0);
 	fflush(stdout);
+
+#ifdef HAWK_AVX
 	bc.tmp = realloc(bc.tmp, bc.tmp_len = HAWK_TMPSIZE_SIGN(logn));
 	printf(" %8.2f", do_bench(&bench_sign, &bc, threshold) / 1000.0);
 	fflush(stdout);
+#endif
 
 	// verify
 #ifdef HAWK_AVX
@@ -357,11 +366,20 @@ main(int argc, char *argv[])
 		exit(EXIT_FAILURE);
 	}
 	printf("time threshold = %.4f s\n", threshold);
+#ifdef HAWK_AVX
 	printf("kg = keygen, ek = expand private key\n");
 	printf("su = uncompressed sign, sd = sign (without ek), sek = sign (with ek), vu = uncompressed verify, vv = verify\n");
+#else
+	printf("kg = keygen\n");
+	printf("su = uncompressed sign, sd = sign, vu = uncompressed verify, vv = verify\n");
+#endif
 	printf("keygen in milliseconds, other values in microseconds\n");
 	printf("\n");
+#ifdef HAWK_AVX
 	printf("degree  kg(ms)   ek(us)   su(us)   sd(us)   sek(us)  vu(us)   vv(us)\n");
+#else
+	printf("degree  kg(ms)   su(us)   sd(us)   vu(us)   vv(us)\n");
+#endif
 	fflush(stdout);
 
 	for (unsigned logn = 1; logn <= 10; logn++) {
