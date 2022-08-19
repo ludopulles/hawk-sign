@@ -4110,7 +4110,7 @@ Zf(keygen)(inner_shake256_context *sc,
 			 * For n = 512, we reject a key pair if cst(1/q00) >= 1/1000, as
 			 * the failure probability of decompressing a signature is bounded
 			 * from above by 1.9e-32 < 2^{-105}. Experimentally this fails
-			 * with probability of 9%.
+			 * with a probability of 9%.
 			 */
 			fg_okay &= fpr_lt(rt1[0], fpr_inv(fpr_of(1000)));
 		} else if (logn == 10) {
@@ -4118,7 +4118,7 @@ Zf(keygen)(inner_shake256_context *sc,
 			 * For n = 1024, we reject a key pair if cst(1/q00) >= 1/3000, as
 			 * the failure probability of decompressing a signature is bounded
 			 * from above by 1.2e-95 < 2^{-315}. Experimentally this fails
-			 * with probability of 0.9%.
+			 * with a probability of 0.9%.
 			 */
 			fg_okay &= fpr_lt(rt1[0], fpr_inv(fpr_of(3000)));
 		}
