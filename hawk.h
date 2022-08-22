@@ -413,7 +413,7 @@ extern const size_t HAWK_PUBKEY_SIZE[11];
  * Temporary buffer size for computing the public key from the secret key.
  */
 #define HAWK_TMPSIZE_MAKEPUB(logn) \
-	((6u << (logn)) + 1)
+	((24u << (logn)) + 3)
 
 /*
  * Temporary buffer size for dynamically generating an uncompressed signature.

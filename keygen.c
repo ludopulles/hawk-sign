@@ -31,6 +31,7 @@
  */
 
 #include "inner.h"
+#include <assert.h>
 
 /* ==================================================================== */
 /*
@@ -789,13 +790,13 @@ modp_Rx(unsigned x, uint32_t p, uint32_t p0i, uint32_t R2)
  *   R     2^31 mod R
  */
 static uint32_t
-modp_div(uint32_t a, uint32_t b, uint32_t p, uint32_t p0i, uint32_t R)
+modp_div(uint32_t a, uint32_t b, uint32_t p, uint32_t p0i)
 {
 	uint32_t z, e;
 	int i;
 
 	e = p - 2;
-	z = R;
+	z = modp_R(p);
 	for (i = 30; i >= 0; i --) {
 		uint32_t z2;
 
@@ -944,7 +945,7 @@ modp_mkgm2(uint32_t *restrict gm, uint32_t *restrict igm, unsigned logn,
 		g = modp_montymul(g, g, p, p0i);
 	}
 
-	ig = modp_div(R2, g, p, p0i, modp_R(p));
+	ig = modp_div(R2, g, p, p0i);
 	k = 10 - logn;
 	x1 = x2 = modp_R(p);
 	for (u = 0; u < n; u ++) {
@@ -3968,49 +3969,105 @@ solve_NTRU(unsigned logn, int8_t *F, int8_t *G,
 void
 Zf(make_public)(const int8_t *restrict f, const int8_t *restrict g,
 	const int8_t *restrict F, const int8_t *restrict G,
-	int16_t *restrict iq00, int16_t *restrict iq10,
+	int16_t *restrict iq00, int16_t *restrict iq10, int16_t *restrict iq11,
 	unsigned logn, uint8_t *restrict tmp)
 {
-	size_t n, u;
-	uint16_t *q00, *q10, *reg0, *reg1;
+	size_t n, u, v;
+	uint32_t p, p0i, R2, *gm, *igm, *t0, *t1, *t2, *t3;
 
 	n = MKN(logn);
-	q00 = (uint16_t *)iq00;
-	q10 = (uint16_t *)iq10;
-	reg0 = (uint16_t *)tmp;
-	reg1 = reg0 + n;
+	p = PRIMES[0].p;
+	p0i = modp_ninv31(p);
+	R2 = modp_R2(p, p0i);
 
-	Zf(NTT_NTRU)(f, g, F, G, q00, reg0, q10, reg1, logn);
+	gm = (uint32_t *)tmp;
+	igm = gm + n;
+	t0 = igm + n;
+	t1 = t0 + n;
+	t2 = t1 + n;
+	t3 = t2 + n;
 
-	/*
-	 * First store F*adj(f) in q10 and G*adj(g) in reg1.
-	 * Then calculate q10 = F*adj(f) + G*adj(g)
-	 */
-	Zf(mq_poly_muladj)(q10, q00, logn);
-	Zf(mq_poly_muladj)(reg1, reg0, logn);
+	modp_mkgm2(gm, igm, logn, PRIMES[0].g, p, p0i);
+
 	for (u = 0; u < n; u++) {
-		q10[u] = Zf(mq_add)(q10[u], reg1[u]);
+		t0[u] = modp_set((int32_t)f[u], p);
+		t1[u] = modp_set((int32_t)g[u], p);
+		t2[u] = modp_set((int32_t)F[u], p);
+	}
+	modp_NTT2(t0, gm, logn, p, p0i);
+	modp_NTT2(t1, gm, logn, p, p0i);
+	modp_NTT2(t2, gm, logn, p, p0i);
+
+	if (G == NULL) {
+		/*
+		 * Compute (in NTT representation) G = (1 + gF) / f.
+		 */
+		for (u = 0; u < n; u++) {
+			t3[u] = modp_montymul(t1[u], R2, p, p0i);
+			t3[u] = modp_add(1U, modp_montymul(t3[u], t2[u], p, p0i), p);
+			t3[u] = modp_div(t3[u], t0[u], p, p0i);
+		}
+	} else {
+		for (u = 0; u < n; u++) {
+			t3[u] = modp_set((int32_t)G[u], p);
+		}
+		modp_NTT2(t3, gm, logn, p, p0i);
 	}
 
-	/*
-	 * Then calculate q00 = f*adj(f) + g*adj(g).
-	 */
-	Zf(mq_poly_mulselfadj)(q00, logn);
-	Zf(mq_poly_mulselfadj)(reg0, logn);
-	for (u = 0; u < n; u++) {
-		q00[u] = Zf(mq_add)(q00[u], reg0[u]);
+	for (u = 0, v = n - 1; u < v; u++, v--) {
+		uint32_t q00, q10a, q10b;
+
+		/*
+		 * Calculate q00 = adj(f) * f + adj(g) * g.
+		 */
+		q00 = modp_add(
+			modp_montymul(t0[u], t0[v], p, p0i),
+			modp_montymul(t1[u], t1[v], p, p0i), p);
+		q00 = modp_montymul(q00, R2, p, p0i);
+
+		/*
+		 * Calculate q10 = adj(f) * F + adj(g) * G.
+		 */
+		q10a = modp_add(
+			modp_montymul(t0[v], t2[u], p, p0i),
+			modp_montymul(t1[v], t3[u], p, p0i), p);
+		q10b = modp_add(
+			modp_montymul(t0[u], t2[v], p, p0i),
+			modp_montymul(t1[u], t3[v], p, p0i), p);
+		q10a = modp_montymul(q10a, R2, p, p0i);
+		q10b = modp_montymul(q10b, R2, p, p0i);
+
+		/*
+		 * Now store the result in t0, t1.
+		 */
+		t0[u] = t0[v] = q00;
+		t1[u] = q10a;
+		t1[v] = q10b;
+
+		if (iq11 != NULL) {
+			/*
+			 * Calculate q11 = adj(f) * f + adj(g) * g and store result in t2.
+			 */
+			t2[u] = modp_add(
+				modp_montymul(t2[u], t2[v], p, p0i),
+				modp_montymul(t3[u], t3[v], p, p0i), p);
+			t2[u] = t2[v] = modp_montymul(t2[u], R2, p, p0i);
+		}
 	}
 
-	Zf(mq_iNTT)(q00, logn);
-	Zf(mq_iNTT)(q10, logn);
+	modp_iNTT2(t0, igm, logn, p, p0i);
+	modp_iNTT2(t1, igm, logn, p, p0i);
 
-	/*
-	 * Store result in iq00, iq10 while actually overwriting these memory
-	 * locations.
-	 */
 	for (u = 0; u < n; u++) {
-		iq00[u] = Zf(mq_conv_signed)(q00[u]);
-		iq10[u] = Zf(mq_conv_signed)(q10[u]);
+		iq00[u] = modp_norm(t0[u], p);
+		iq10[u] = modp_norm(t1[u], p);
+	}
+
+	if (iq11 != NULL) {
+		modp_iNTT2(t2, igm, logn, p, p0i);
+		for (u = 0; u < n; u++) {
+			iq11[u] = modp_norm(t2[u], p);
+		}
 	}
 }
 
@@ -4042,19 +4099,21 @@ Zf(keygen)(inner_shake256_context *sc,
 	 */
 	size_t n, hn, u;
 	uint8_t fg_okay;
+	int16_t *iq11, *atmp;
 	int32_t norm, bound, x;
 	uint32_t p, p0i, *gm, *igm, *rf1, *rf2;
 	prng rng;
-	fpr *rt1, *rt2, *rt3, *rt4, *rt5;
+	fpr *rt1, *rt2, *rt3;
 
 	n = MKN(logn);
 	hn = n >> 1;
 
+	iq11 = (int16_t *)tmp;
+	atmp = iq11 + n;
+
 	rt1 = (fpr *)tmp;
 	rt2 = rt1 + n;
 	rt3 = rt2 + n;
-	rt4 = rt3 + n;
-	rt5 = rt4 + n;
 
 	gm = (uint32_t *)tmp;
 	igm = gm + n;
@@ -4083,7 +4142,7 @@ Zf(keygen)(inner_shake256_context *sc,
 		fg_okay = poly_small_mkgauss(&rng, f, logn)
 			& poly_small_mkgauss(&rng, g, logn) & 1u;
 
-		fg_okay &= Zf(mq_is_invertible)(f, logn, tmp);
+		fg_okay &= Zf(mf_is_invertible)(f, logn, tmp);
 
 		Zf(int8_to_fft)(rt2, f, logn);
 		Zf(int8_to_fft)(rt3, g, logn);
@@ -4153,8 +4212,11 @@ Zf(keygen)(inner_shake256_context *sc,
 			/*
 			 * Generation of (f, g) failed because:
 			 * 1) N(f) or N(g) was even,
-			 * 2) cst(q00) = ||(f,g)||^2 < l2bound(logn)/4, or
-			 * 3) cst(1/q00) >= 0.001.
+			 * 2) NTT(f) had zero coefficient,
+			 * 3) NTT(q00) had zero coefficient,
+			 * 4) cst(q00) = ||(f,g)||^2 < l2bound(logn)/4, or
+			 * 5) cst(1/q00) was too large.
+			 *
 			 * Thus, resample f and g.
 			 */
 			continue;
@@ -4170,70 +4232,40 @@ Zf(keygen)(inner_shake256_context *sc,
 			continue;
 		}
 
-		/*
-		 * Calculate the public key.
-		 */
-		Zf(int8_to_fft)(rt1, f, logn);
-		Zf(int8_to_fft)(rt2, g, logn);
-		Zf(int8_to_fft)(rt3, F, logn);
-		Zf(int8_to_fft)(rt4, G, logn);
-
-		/*
-		 * Compute q10 = F*adj(f) + G*adj(g).
-		 */
-		Zf(poly_add_muladj_fft)(rt5, rt3, rt4, rt1, rt2, logn);
-
-		/*
-		 * Compute q00 = f*adj(f) + g*adj(g).
-		 */
-		Zf(poly_mulselfadj_fft)(rt1, logn);
-		Zf(poly_mulselfadj_fft)(rt2, logn);
-		Zf(poly_add)(rt1, rt2, logn);
-
-		/*
-		 * Compute q11 = F*adj(F) + G*adj(G).
-		 */
-		Zf(poly_mulselfadj_fft)(rt3, logn);
-		Zf(poly_mulselfadj_fft)(rt4, logn);
-		Zf(poly_add)(rt3, rt4, logn);
-
-		/*
-		 * Apply inverse FFT on q00, q10, q11, and also put values of q00, q10
-		 * in iq00, iq10 respectively.
-		 */
-		Zf(fft_to_int16)(iq00, rt1, logn);
-		Zf(iFFT)(rt3, logn);
-		Zf(fft_to_int16)(iq10, rt5, logn);
+		Zf(make_public)(f, g, F, G, iq00, iq10, iq11, logn, (uint8_t *)atmp);
 
 		/*
 		 * Check the bounds on q00 and q11.
 		 */
 		bound = (int32_t)(1U << Zf(bits_q00)[logn]);
 		for (u = 1; u < hn; u++) {
-			x = fpr_rint(rt1[u]);
+			x = iq00[u];
 			fg_okay &= (+x - bound) >> 31;
 			fg_okay &= (-x - bound) >> 31;
-			fg_okay &= x == -fpr_rint(rt1[n - u]);
+			fg_okay &= x == -iq00[n - u];
 		}
 
 		bound = (int32_t)(1U << Zf(bits_q11)[logn]);
 		for (u = 1; u < hn; u++) {
-			x = fpr_rint(rt3[u]);
+			x = iq11[u];
 			fg_okay &= (+x - bound) >> 31;
 			fg_okay &= (-x - bound) >> 31;
-			fg_okay &= x == -fpr_rint(rt3[n - u]);
+			fg_okay &= x == -iq11[n - u];
 		}
 
 		bound = (int32_t)(1U << Zf(bits_q10)[logn]);
 		for (u = 0; u < n; u++) {
-			x = fpr_rint(rt5[u]);
+			x = iq10[u];
 			fg_okay &= (+x - bound) >> 31;
 			fg_okay &= (-x - bound) >> 31;
 		}
 
 		if (fg_okay == 0) {
 			/*
-			 * There was a coefficient that was too large.
+			 * There was a coefficient that was too large, i.e. there
+			 * was an x in the above with
+			 *   x <= -bound or x >= bound,
+			 * or q00 and q11 failed to be selfadjoint (should not happen).
 			 */
 			continue;
 		}

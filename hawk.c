@@ -292,9 +292,9 @@ hawk_make_public(void *pubkey, size_t pubkey_len, const void *seckey,
 	 */
 	iq00 = align_i16(tmp);
 	iq10 = iq00 + n;
-	atmp = (uint8_t *)(iq10 + n);
+	atmp = (uint8_t *)align_i32(iq10 + n);
 
-	Zf(make_public)(f, g, F, NULL, iq00, iq10, logn, atmp);
+	Zf(make_public)(f, g, F, NULL, iq00, iq10, NULL, logn, atmp);
 
 	/*
 	 * Encode public key.
