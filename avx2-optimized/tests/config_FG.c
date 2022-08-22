@@ -67,7 +67,6 @@ _solve_NTRU_intermediate(unsigned logn_top,
 	int scale_fg, minbl_fg, maxbl_fg, maxbl_FG, scale_k;
 	uint32_t *x, *y;
 	int32_t *k;
-	const small_prime *primes;
 
 	logn = logn_top - depth;
 	n = (size_t)1 << logn;
@@ -93,7 +92,6 @@ _solve_NTRU_intermediate(unsigned logn_top,
 		dlen = MAX_BL_SMALL_512[depth + 1];
 	}
 	llen = __MAX_BL_LARGE__[depth];
-	primes = PRIMES;
 
 	/*
 	 * Fd and Gd are the F and G from the deeper level.
@@ -136,7 +134,7 @@ _solve_NTRU_intermediate(unsigned logn_top,
 		size_t v;
 		uint32_t *xs, *ys, *xd, *yd;
 
-		p = primes[u].p;
+		p = PRIMES[u].p;
 		p0i = modp_ninv31(p);
 		R2 = modp_R2(p, p0i);
 		Rx = modp_Rx((unsigned)dlen, p, p0i, R2);
@@ -164,7 +162,7 @@ _solve_NTRU_intermediate(unsigned logn_top,
 		/*
 		 * All computations are done modulo p.
 		 */
-		p = primes[u].p;
+		p = PRIMES[u].p;
 		p0i = modp_ninv31(p);
 		R2 = modp_R2(p, p0i);
 
@@ -173,8 +171,8 @@ _solve_NTRU_intermediate(unsigned logn_top,
 		 * de-NTTized, and are in RNS; we can rebuild them.
 		 */
 		if (u == slen) {
-			zint_rebuild_CRT(ft, slen, slen, n, primes, 1, t1);
-			zint_rebuild_CRT(gt, slen, slen, n, primes, 1, t1);
+			zint_rebuild_CRT(ft, slen, slen, n, 1, t1);
+			zint_rebuild_CRT(gt, slen, slen, n, 1, t1);
 		}
 
 		gm = t1;
@@ -182,7 +180,7 @@ _solve_NTRU_intermediate(unsigned logn_top,
 		fx = igm + n;
 		gx = fx + n;
 
-		modp_mkgm2(gm, igm, logn, primes[u].g, p, p0i);
+		modp_mkgm2(gm, igm, logn, PRIMES[u].g, p, p0i);
 
 		if (u < slen) {
 			for (v = 0, x = ft + u, y = gt + u;
@@ -279,8 +277,8 @@ _solve_NTRU_intermediate(unsigned logn_top,
 	/*
 	 * Rebuild F and G with the CRT.
 	 */
-	zint_rebuild_CRT(Ft, llen, llen, n, primes, 1, t1);
-	zint_rebuild_CRT(Gt, llen, llen, n, primes, 1, t1);
+	zint_rebuild_CRT(Ft, llen, llen, n, 1, t1);
+	zint_rebuild_CRT(Gt, llen, llen, n, 1, t1);
 
 	/*
 	 * Record the sizes of Ft, Gt so we know the amount of bits we need to use

@@ -40,8 +40,8 @@ void find_seckeysizes(inner_shake256_context *sc) {
 	}
 }
 
-constexpr int nrepetitions = 5000;
-constexpr int nthreads = 20;
+constexpr int nrepetitions = 125;
+constexpr int nthreads = 4;
 
 struct WorkerResult {
 	long long iterations;

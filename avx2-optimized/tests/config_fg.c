@@ -139,7 +139,7 @@ void sample_fg_sizes(inner_shake256_context *rng, uint8_t *tmp)
 			memset(tmp, 0, (len << (logn - depth)) * sizeof fp);
 			make_fg(fp, f, g, logn, depth, 0);
 			// Rebuild fp, gp as polynomials of big integers
-			zint_rebuild_CRT(fp, len, len, 2 << (logn - depth), PRIMES, 1, t1);
+			zint_rebuild_CRT(fp, len, len, 2 << (logn - depth), 1, t1);
 
 			// determine sizes of fp, gp
 			uint32_t *ptr = fp;

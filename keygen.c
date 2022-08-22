@@ -1318,13 +1318,12 @@ zint_norm_zero(uint32_t *restrict x, const uint32_t *restrict p, size_t len)
  */
 static void
 zint_rebuild_CRT(uint32_t *restrict xx, size_t xlen, size_t xstride,
-	size_t num, const small_prime *primes, int normalize_signed,
-	uint32_t *restrict tmp)
+	size_t num, int normalize_signed, uint32_t *restrict tmp)
 {
 	size_t u;
 	uint32_t *x;
 
-	tmp[0] = primes[0].p;
+	tmp[0] = PRIMES[0].p;
 	for (u = 1; u < xlen; u ++) {
 		/*
 		 * At the entry of each loop iteration:
@@ -1338,8 +1337,8 @@ zint_rebuild_CRT(uint32_t *restrict xx, size_t xlen, size_t xstride,
 		uint32_t p, p0i, s, R2;
 		size_t v;
 
-		p = primes[u].p;
-		s = primes[u].s;
+		p = PRIMES[u].p;
+		s = PRIMES[u].s;
 		p0i = modp_ninv31(p);
 		R2 = modp_R2(p, p0i);
 
@@ -2136,7 +2135,6 @@ poly_sub_scaled_ntt(uint32_t *restrict F, size_t Flen, size_t Fstride,
 	uint32_t *gm, *igm, *fk, *t1, *x;
 	const uint32_t *y;
 	size_t n, u, tlen;
-	const small_prime *primes;
 
 	n = MKN(logn);
 	tlen = flen + 1;
@@ -2145,8 +2143,6 @@ poly_sub_scaled_ntt(uint32_t *restrict F, size_t Flen, size_t Fstride,
 	fk = igm + n;
 	t1 = fk + n * tlen;
 
-	primes = PRIMES;
-
 	/*
 	 * Compute k*f in fk[], in RNS notation.
 	 */
@@ -2154,11 +2150,11 @@ poly_sub_scaled_ntt(uint32_t *restrict F, size_t Flen, size_t Fstride,
 		uint32_t p, p0i, R2, Rx;
 		size_t v;
 
-		p = primes[u].p;
+		p = PRIMES[u].p;
 		p0i = modp_ninv31(p);
 		R2 = modp_R2(p, p0i);
 		Rx = modp_Rx((unsigned)flen, p, p0i, R2);
-		modp_mkgm2(gm, igm, logn, primes[u].g, p, p0i);
+		modp_mkgm2(gm, igm, logn, PRIMES[u].g, p, p0i);
 
 		for (v = 0; v < n; v ++) {
 			t1[v] = modp_set(k[v], p);
@@ -2180,7 +2176,7 @@ poly_sub_scaled_ntt(uint32_t *restrict F, size_t Flen, size_t Fstride,
 	/*
 	 * Rebuild k*f.
 	 */
-	zint_rebuild_CRT(fk, tlen, tlen, n, primes, 1, t1);
+	zint_rebuild_CRT(fk, tlen, tlen, n, 1, t1);
 
 	/*
 	 * Subtract k*f, scaled, from F.
@@ -2196,7 +2192,7 @@ poly_sub_scaled_ntt(uint32_t *restrict F, size_t Flen, size_t Fstride,
  * The following average lengths, in bits, have been measured on thousands
  * of random keys (fg = max length of the absolute value of coefficients
  * of f and g at that depth; FG = idem for the unreduced F and G; for the
- * maximum depth, F and G are the output of binary GCD, multiplied by q;
+ * maximum depth, F and G are the output of binary GCD;
  * for each value, the average and standard deviation are provided).
  *
  * Binary case:
@@ -2464,7 +2460,6 @@ make_fg_step(uint32_t *data, unsigned logn, unsigned depth,
 	size_t n, hn, u;
 	size_t slen, tlen;
 	uint32_t *fd, *gd, *fs, *gs, *gm, *igm, *t1;
-	const small_prime *primes;
 
 	n = MKN(logn);
 	hn = n >> 1;
@@ -2476,7 +2471,6 @@ make_fg_step(uint32_t *data, unsigned logn, unsigned depth,
 		slen = MAX_BL_SMALL_512[depth];
 		tlen = MAX_BL_SMALL_512[depth + 1];
 	}
-	primes = PRIMES;
 
 	/*
 	 * Prepare room for the result.
@@ -2499,10 +2493,10 @@ make_fg_step(uint32_t *data, unsigned logn, unsigned depth,
 		size_t v;
 		uint32_t *x;
 
-		p = primes[u].p;
+		p = PRIMES[u].p;
 		p0i = modp_ninv31(p);
 		R2 = modp_R2(p, p0i);
-		modp_mkgm2(gm, igm, logn, primes[u].g, p, p0i);
+		modp_mkgm2(gm, igm, logn, PRIMES[u].g, p, p0i);
 
 		for (v = 0, x = fs + u; v < n; v ++, x += slen) {
 			t1[v] = *x;
@@ -2550,8 +2544,8 @@ make_fg_step(uint32_t *data, unsigned logn, unsigned depth,
 	 * Since the fs and gs words have been de-NTTized, we can use the
 	 * CRT to rebuild the values.
 	 */
-	zint_rebuild_CRT(fs, slen, slen, n, primes, 1, gm);
-	zint_rebuild_CRT(gs, slen, slen, n, primes, 1, gm);
+	zint_rebuild_CRT(fs, slen, slen, n, 1, gm);
+	zint_rebuild_CRT(gs, slen, slen, n, 1, gm);
 
 	/*
 	 * Remaining words: use modular reductions to extract the values.
@@ -2561,11 +2555,11 @@ make_fg_step(uint32_t *data, unsigned logn, unsigned depth,
 		size_t v;
 		uint32_t *x;
 
-		p = primes[u].p;
+		p = PRIMES[u].p;
 		p0i = modp_ninv31(p);
 		R2 = modp_R2(p, p0i);
 		Rx = modp_Rx((unsigned)slen, p, p0i, R2);
-		modp_mkgm2(gm, igm, logn, primes[u].g, p, p0i);
+		modp_mkgm2(gm, igm, logn, PRIMES[u].g, p, p0i);
 		for (v = 0, x = fs; v < n; v ++, x += slen) {
 			t1[v] = zint_mod_small_signed(x, slen, p, p0i, R2, Rx);
 		}
@@ -2614,37 +2608,32 @@ make_fg(uint32_t *data, const int8_t *f, const int8_t *g,
 	unsigned logn, unsigned depth, int out_ntt)
 {
 	size_t n, u;
-	uint32_t *ft, *gt, p0;
+	uint32_t *ft, *gt, p;
 	unsigned d;
-	const small_prime *primes;
 
 	n = MKN(logn);
 	ft = data;
 	gt = ft + n;
-	primes = PRIMES;
-	p0 = primes[0].p;
+	p = PRIMES[0].p;
 	for (u = 0; u < n; u ++) {
-		ft[u] = modp_set(f[u], p0);
-		gt[u] = modp_set(g[u], p0);
+		ft[u] = modp_set(f[u], p);
+		gt[u] = modp_set(g[u], p);
 	}
 
 	if (depth == 0 && out_ntt) {
-		uint32_t *gm, *igm;
-		uint32_t p, p0i;
+		uint32_t *gm, *igm, p0i;
 
-		p = primes[0].p;
 		p0i = modp_ninv31(p);
 		gm = gt + n;
 		igm = gm + MKN(logn);
-		modp_mkgm2(gm, igm, logn, primes[0].g, p, p0i);
+		modp_mkgm2(gm, igm, logn, PRIMES[0].g, p, p0i);
 		modp_NTT2(ft, gm, logn, p, p0i);
 		modp_NTT2(gt, gm, logn, p, p0i);
 		return;
 	}
 
 	for (d = 0; d < depth; d ++) {
-		make_fg_step(data, logn - d, d,
-			d != 0, (d + 1) < depth || out_ntt);
+		make_fg_step(data, logn - d, d, d != 0, (d + 1) < depth || out_ntt);
 	}
 }
 
@@ -2661,14 +2650,12 @@ solve_NTRU_deepest(unsigned logn_top,
 {
 	size_t len;
 	uint32_t *Fp, *Gp, *fp, *gp, *t1;
-	const small_prime *primes;
 
 	if (logn_top == 10) {
 		len = MAX_BL_SMALL_1024[logn_top];
 	} else {
 		len = MAX_BL_SMALL_512[logn_top];
 	}
-	primes = PRIMES;
 
 	Fp = tmp;
 	Gp = Fp + len;
@@ -2683,7 +2670,7 @@ solve_NTRU_deepest(unsigned logn_top,
 	 * There are two such big integers. The resultants are always
 	 * nonnegative.
 	 */
-	zint_rebuild_CRT(fp, len, len, 2, primes, 0, t1);
+	zint_rebuild_CRT(fp, len, len, 2, 0, t1);
 
 	/*
 	 * Apply the binary GCD. The zint_bezout() function works only
@@ -2714,7 +2701,6 @@ solve_NTRU_intermediate(unsigned logn_top,
 	int scale_fg, minbl_fg, maxbl_fg, maxbl_FG, scale_k;
 	uint32_t *x, *y;
 	int32_t *k;
-	const small_prime *primes;
 
 	logn = logn_top - depth;
 	n = MKN(logn);
@@ -2741,7 +2727,6 @@ solve_NTRU_intermediate(unsigned logn_top,
 		dlen = MAX_BL_SMALL_512[depth + 1];
 		llen = MAX_BL_LARGE_512[depth];
 	}
-	primes = PRIMES;
 
 	/*
 	 * Fd and Gd are the F and G from the deeper level.
@@ -2784,7 +2769,7 @@ solve_NTRU_intermediate(unsigned logn_top,
 		size_t v;
 		uint32_t *xs, *ys, *xd, *yd;
 
-		p = primes[u].p;
+		p = PRIMES[u].p;
 		p0i = modp_ninv31(p);
 		R2p = modp_R2(p, p0i);
 		Rx = modp_Rx((unsigned)dlen, p, p0i, R2p);
@@ -2812,7 +2797,7 @@ solve_NTRU_intermediate(unsigned logn_top,
 		/*
 		 * All computations are done modulo p.
 		 */
-		p = primes[u].p;
+		p = PRIMES[u].p;
 		p0i = modp_ninv31(p);
 		R2p = modp_R2(p, p0i);
 
@@ -2821,8 +2806,8 @@ solve_NTRU_intermediate(unsigned logn_top,
 		 * de-NTTized, and are in RNS; we can rebuild them.
 		 */
 		if (u == slen) {
-			zint_rebuild_CRT(ft, slen, slen, n, primes, 1, t1);
-			zint_rebuild_CRT(gt, slen, slen, n, primes, 1, t1);
+			zint_rebuild_CRT(ft, slen, slen, n, 1, t1);
+			zint_rebuild_CRT(gt, slen, slen, n, 1, t1);
 		}
 
 		gm = t1;
@@ -2830,7 +2815,7 @@ solve_NTRU_intermediate(unsigned logn_top,
 		fx = igm + n;
 		gx = fx + n;
 
-		modp_mkgm2(gm, igm, logn, primes[u].g, p, p0i);
+		modp_mkgm2(gm, igm, logn, PRIMES[u].g, p, p0i);
 
 		if (u < slen) {
 			for (v = 0, x = ft + u, y = gt + u;
@@ -2927,8 +2912,8 @@ solve_NTRU_intermediate(unsigned logn_top,
 	/*
 	 * Rebuild F and G with the CRT.
 	 */
-	zint_rebuild_CRT(Ft, llen, llen, n, primes, 1, t1);
-	zint_rebuild_CRT(Gt, llen, llen, n, primes, 1, t1);
+	zint_rebuild_CRT(Ft, llen, llen, n, 1, t1);
+	zint_rebuild_CRT(Gt, llen, llen, n, 1, t1);
 
 	/*
 	 * At that point, Ft, Gt, ft and gt are consecutive in RAM (in that
@@ -3515,8 +3500,8 @@ solve_NTRU_binary_depth1(unsigned logn_top,
 	 * and G are consecutive, and thus can be rebuilt in a single
 	 * loop; similarly, the elements of f and g are consecutive.
 	 */
-	zint_rebuild_CRT(Ft, llen, llen, n << 1, PRIMES, 1, t1);
-	zint_rebuild_CRT(ft, slen, slen, n << 1, PRIMES, 1, t1);
+	zint_rebuild_CRT(Ft, llen, llen, n << 1, 1, t1);
+	zint_rebuild_CRT(ft, slen, slen, n << 1, 1, t1);
 
 	/*
 	 * Here starts the Babai reduction, specialized for depth = 1.
