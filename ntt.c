@@ -141,7 +141,13 @@ Zf(mf_mul)(uint32_t x, uint32_t y)
 	return z;
 }
 
-#define mf_sqr(x) Zf(mf_mul)((x), (x))
+static inline uint32_t
+mf_sqr(uint32_t x) {
+	x = x * x + (x >> 16);
+	x = (x & 0xFFFF) - (x >> 16);
+	x += FERMAT_P & -(x >> 31);
+	return x;
+}
 
 /* see inner.h */
 uint32_t
@@ -161,18 +167,36 @@ Zf(mf_div)(uint32_t x, uint32_t y)
 	 * e7 = 1111111100000000
 	 * e8 = 1111111111111111 = p-2
 	 */
-	uint32_t y1, y2, y3, y4, y5, y6, y7, y8;
+	uint32_t yp;
 
-	y1 = mf_sqr(y);
-	y2 = Zf(mf_mul)(y1, y);
-	y3 = mf_sqr(mf_sqr(y2));
-	y4 = Zf(mf_mul)(y3, y2);
-	y5 = mf_sqr(mf_sqr(mf_sqr(mf_sqr(y4))));
-	y6 = Zf(mf_mul)(y5, y4);
-	y7 = mf_sqr(mf_sqr(mf_sqr(mf_sqr(mf_sqr(mf_sqr(mf_sqr(mf_sqr(y6))))))));
-	y8 = Zf(mf_mul)(y7, y6);
+	yp = mf_sqr(y);
+	// 11
+	y = Zf(mf_mul)(y, yp);
 
-	return Zf(mf_mul)(x, y8);
+	yp = mf_sqr(y);
+	yp = mf_sqr(yp);
+	// 1111
+	y = Zf(mf_mul)(y, yp);
+
+	yp = mf_sqr(y);
+	yp = mf_sqr(yp);
+	yp = mf_sqr(yp);
+	yp = mf_sqr(yp);
+	// 11111111
+	y = Zf(mf_mul)(y, yp);
+
+	yp = mf_sqr(y);
+	yp = mf_sqr(yp);
+	yp = mf_sqr(yp);
+	yp = mf_sqr(yp);
+	yp = mf_sqr(yp);
+	yp = mf_sqr(yp);
+	yp = mf_sqr(yp);
+	yp = mf_sqr(yp);
+	// 1111111111111111
+	y = Zf(mf_mul)(y, yp);
+
+	return Zf(mf_mul)(x, y);
 }
 
 /*
