@@ -277,15 +277,13 @@ Zf(decode_pubkey)(int16_t *q00, int16_t *q10,
 		 * Recover the most significant bits of w: count number of consecutive
 		 * zeros up to the first 1 and add 2^5 to w for each one you see.
 		 */
-		for (;;) {
-			ENSUREBIT();
-			if (GETBIT() != 0) {
-				break;
-			}
+		ENSUREBIT();
+		while (GETBIT() == 0) {
 			w += high_inc;
 			if (w >= bound) {
 				return 0;
 			}
+			ENSUREBIT();
 		}
 
 		q00[u] = w ^ -s;
@@ -343,15 +341,13 @@ Zf(decode_pubkey)(int16_t *q00, int16_t *q10,
 		 * zeros up to the first 1 and add 2^low_bits_q10[logn] to w for each
 		 * one you see.
 		 */
-		for (;;) {
-			ENSUREBIT();
-			if (GETBIT() != 0) {
-				break;
-			}
+		ENSUREBIT();
+		while (GETBIT() == 0) {
 			w += high_inc;
 			if (w >= bound) {
 				return 0;
 			}
+			ENSUREBIT();
 		}
 
 		q10[u] = w ^ -s;
@@ -542,15 +538,15 @@ Zf(decode_uncomp_sig)(int16_t *s0, int16_t *s1,
 		 * Recover the most significant bits of w: count number of consecutive
 		 * zeros up to the first 1 and add 2^lo_bits to w for each one you see.
 		 */
-		for (;;) {
-			ENSUREBIT();
-			if (GETBIT() != 0) break;
+		ENSUREBIT();
+		while (GETBIT() == 0) {
 			w += (1U << LOW_BITS_S0(logn));
 
 			/*
 			 * Make sure no coefficient is too large.
 			 */
 			if (w >= bound_s0) return 0;
+			ENSUREBIT();
 		}
 
 		s0[u] = w ^ -s;
@@ -582,15 +578,15 @@ Zf(decode_uncomp_sig)(int16_t *s0, int16_t *s1,
 		 * Recover the most significant bits of w: count number of consecutive
 		 * zeros up to the first 1 and add 2^lo_bits to w for each one you see.
 		 */
-		for (;;) {
-			ENSUREBIT();
-			if (GETBIT() != 0) break;
+		ENSUREBIT();
+		while (GETBIT() == 0) {
 			w += (1U << LOW_BITS_S1(logn));
 
 			/*
 			 * Make sure no coefficient is too large.
 			 */
 			if (w >= bound_s1) return 0;
+			ENSUREBIT();
 		}
 
 		s1[u] = w ^ -s;
@@ -699,8 +695,9 @@ size_t
 Zf(decode_sig)(int16_t *s1, const void *in, size_t max_in_len, unsigned logn)
 {
 	const uint8_t *buf;
-	size_t n, u, v;
+	size_t n, u, v, nbits;
 	int16_t bound;
+	uint16_t mask;
 	uint32_t acc;
 	unsigned acc_len;
 
@@ -709,47 +706,46 @@ Zf(decode_sig)(int16_t *s1, const void *in, size_t max_in_len, unsigned logn)
 	acc = 0;
 	acc_len = 0;
 	v = 0;
+	nbits = 1 + LOW_BITS_S1(logn);
 	bound = (1U << Zf(bits_s1)[logn]) - 1;
+	mask = (1U << LOW_BITS_S1(logn)) - 1;
 
 	for (u = 0; u < n; u ++) {
 		uint16_t s, w;
 
 		/*
-		 * Get sign of the current coefficient
+		 * Check space in buffer
 		 */
-		ENSUREBIT();
-		s = GETBIT();
-
-		/*
-		 * Get next lo_bits bits that make up the lowest significant bits of w.
-		 */
-		if (acc_len < LOW_BITS_S1(logn)) {
-			// should be true all the time
+		if (acc_len < nbits) {
 			if (v >= max_in_len) return 0;
 			acc = (acc << 8) | buf[v ++];
 			acc_len += 8;
 		}
 
 		/*
+		 * Get sign of the current coefficient
+		 */
+		s = (acc >> (acc_len - 1)) & 1;
+
+		/*
 		 * Get lo_bits least significant bits of w.
 		 */
-		w = (acc >> (acc_len -= LOW_BITS_S1(logn))) & ((1U << LOW_BITS_S1(logn)) - 1);
+		acc_len -= nbits;
+		w = (acc >> acc_len) & mask;
 
 		/*
 		 * Recover the most significant bits of w: count number of consecutive
 		 * zeros up to the first 1 and add 2^lo_bits to w for each one you see.
 		 */
-		for (;;) {
-			ENSUREBIT();
-			if (GETBIT() != 0) {
-				break;
-			}
-			w += (1U << LOW_BITS_S1(logn));
+		ENSUREBIT();
+		while (GETBIT() == 0) {
+			w += mask + 1;
 
 			/*
 			 * Make sure no coefficient is too large.
 			 */
 			if (w >= bound) return 0;
+			ENSUREBIT();
 		}
 
 		s1[u] = w ^ -s;
