@@ -195,119 +195,6 @@ Zf(complete_pubkey)(const int16_t *restrict iq00, const int16_t *restrict iq01,
 
 /* see inner.h */
 int
-Zf(uncompressed_verify)(const uint8_t *restrict h,
-	const int16_t *restrict s0, const int16_t *restrict s1,
-	const fpr *restrict q00, const fpr *restrict q01, const fpr *restrict q11,
-	unsigned logn, uint8_t *restrict tmp)
-{
-	size_t n;
-	fpr *t0, *t1;
-
-	n = MKN(logn);
-	t0 = (fpr *)tmp;
-	t1 = t0 + n;
-
-	/*
-	 * Put (t0, t1) = (h0 - 2 s0, h1 - 2 s1) in FFT representation.
-	 */
-	hash_to_fft(t0, h, s0, logn);
-	hash_to_fft(t1, SECOND_HASH(h, logn), s1, logn);
-
-	return Zf(in_positive_half)(s1, SECOND_HASH(h, logn), logn)
-		&& has_short_trace(t0, t1, q00, q01, q11, logn);
-}
-
-/* see inner.h */
-int
-Zf(recover_and_verify)(const uint8_t *restrict h,
-	int16_t *restrict s0, const int16_t *restrict s1,
-	const fpr *restrict q00, const fpr *restrict q01, const fpr *restrict q11,
-	unsigned logn, uint8_t *restrict tmp)
-{
-	size_t n, u, v, w;
-	uint8_t h0;
-	fpr *t0, *t1;
-
-	n = MKN(logn);
-	t0 = (fpr *)tmp;
-	t1 = t0 + n;
-
-	hash_to_fft(t1, SECOND_HASH(h, logn), s1, logn);
-	memcpy(t0, t1, n * sizeof *t1);
-	Zf(poly_mul_fft)(t0, q01, logn);
-	Zf(poly_div_autoadj_fft)(t0, q00, logn);
-	Zf(iFFT)(t0, logn);
-
-	/*
-	 * Recover s0 with s0 = round(h0 / 2 + (h1 / 2 - s1) q01 / q00).
-	 * Put (t0, t1) = (h0 - 2 * s0, h1 - 2 * s1) in FFT representation.
-	 */
-	if (logn <= 3) {
-		h0 = h[0];
-		for (u = 0; u < n; u ++) {
-			s0[u] = fpr_rint(fpr_half(fpr_add(fpr_of(h0 & 1), t0[u])));
-			h0 >>= 1;
-		}
-	} else {
-		for (u = 0, w = 0; w < n; u ++) {
-			h0 = h[u];
-			for (v = 0; v < 8; v ++, w ++) {
-				s0[w] = fpr_rint(fpr_half(fpr_add(fpr_of(h0 & 1), t0[w])));
-				h0 >>= 1;
-			}
-		}
-	}
-
-	hash_to_fft(t0, h, s0, logn);
-	return Zf(in_positive_half)(s1, SECOND_HASH(h, logn), logn)
-		&& has_short_trace(t0, t1, q00, q01, q11, logn);
-}
-
-/* see inner.h */
-int
-Zf(verify_nearest_plane)(const uint8_t *restrict h,
-	const int16_t *restrict s1,
-	const fpr *restrict q00, const fpr *restrict q01, const fpr *restrict q11,
-	unsigned logn, uint8_t *restrict tmp)
-{
-	/*
-	 * This works slightly better than simple rounding, but is also slower.
-	 * Reconstruct s0, by running Babai's NP algorithm with target
-	 *     h0 / 2 + (h1 / 2 - s1) * q01 / q00.
-	 */
-
-	size_t n;
-	int16_t *restrict s0;
-	fpr *t0, *t1;
-
-	n = MKN(logn);
-	t0 = (fpr *)tmp;
-	t1 = t0 + n;
-	s0 = (int16_t *)(t1 + n);
-
-	hash_to_fft(t0, h, NULL, logn);
-	hash_to_fft(t1, SECOND_HASH(h, logn), s1, logn);
-
-	Zf(poly_mul_fft)(t1, q01, logn);
-	Zf(poly_div_autoadj_fft)(t1, q00, logn);
-	Zf(poly_add)(t0, t1, logn);
-	Zf(poly_mulconst)(t0, fpr_onehalf, logn);
-
-	memcpy(t1, q00, n * sizeof *q00);
-	/*
-	 * Run Babai with target t0 and Gram-matrix q00.
-	 */
-	Zf(ffNearestPlane_dyn)(t0, t1, logn, t1 + n);
-	Zf(fft_to_int16)(s0, t0, logn);
-
-	/*
-	 * Now run the casual verification.
-	 */
-	return Zf(uncompressed_verify)(h, s0, s1, q00, q01, q11, logn, tmp);
-}
-
-/* see inner.h */
-int
 Zf(verify)(const uint8_t *restrict h, const int16_t *restrict s1,
 	const fpr *restrict q00, const fpr *restrict q01, const fpr *restrict q11,
 	unsigned logn, uint8_t *restrict tmp)
@@ -354,7 +241,7 @@ Zf(verify)(const uint8_t *restrict h, const int16_t *restrict s1,
 }
 
 /* ============================================================================
- * Below is all the code necessary for Zf(uncompressed_verify_NTT).
+ * Below is all the code necessary for uncompressed_verify_NTT.
  * Note that a lot of it is duplicate code with the code in keygen.c
  * ==========================================================================*/
 
@@ -1073,9 +960,15 @@ hash_to_ntt(uint32_t *a, const uint8_t *h, const int16_t *s,
 }
 
 
-/* see inner.h */
-int
-Zf(uncompressed_verify_NTT)(const uint8_t *restrict h,
+/*
+ * Verify if a signature (s0, s1) is valid for a hashed message h of length n/4
+ * bytes. This method does not use any floating point operations.
+ * Assumes Zf(l2bound_XXX)[logn] * n/2 < 2^30.
+ *
+ * Note: tmp[] must have space for at least 24 * 2^logn bytes.
+ */
+static int
+uncompressed_verify_NTT(const uint8_t *restrict h,
 	const int16_t *restrict s0, const int16_t *restrict s1,
 	const int16_t *restrict q00, const int16_t *restrict q01,
 	unsigned logn, uint8_t *restrict tmp)
@@ -1802,5 +1695,5 @@ int Zf(verify_NTT)(const uint8_t *restrict h,
 		}
 	}
 
-	return Zf(uncompressed_verify_NTT)(h, s0, s1, q00, q01, logn, atmp);
+	return uncompressed_verify_NTT(h, s0, s1, q00, q01, logn, atmp);
 }

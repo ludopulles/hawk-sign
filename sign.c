@@ -511,7 +511,7 @@ sample_short(prng *rng, fpr *restrict x0, fpr *restrict x1,
 
 
 /*
- * The following are different sign functions for uncompressed HAWK or HAWK.
+ * The following are different sign functions for HAWK.
  * If a lattice point is generated that is too far away from (h0, h1) / 2, s0
  * and s1 are untouched and 0 is returned; the caller should then try again.
  * Otherwise, 1 is returned and (s0, s1) contains a valid signature for (h0,
@@ -521,56 +521,6 @@ sample_short(prng *rng, fpr *restrict x0, fpr *restrict x1,
  * All signing functions use a fast PRNG for gaussian sampling during signing,
  * that is seeded with the SHAKE256 context.
  */
-
-/* see inner.h */
-int
-Zf(uncompressed_sign)(inner_shake256_context *rng,
-	int16_t *restrict s0, int16_t *restrict s1,
-	const int8_t *restrict f, const int8_t *restrict g,
-	const int8_t *restrict F, const int8_t *restrict G,
-	const uint8_t *restrict h, unsigned logn, uint8_t *restrict tmp)
-{
-	size_t n;
-	fpr *x0, *x1, *bf, *bg, *bF, *bG;
-	uint16_t flag;
-	int norm_okay;
-	prng p;
-
-	n = MKN(logn);
-	bf = (fpr *)tmp;
-	bg = bf + n;
-	bF = bg + n;
-	bG = bF + n;
-	x0 = bG + n;
-	x1 = x0 + n;
-
-	Zf(prng_init)(&p, rng);
-
-	construct_basis(f, g, F, G, bf, bg, bF, bG, logn);
-
-	norm_okay = sample_short(&p, x0, x1, bf, bg, bF, bG, h, logn);
-
-	/*
-	 * Compute (s0, s1) = ((h0, h1) - B^{-1} (x0, x1)) / 2, so
-	 *
-	 *     s0 = (h0 - (x0 * G + x1 (-F))) / 2,
-	 *     s1 = (h1 - (x0 * (-g) + x1 f)) / 2.
-	 */
-	Zf(poly_neg)(x0, logn);
-	Zf(poly_matmul_fft)(bG, bF, bg, bf, x0, x1, logn);
-	Zf(poly_neg)(x0, logn);
-	Zf(iFFT)(x0, logn);
-	Zf(iFFT)(x1, logn);
-
-	noise_to_lattice(s0, h, x0, logn);
-	noise_to_lattice(s1, SECOND_HASH(h, logn), x1, logn);
-
-	flag = (uint16_t)Zf(in_positive_half)(s1, SECOND_HASH(h, logn), logn);
-	conditional_flip(flag, s0, h, logn);
-	conditional_flip(flag, s1, SECOND_HASH(h, logn), logn);
-
-	return norm_okay;
-}
 
 /* see inner.h */
 int
@@ -850,69 +800,6 @@ sample_short_NTT(prng *rng, uint32_t *restrict x0, uint32_t *restrict x1,
 	 * norm of the gaussian (x0, x1) is too large.
 	 */
 	return (uint32_t)norm <= L2BOUND(logn);
-}
-
-/* see inner.h */
-int
-Zf(uncompressed_sign_NTT)(inner_shake256_context *rng,
-	int16_t *restrict s0, int16_t *restrict s1,
-	const int8_t *restrict f, const int8_t *restrict g,
-	const int8_t *restrict F, const int8_t *restrict G,
-	const uint8_t *restrict h, unsigned logn, uint8_t *restrict tmp)
-{
-	size_t n, u;
-	uint32_t flag, *bf, *bg, *bF, *bG, *x0, *x1;
-	int norm_okay;
-	prng p;
-
-	n = MKN(logn);
-
-	bf = (uint32_t *)tmp;
-	bg = bf + n;
-	bF = bg + n;
-	bG = bF + n;
-	x0 = bG + n;
-	x1 = x0 + n;
-
-	Zf(prng_init)(&p, rng);
-
-	mf_NTRU(f, g, F, G, bf, bg, bF, bG, logn);
-
-	norm_okay = sample_short_NTT(&p, x0, x1, bf, bg, bF, bG, h, logn);
-
-	/*
-	 * Compute (s0, s1) = ((h0, h1) - B^{-1} (x0, x1)) / 2, so
-	 *
-	 *     s0 = (h0 - (x0 * G + x1 (-F))) / 2,
-	 *     s1 = (h1 - (x0 * (-g) + x1 f)) / 2.
-	 */
-
-	for (u = 0; u < n; u++) {
-		uint32_t z0, z1;
-		z0 = Zf(mf_sub)(Zf(mf_mul)(bG[u], x0[u]), Zf(mf_mul)(bF[u], x1[u]));
-		z1 = Zf(mf_sub)(Zf(mf_mul)(bf[u], x1[u]), Zf(mf_mul)(bg[u], x0[u]));
-
-		x0[u] = z0;
-		x1[u] = z1;
-	}
-
-	Zf(mf_iNTT)(x0, logn);
-	Zf(mf_iNTT)(x1, logn);
-
-	/*
-	 * The polynomial x0 is stored at s0, so conversion to int16_t is done
-	 * automatically. Normalize s0 elements into the [-q/2..q/2] range.
-	 * Do similarly for s1/x1.
-	 */
-	for (u = n; u -- > 0; ) {
-		s0[u] = Zf(mf_conv_signed)(x0[u]);
-		s1[u] = Zf(mf_conv_signed)(x1[u]);
-	}
-
-	flag = (uint32_t)Zf(in_positive_half)(s1, SECOND_HASH(h, logn), logn);
-	conditional_flip(flag, s0, h, logn);
-	conditional_flip(flag, s1, SECOND_HASH(h, logn), logn);
-	return norm_okay;
 }
 
 /* see inner.h */

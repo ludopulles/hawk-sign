@@ -104,9 +104,9 @@
 #include <string.h>
 
 /*
- * Optionally, one can do a lightweight-check during signing in Hawk (not
- * uncompressed) if recovering the first half of the signature works. To have
- * this, add the flag -DHAWK_RECOVER_CHECK to $(CFLAGS) in the Makefile.
+ * Optionally, one can do a lightweight-check during signing in Hawk if
+ * recovering the first half of the signature works. To have this, add the flag
+ * -DHAWK_RECOVER_CHECK to $(CFLAGS) in the Makefile.
  */
 
 /*
@@ -568,9 +568,6 @@ extern const unsigned Zf(bits_q11)[11];
  * A signature (s1) should be rejected whenever one of its coefficients has a
  * value x with x >= B or x < -B, with B the respective bound with index logn.
  *
- * In the uncompressed version, one should also check coefficients of s0 for a
- * signature (s0, s1) with the bound for s0.
- *
  * Values are expressed as number of bits after the sign.
  * e.g.: |s1[u]| < 2^Zf(bits_s1)[logn] must hold for all 0 <= u < n.
  */
@@ -588,12 +585,6 @@ void Zf(int8_to_fft)(fpr *p, const int8_t *x, unsigned logn);
  * This also works correctly when p and x overlap.
  */
 void Zf(int16_to_fft)(fpr *p, const int16_t *x, unsigned logn);
-
-/*
- * Convert a floating point polynomial (assumed to have small values) into an
- * integer polynomial. This also works correctly when x and p overlap.
- */
-void Zf(fft_to_int16)(int16_t *x, fpr *p, unsigned logn);
 
 /*
  * With input s and h both of length 2^logn, let e = h - 2s.
@@ -640,23 +631,11 @@ size_t Zf(decode_pubkey)(int16_t *q00, int16_t *q01,
 	const void *in, size_t max_in_len, unsigned logn);
 
 /*
- * Encode a signature (s0, s1) with Golomb-Rice encoding.
- */
-size_t Zf(encode_uncomp_sig)(void *out, size_t max_out_len,
-	const int16_t *s0, const int16_t *s1, unsigned logn);
-
-/*
  * Encode a signature s1 by outputting 'lo_bits' bits of the lowest signficant
  * bits of x[i] and using unary for the other most significant bits.
  */
 size_t Zf(encode_sig)(void *out, size_t max_out_len, const int16_t *s1,
 	unsigned logn);
-
-/*
- * Decode a signature (s0, s1) with Golomb-Rice encoding.
- */
-size_t Zf(decode_uncomp_sig)(int16_t *s0, int16_t *s1,
-	const void *in, size_t max_in_len, unsigned logn);
 
 /*
  * Decode a signature s1.
@@ -874,18 +853,9 @@ void Zf(poly_div_autoadj_fft)(fpr *restrict a,
  * Perform an LDL decomposition of an auto-adjoint matrix G, in FFT
  * representation. On input, g00, g01 and g11 are provided (where the
  * matrix G = [[g00, g01], [adj(g01), g11]]). On output, the d00, l10
- * and d11 values are written in g00, g01 and g11, respectively
+ * and d11 values are written in g00, l10 and d11, respectively
  * (with D = [[d00, 0], [0, d11]] and L = [[1, 0], [l10, 1]]).
  * (In fact, d00 = g00, so the g00 operand is left unmodified.)
- */
-void Zf(poly_LDL_fft)(const fpr *restrict g00,
-	fpr *restrict g01, fpr *restrict g11, unsigned logn);
-
-/*
- * Perform an LDL decomposition of an auto-adjoint matrix G, in FFT
- * representation. This is identical to poly_LDL_fft() except that
- * g00, g01 and g11 are unmodified; the outputs d11 and l10 are written
- * in two other separate buffers provided as extra parameters.
  */
 void Zf(poly_LDLmv_fft)(fpr *restrict d11, fpr *restrict l10,
 	const fpr *restrict g00, const fpr *restrict g01,
@@ -927,51 +897,13 @@ void Zf(poly_merge_fft)(fpr *restrict f,
  */
 
 /*
- * Number of elements (fpr) in the LDL tree for an input with polynomials
- * of size 2^logn. Note that leaves do not store any information, nor does
- * the root of the whole tree. As on any level i=1,..., logn-1 we have
- * 2^logn elements, the total size is (logn-1) * 2^logn.
- */
-#define LDL_TREESIZE(logn) (((logn) - 1) << (logn))
-
-/*
- * Compute the ffLDL tree of an auto-adjoint q00 (in FFT representation),
- * so one can use Zf(ffNearestPlane_tree)
- *
- * The "tree" array is filled with the computed tree, of size logn 2^logn
- * elements (see ffLDL_treesize()).
- *
- * Input arrays MUST NOT overlap. tmp[] should have room for at least
- * three polynomials of 2^logn elements each.
- */
-void Zf(ffLDL_fft)(fpr *restrict tree, const fpr *restrict q00, unsigned logn,
-	fpr *restrict tmp);
-
-/*
- * Perform Fast Fourier Nearest Plane for target vector t and LDL tree T.
- * Result is stored in z. Note: tmp[] must have space for at least two
- * polynomials of size 2^logn.
- */
-void Zf(ffNearestPlane_tree)(fpr *restrict z, const fpr *restrict tree,
-	const fpr *restrict t, unsigned logn, fpr *restrict tmp);
-
-/*
- * Dynamic version of Zf(ffNearestPlane_tree). The tree of Gram matrix g
- * is calculated on the fly, and the return value is stored in t. Note: t
- * and g get modified in this function. tmp[] must have space for at least
- * 2 polynomials of size 2^logn.
+ * Perform Fast Fourier Nearest Plane for target t and Gram matrix g.
+ * The result is stored in t.
+ * Note: t and g are modified in this function.
+ * tmp[] must have space for at least 2 polynomials of size 2^logn.
  */
 void Zf(ffNearestPlane_dyn)(fpr *restrict t, fpr *restrict g, unsigned logn,
 	fpr *restrict tmp);
-
-/*
- * Babai reduce (F, G) w.r.t (f, g) (all in FFT representation) and adjust
- * the result in Fn, Gn as well (in coefficient representation). Note:
- * tmp[] must have space for at least 4 polynomials of size 2^logn.
- */
-void Zf(ffBabai_reduce)(const fpr *restrict f, const fpr *restrict g,
-	fpr *restrict F, fpr *restrict G, int8_t *restrict Fn,
-	int8_t *restrict Gn, unsigned logn, fpr *tmp);
 
 /* ==================================================================== */
 /*
@@ -1018,19 +950,6 @@ void Zf(keygen)(inner_shake256_context *rng,
 /*
  * Signature generation (sign.c)
  */
-
-/*
- * Compute a signature of h, i.e. the signature is a vector (s0, s1) that is
- * close to (h0, h1) / 2 with respect to the quadratic form Q.
- * Return if the signature has small enough norm.
- *
- * Note: tmp[] must have space for at least 48 * 2^logn bytes.
- */
-int Zf(uncompressed_sign)(inner_shake256_context *rng,
-	int16_t *restrict s0, int16_t *restrict s1,
-	const int8_t *restrict f, const int8_t *restrict g,
-	const int8_t *restrict F, const int8_t *restrict G,
-	const uint8_t *restrict h, unsigned logn, uint8_t *restrict tmp);
 
 /*
  * Compute s1 of a signature of h, i.e. a signature is a vector (s0, s1) that
@@ -1082,19 +1001,6 @@ int Zf(sign)(inner_shake256_context *rng, int16_t *restrict sig,
 	unsigned logn, uint8_t *restrict tmp);
 
 /*
- * Compute a signature of h, i.e. the signature is a vector (s0, s1) that is
- * close to (h0, h1) / 2 with respect to the quadratic form Q.
- * Return if the signature has small enough norm.
- *
- * Note: tmp[] must have space for at least 24 * 2^logn bytes.
- */
-int Zf(uncompressed_sign_NTT)(inner_shake256_context *rng,
-	int16_t *restrict s0, int16_t *restrict s1,
-	const int8_t *restrict f, const int8_t *restrict g,
-	const int8_t *restrict F, const int8_t *restrict G,
-	const uint8_t *restrict h, unsigned logn, uint8_t *restrict tmp);
-
-/*
  * Compute s1 of a signature of h, i.e. a signature is a vector (s0, s1) that
  * is close to (h0, h1) / 2 with respect to the quadratic form Q. It is NOT
  * guaranteed that one can succesfully recover a s0 during verification such
@@ -1124,40 +1030,6 @@ void Zf(complete_pubkey)(const int16_t *iq00, const int16_t *iq01,
 	fpr *q00, fpr *q01, fpr *q11, unsigned logn);
 
 /*
- * Verify if a signature (s0, s1) is valid for a message hm.
- * The signature is accepted iff the squared l2-norm of (2s0 - hm, 2s1) is at
- * most a specified bound depending on logn.
- *
- * Note: tmp[] must have space for at least 16 * 2^logn bytes.
- */
-int Zf(uncompressed_verify)(const uint8_t *restrict h,
-	const int16_t *restrict s0, const int16_t *restrict s1,
-	const fpr *restrict q00, const fpr *restrict q01, const fpr *restrict q11,
-	unsigned logn, uint8_t *restrict tmp);
-
-/*
- * Similar to Zf(uncompressed_verify), except that it takes s1 as signature,
- * and reconstructs s0 with simple rounding:
- *     s0 = round(h0 / 2 + (h1 / 2 - s1) q01 / q00).
- */
-int Zf(recover_and_verify)(const uint8_t *restrict h,
-	int16_t *restrict s0, const int16_t *restrict s1,
-	const fpr *restrict q00, const fpr *restrict q01, const fpr *restrict q11,
-	unsigned logn, uint8_t *restrict tmp);
-
-/*
- * Similar to Zf(uncompressed_verify), except that it takes s1 as signature,
- * and reconstructs s0 with Babai's Nearest Plane Algorithm:
- *     s0 ~ h0 / 2 + (h1 / 2 - s1) q01 / q00,
- * such that s0 (f, g) + s1 (F, G) is in the parallelepiped generated by
- * the GSO'ed basis generated by (f, g) and (F, G).
- */
-int Zf(verify_nearest_plane)(const uint8_t *restrict h,
-	const int16_t *restrict s1,
-	const fpr *restrict q00, const fpr *restrict q01, const fpr *restrict q11,
-	unsigned logn, uint8_t *restrict tmp);
-
-/*
  * Verify if a signature (s0, s1) is valid for a hashed message h of length
  * n / 4 bytes, where s0 is reconstructed with simple rounding.
  * The signature is accepted iff the squared l2-norm of (h0 - 2s0, h1 - 2s1) is
@@ -1167,18 +1039,6 @@ int Zf(verify_nearest_plane)(const uint8_t *restrict h,
  */
 int Zf(verify)(const uint8_t *restrict h, const int16_t *restrict s1,
 	const fpr *restrict q00, const fpr *restrict q01, const fpr *restrict q11,
-	unsigned logn, uint8_t *restrict tmp);
-
-/*
- * Verify if a signature (s0, s1) is valid for a hashed message h of length n /
- * 4 bytes. This method does not use any floating point operations.
- * Assumes Zf(l2bound_XXX)[logn] * n/2 < 2^30.
- *
- * Note: tmp[] must have space for at least 24 * 2^logn bytes.
- */
-int Zf(uncompressed_verify_NTT)(const uint8_t *restrict h,
-	const int16_t *restrict s0, const int16_t *restrict s1,
-	const int16_t *restrict q00, const int16_t *restrict q01,
 	unsigned logn, uint8_t *restrict tmp);
 
 /*

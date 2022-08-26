@@ -678,34 +678,6 @@ Zf(poly_div_autoadj_fft)(
 
 /* see inner.h */
 void
-Zf(poly_LDL_fft)(
-	const fpr *restrict g00,
-	fpr *restrict g01, fpr *restrict g11, unsigned logn)
-{
-	size_t n, hn, u;
-
-	n = MKN(logn);
-	hn = n >> 1;
-	for (u = 0; u < hn; u ++) {
-		fpr g00_re, g00_im, g01_re, g01_im, g11_re, g11_im;
-		fpr mu_re, mu_im;
-
-		g00_re = g00[u];
-		g00_im = g00[u + hn];
-		g01_re = g01[u];
-		g01_im = g01[u + hn];
-		g11_re = g11[u];
-		g11_im = g11[u + hn];
-		FPC_DIV(mu_re, mu_im, g01_re, g01_im, g00_re, g00_im);
-		FPC_MUL(g01_re, g01_im, mu_re, mu_im, g01_re, fpr_neg(g01_im));
-		FPC_SUB(g11[u], g11[u + hn], g11_re, g11_im, g01_re, g01_im);
-		g01[u] = mu_re;
-		g01[u + hn] = fpr_neg(mu_im);
-	}
-}
-
-/* see inner.h */
-void
 Zf(poly_LDLmv_fft)(
 	fpr *restrict d11, fpr *restrict l10,
 	const fpr *restrict g00, const fpr *restrict g01,

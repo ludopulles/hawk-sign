@@ -115,20 +115,6 @@ Zf(int16_to_fft)(fpr *p, const int16_t *x, unsigned logn)
 }
 
 /* see inner.h */
-void
-Zf(fft_to_int16)(int16_t *x, fpr *p, unsigned logn)
-{
-	size_t u;
-
-	u = MKN(logn);
-
-	Zf(iFFT)(p, logn);
-	while (u -- > 0) {
-		x[u] = fpr_rint(p[u]);
-	}
-}
-
-/* see inner.h */
 int
 Zf(in_positive_half)(const int16_t *s, const uint8_t *h, unsigned logn)
 {

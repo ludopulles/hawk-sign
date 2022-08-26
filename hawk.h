@@ -113,14 +113,10 @@ extern "C" {
  * possibly distinct from each other. For all degrees (logn = 1 to 10), the
  * following sizes are in descending order:
  *
- *   HAWK_TMPSIZE_UNCOMPRESSED_SIGN
  *   HAWK_TMPSIZE_SIGNDYN
  *   HAWK_TMPSIZE_KEYGEN
  *   HAWK_TMPSIZE_VERIFY
- *   HAWK_TMPSIZE_UNCOMPRESSED_VERIFY
  *   HAWK_TMPSIZE_VERIFY_NTT
- *   HAWK_TMPSIZE_UNCOMPRESSED_VERIFY_NTT
- *   HAWK_TMPSIZE_UNCOMPRESSED_SIGN_NTT
  *   HAWK_TMPSIZE_SIGNDYN_NTT
  *   HAWK_TMPSIZE_SIGN
  *   HAWK_TMPSIZE_MAKEPUB
@@ -144,26 +140,13 @@ extern "C" {
  *  512 27271 24583 23687 17543 14979 13447 12291
  * 1024 54535 49159 47367 35079 29955 26887 24579
  *
- *  deg  usig  kgen  uver uverN usigN mkpub
- *    2   119   103    97    69    67    51
- *    4   229   199   185   133   129    99
- *    8   449   391   361   261   253   195
- *   16   891   775   715   519   503   387
- *   32  1775  1543  1423  1035  1003   771
- *   64  3543  3079  2839  2067  2003  1539
- *  128  7079  6151  5671  4131  4003  3075
- *  256 14151 12295 11335  8259  8003  6147
- *  512 28295 24583 22663 16515 16003 12291
- * 1024 56583 49159 45319 33027 32003 24579
- *
- * Here, first the scheme Hawk is listed and second is the uncompressed version
- * of Hawk (with prefix 'u') which does not provide as compact signatures as
- * Hawk does. The suffix 'D' stands for dynamic signing as opposed to batched
- * signing where you need to do some preprocessing on the secret key to get the
- * expanded key. The suffix 'N' stands for number theoretic transform and these
- * functions will be used by the reference implementation as these functions
- * do not make use of floating point numbers while the AVX2 optimized version
- * uses floats for faster signing/verifying.
+ * Here, first the scheme Hawk is listed. The suffix 'D' stands for dynamic
+ * signing as opposed to batched signing where you need to do some
+ * preprocessing on the secret key to get the expanded key. The suffix 'N'
+ * stands for number theoretic transform and these functions will be used by
+ * the reference implementation as these functions do not make use of floating
+ * point numbers while the AVX2 optimized version uses floats for faster
+ * signing/verifying.
  *
  *
  * KEY SIZES
@@ -377,20 +360,6 @@ extern const size_t HAWK_PUBKEY_SIZE[11];
  */
 
 /*
- * Maximum practical signature size (in bytes) when using the compact format
- * and the uncompressed scheme.
- */
-#define HAWK_UNCOMPRESSED_SIG_COMPACT_MAXSIZE(logn) \
-	((logn) == 10 ? 2872u : 1310u)
-
-/*
- * Signature size (in bytes) when using the PADDED format and the uncompressed
- * scheme. The size is exact.
- */
-#define HAWK_UNCOMPRESSED_SIG_PADDED_SIZE(logn) \
-	((logn) == 10 ? 2804u : 1267u)
-
-/*
  * Maximum practical signature size (in bytes) when using the COMPACT
  * format.
  */
@@ -439,14 +408,6 @@ extern const size_t HAWK_PUBKEY_SIZE[11];
 	((24u << (logn)) + 3)
 
 /*
- * Temporary buffer size for dynamically generating an uncompressed signature.
- */
-#define HAWK_TMPSIZE_UNCOMPRESSED_SIGN(logn) \
-	(HAWK_HASH_SIZE(logn) + (55u << (logn)) + 7) // 7 in hawk.c, 6*8 in sign
-#define HAWK_TMPSIZE_UNCOMPRESSED_SIGN_NTT(logn) \
-	(HAWK_HASH_SIZE(logn) + (31u << (logn)) + 3) // 7 in hawk.c, 6*4 in sign
-
-/*
  * Temporary buffer size for dynamically generating a signature.
  */
 #define HAWK_TMPSIZE_SIGNDYN(logn) \
@@ -481,14 +442,6 @@ extern const size_t HAWK_PUBKEY_SIZE[11];
 	(HAWK_HASH_SIZE(logn) + (46u << (logn)) + 7)
 #define HAWK_TMPSIZE_VERIFY_NTT(logn) \
 	(HAWK_HASH_SIZE(logn) + (34u << (logn)) + 7)
-
-/*
- * Temporary buffer size for verifying an uncompressed signature with NTT.
- */
-#define HAWK_TMPSIZE_UNCOMPRESSED_VERIFY(logn) \
-	(HAWK_HASH_SIZE(logn) + (44u << (logn)) + 7)
-#define HAWK_TMPSIZE_UNCOMPRESSED_VERIFY_NTT(logn) \
-	(HAWK_HASH_SIZE(logn) + (32u << (logn)) + 3)
 
 /* ========================================================================= */
 /*
@@ -649,11 +602,6 @@ int hawk_get_logn(const void *obj, size_t len);
 int hawk_expand_seckey(void *expanded_key, size_t expanded_key_len,
 	const void *seckey, size_t seckey_len);
 
-/* Helper for hawk_uncompressed_sign_finish */
-int hawk_uncompressed_sign(shake256_context *rng, void *sig, size_t *sig_len,
-	int sig_type, const void *seckey, size_t seckey_len, const void *data,
-	size_t data_len, void *tmp, size_t tmp_len);
-
 /* Helper for hawk_sign_dyn_finish */
 int hawk_sign_dyn(shake256_context *rng, void *sig, size_t *sig_len,
 	int sig_type, const void *seckey, size_t seckey_len, const void *data,
@@ -679,39 +627,6 @@ int hawk_sign(shake256_context *rng, void *sig, size_t *sig_len,
  * Start a signature generation context: the *hash_data context is initialized.
  */
 void hawk_sign_start(shake256_context *hash_data);
-
-/*
- * Finish a signature generation operation, using the secret key held in
- * seckey[] of length seckey_len bytes. The hashed message is provided as the
- * SHAKE256 context *hash_data, which must still be in input mode (i.e. not yet
- * flipped to output mode). During signing, a salt is generated, written in
- * salt[] and added to (a copy of) *hash_data, after which output is taken from
- * it. The salt length is 24 or 40 bytes, see the HAWK_SALT_SIZE macro.
- *
- * The source of randomness is the provided SHAKE256 context *rng, which
- * must have been already initialized, seeded, and set to output mode (see
- * shake256_init_prng_from_seed() and shake256_init_prng_from_system()).
- *
- * The signature is written in sig[]. The caller must set *sig_len to the
- * maximum size of sig[]; if the signature computation is successful, then
- * *sig_len will be set to the actual length of the signature. The signature
- * length depends on the signature type, which is specified with the sig_type
- * parameter to one of the three defined values HAWK_SIG_COMPACT or
- * HAWK_SIG_PADDED; for the latter, the signature length is fixed (for a given
- * Hawk degree).
- * This returns a signature for *uncompressed* HAWK.
- *
- * Regardless of the signature type, the process is constant-time with regard
- * to the secret key.
- *
- * The tmp[] buffer is used to hold temporary values. Its size tmp_len MUST be
- * at least HAWK_TMPSIZE_UNCOMPRESSED_SIGN(logn) bytes.
- *
- * Returned value: 0 on success, or a negative error code.
- */
-int hawk_uncompressed_sign_finish(shake256_context *rng, void *sig,
-	size_t *sig_len, int sig_type, const void *seckey, size_t seckey_len,
-	shake256_context *hash_data, void *salt, void *tmp, size_t tmp_len);
 
 /*
  * Finish a signature generation operation, using the secret key held in
@@ -784,11 +699,6 @@ int hawk_sign_finish(shake256_context *rng, void *sig, size_t *sig_len,
  * Signature verification.
  */
 
-/* Helper for hawk_uncompressed_verify_finish */
-int hawk_uncompressed_verify(const void *sig, size_t sig_len, int sig_type,
-	const void *pubkey, size_t pubkey_len, const void *data, size_t data_len,
-	void *tmp, size_t tmp_len);
-
 /* Helper for hawk_verify_finish */
 int hawk_verify(const void *sig, size_t sig_len, int sig_type,
 	const void *pubkey, size_t pubkey_len, const void *data, size_t data_len,
@@ -798,34 +708,9 @@ int hawk_verify(const void *sig, size_t sig_len, int sig_type,
 /*
  * Start a streamed signature verification. The provided SHAKE256 context
  * *hash_data is initialized. The caller shall then inject the message data
- * into the SHAKE256 context, and finally call hawk_verify_finish() or
- * hawk_uncompressed_verify_finish().
+ * into the SHAKE256 context, and finally call hawk_verify_finish().
  */
 void hawk_verify_start(shake256_context *hash_data);
-
-/*
- * Finish a streamed signature verification. The signature sig[] (of length
- * sig_len bytes) is verified against the provided public key pubkey[] (of
- * length pubkey_len bytes) and the hashed message. The hashed message is
- * provided as a SHAKE256 context *hash_data; that context must have received
- * the message itself, and still be in input mode (not yet flipped to output
- * mode). *hash_data is modified by the verification process, as salt is added
- * from the signature.
- *
- * The sig_type parameter must be zero, or one of HAWK_SIG_COMPACT or
- * HAWK_SIG_PADDED. The function verifies that the provided signature has the
- * correct format. If sig_type is zero, then the signature format is inferred
- * from the signature header byte; note that in that case, the signature is
- * malleable (since a signature value can be transcoded to other formats).
- *
- * The tmp[] buffer is used to hold temporary values. Its size tmp_len MUST be
- * at least HAWK_TMPSIZE_UNCOMPRESSED_VERIFY(logn) bytes.
- *
- * Returned value: 0 on success, or a negative error code.
- */
-int hawk_uncompressed_verify_finish(const void *sig, size_t sig_len,
-	int sig_type, const void *pubkey, size_t pubkey_len,
-	shake256_context *hash_data, void *tmp, size_t tmp_len);
 
 /*
  * Finish a streamed signature verification. The signature sig[] (of length
