@@ -696,8 +696,42 @@ Zf(sign)(inner_shake256_context *rng, int16_t *restrict s1,
 }
 
 
+/******************************************************************************
+ * NTT part
+ *****************************************************************************/
 static void
-hash_to_ntt(uint16_t *p, const uint8_t *h, unsigned logn)
+mf_NTRU(
+	const int8_t *restrict f, const int8_t *restrict g,
+	const int8_t *restrict F, const int8_t *restrict G,
+	uint32_t *restrict bf, uint32_t *restrict bg,
+	uint32_t *restrict bF, uint32_t *restrict bG, unsigned logn)
+{
+	size_t n, u;
+
+	n = MKN(logn);
+
+	Zf(mf_int8_to_NTT)(bf, f, logn);
+	Zf(mf_int8_to_NTT)(bg, g, logn);
+	Zf(mf_int8_to_NTT)(bF, F, logn);
+
+	if (G == NULL) {
+		/*
+		 * Compute (in NTT representation) G = (1 + gF) / f.
+		 */
+		for (u = 0; u < n; u++) {
+			bG[u] = Zf(mf_div)(Zf(mf_add)(1, Zf(mf_mul)(bg[u], bF[u])), bf[u]);
+		}
+	} else {
+		Zf(mf_int8_to_NTT)(bG, G, logn);
+	}
+}
+
+/******************************************************************************
+ * Now functions that use the above
+ *****************************************************************************/
+
+static void
+hash_to_ntt(uint32_t *p, const uint8_t *h, unsigned logn)
 {
 	size_t n, u, v;
 	uint8_t hash;
@@ -717,13 +751,13 @@ hash_to_ntt(uint16_t *p, const uint8_t *h, unsigned logn)
 		}
 	}
 
-	Zf(mq_NTT)(p, logn);
+	Zf(mf_NTT)(p, logn);
 }
 
 static int
-sample_short_NTT(prng *rng, uint16_t *restrict x0, uint16_t *restrict x1,
-	const uint16_t *restrict bf, const uint16_t *restrict bg,
-	const uint16_t *restrict bF, const uint16_t *restrict bG,
+sample_short_NTT(prng *rng, uint32_t *restrict x0, uint32_t *restrict x1,
+	const uint32_t *restrict bf, const uint32_t *restrict bg,
+	const uint32_t *restrict bF, const uint32_t *restrict bG,
 	const uint8_t *restrict h, unsigned logn)
 {
 	size_t n, u;
@@ -740,16 +774,12 @@ sample_short_NTT(prng *rng, uint16_t *restrict x0, uint16_t *restrict x1,
 	 *     t0 = f h0 + F h1,
 	 *     t1 = g h0 + G h1.
 	 */
-	Zf(mq_poly_tomonty)(x0, logn);
-	Zf(mq_poly_tomonty)(x1, logn);
 
 	for (u = 0; u < n; u ++) {
 		uint32_t res0, res1;
 
-		res0 = Zf(mq_add)(Zf(mq_montymul)(bf[u], x0[u]),
-			Zf(mq_montymul)(bF[u], x1[u]));
-		res1 = Zf(mq_add)(Zf(mq_montymul)(bg[u], x0[u]),
-			Zf(mq_montymul)(bG[u], x1[u]));
+		res0 = Zf(mf_add)(Zf(mf_mul)(bf[u], x0[u]), Zf(mf_mul)(bF[u], x1[u]));
+		res1 = Zf(mf_add)(Zf(mf_mul)(bg[u], x0[u]), Zf(mf_mul)(bG[u], x1[u]));
 		x0[u] = res0;
 		x1[u] = res1;
 	}
@@ -758,8 +788,8 @@ sample_short_NTT(prng *rng, uint16_t *restrict x0, uint16_t *restrict x1,
 	 * Sample and write the result in (x0, x1). Gaussian smoothing is used to
 	 * not reveal information on the secret basis.
 	 */
-	Zf(mq_iNTT)(x0, logn);
-	Zf(mq_iNTT)(x1, logn);
+	Zf(mf_iNTT)(x0, logn);
+	Zf(mf_iNTT)(x1, logn);
 
 	/*
 	 * For the NTT, we store the lattice point B*s close to target t = B*h/2 in
@@ -769,22 +799,22 @@ sample_short_NTT(prng *rng, uint16_t *restrict x0, uint16_t *restrict x1,
 	 * division by two works best as soon as possible.
 	 */
 	for (u = 0; u < n; u ++) {
-		center = Zf(mq_conv_signed)(x0[u]);
+		center = Zf(mf_conv_signed)(x0[u]);
 		offset = mkgauss_sign(rng, center & 1, logn);
 		latcoord = (center - offset) / 2;
-		x0[u] = Zf(mq_conv_small)(latcoord);
+		x0[u] = Zf(mf_conv_small)(latcoord);
 		norm += offset * offset;
 	}
 	for (u = 0; u < n; u ++) {
-		center = Zf(mq_conv_signed)(x1[u]);
+		center = Zf(mf_conv_signed)(x1[u]);
 		offset = mkgauss_sign(rng, center & 1, logn);
 		latcoord = (center - offset) / 2;
-		x1[u] = Zf(mq_conv_small)(latcoord);
+		x1[u] = Zf(mf_conv_small)(latcoord);
 		norm += offset * offset;
 	}
 
-	Zf(mq_NTT)(x0, logn);
-	Zf(mq_NTT)(x1, logn);
+	Zf(mf_NTT)(x0, logn);
+	Zf(mf_NTT)(x1, logn);
 
 	/*
 	 * Test whether the l2-norm of (x0, x1) is below the given bound. The
@@ -805,22 +835,22 @@ Zf(uncompressed_sign_NTT)(inner_shake256_context *rng,
 	const uint8_t *restrict h, unsigned logn, uint8_t *restrict tmp)
 {
 	size_t n, u;
-	uint16_t flag, *bf, *bg, *bF, *bG, *x0, *x1;
+	uint32_t flag, *bf, *bg, *bF, *bG, *x0, *x1;
 	int norm_okay;
 	prng p;
 
 	n = MKN(logn);
 
-	bf = (uint16_t *)tmp;
+	bf = (uint32_t *)tmp;
 	bg = bf + n;
 	bF = bg + n;
 	bG = bF + n;
-	x0 = (uint16_t *)s0;
-	x1 = (uint16_t *)s1;
+	x0 = bG + n;
+	x1 = x0 + n;
 
 	Zf(prng_init)(&p, rng);
 
-	Zf(NTT_NTRU)(f, g, F, G, bf, bg, bF, bG, logn);
+	mf_NTRU(f, g, F, G, bf, bg, bF, bG, logn);
 
 	norm_okay = sample_short_NTT(&p, x0, x1, bf, bg, bF, bG, h, logn);
 
@@ -830,34 +860,30 @@ Zf(uncompressed_sign_NTT)(inner_shake256_context *rng,
 	 *     s0 = (h0 - (x0 * G + x1 (-F))) / 2,
 	 *     s1 = (h1 - (x0 * (-g) + x1 f)) / 2.
 	 */
-	Zf(mq_poly_tomonty)(x0, logn);
-	Zf(mq_poly_tomonty)(x1, logn);
 
 	for (u = 0; u < n; u++) {
-		uint16_t z0, z1;
-		z0 = Zf(mq_sub)(Zf(mq_montymul(bG[u], x0[u])),
-			Zf(mq_montymul)(bF[u], x1[u]));
-		z1 = Zf(mq_sub)(Zf(mq_montymul)(bf[u], x1[u]),
-			Zf(mq_montymul)(bg[u], x0[u]));
+		uint32_t z0, z1;
+		z0 = Zf(mf_sub)(Zf(mf_mul)(bG[u], x0[u]), Zf(mf_mul)(bF[u], x1[u]));
+		z1 = Zf(mf_sub)(Zf(mf_mul)(bf[u], x1[u]), Zf(mf_mul)(bg[u], x0[u]));
 
 		x0[u] = z0;
 		x1[u] = z1;
 	}
 
-	Zf(mq_iNTT)(x0, logn);
-	Zf(mq_iNTT)(x1, logn);
+	Zf(mf_iNTT)(x0, logn);
+	Zf(mf_iNTT)(x1, logn);
 
 	/*
 	 * The polynomial x0 is stored at s0, so conversion to int16_t is done
 	 * automatically. Normalize s0 elements into the [-q/2..q/2] range.
 	 * Do similarly for s1/x1.
 	 */
-	for (u = 0; u < n; u ++) {
-		s0[u] = Zf(mq_conv_signed)(x0[u]);
-		s1[u] = Zf(mq_conv_signed)(x1[u]);
+	for (u = n; u -- > 0; ) {
+		s0[u] = Zf(mf_conv_signed)(x0[u]);
+		s1[u] = Zf(mf_conv_signed)(x1[u]);
 	}
 
-	flag = (uint16_t)Zf(in_positive_half)(s1, SECOND_HASH(h, logn), logn);
+	flag = (uint32_t)Zf(in_positive_half)(s1, SECOND_HASH(h, logn), logn);
 	conditional_flip(flag, s0, h, logn);
 	conditional_flip(flag, s1, SECOND_HASH(h, logn), logn);
 	return norm_okay;
@@ -871,27 +897,24 @@ Zf(sign_NTT)(inner_shake256_context *rng, int16_t *restrict s1,
 	const uint8_t *restrict h, unsigned logn, uint8_t *restrict tmp)
 {
 	size_t n, u;
-	uint16_t flag, *bf, *bg, *bF, *bG, *x0, *x1;
+	uint32_t flag, *bf, *bg, *bF, *bG, *x0, *x1;
 	int norm_okay;
 	prng p;
 
 	n = MKN(logn);
 
-	bf = (uint16_t *)tmp;
+	bf = (uint32_t *)tmp;
 	bg = bf + n;
 	bF = bg + n;
 	bG = bF + n;
 	x0 = bG + n;
-	x1 = (uint16_t *)s1;
+	x1 = x0 + n;
 
 	Zf(prng_init)(&p, rng);
 
-	Zf(NTT_NTRU)(f, g, F, G, bf, bg, bF, bG, logn);
+	mf_NTRU(f, g, F, G, bf, bg, bF, bG, logn);
 
 	norm_okay = sample_short_NTT(&p, x0, x1, bf, bg, bF, bG, h, logn);
-
-	Zf(mq_poly_tomonty)(x0, logn);
-	Zf(mq_poly_tomonty)(x1, logn);
 
 	/*
 	 * Compute s1 in (s0, s1) = ((h0, h1) - B^{-1} (x0, x1)) / 2, so
@@ -899,20 +922,19 @@ Zf(sign_NTT)(inner_shake256_context *rng, int16_t *restrict s1,
 	 *     s1 = (h1 - (x0 * (-g) + x1 f)) / 2.
 	 */
 	for (u = 0; u < n; u++) {
-		x1[u] = Zf(mq_sub)(Zf(mq_montymul)(bf[u], x1[u]),
-			Zf(mq_montymul)(bg[u], x0[u]));
+		x1[u] = Zf(mf_sub)(Zf(mf_mul)(bf[u], x1[u]), Zf(mf_mul)(bg[u], x0[u]));
 	}
-	Zf(mq_iNTT)(x1, logn);
+	Zf(mf_iNTT)(x1, logn);
 
 	/*
 	 * The polynomial x1 is stored at s1, so conversion to int16_t is done
 	 * automatically. Normalize s1 elements into the [-q/2..q/2] range.
 	 */
 	for (u = 0; u < n; u ++) {
-		s1[u] = Zf(mq_conv_signed)(x1[u]);
+		s1[u] = Zf(mf_conv_signed)(x1[u]);
 	}
 
-	flag = (uint16_t)Zf(in_positive_half)(s1, SECOND_HASH(h, logn), logn);
+	flag = (uint32_t)Zf(in_positive_half)(s1, SECOND_HASH(h, logn), logn);
 	conditional_flip(flag, s1, SECOND_HASH(h, logn), logn);
 
 	return norm_okay;

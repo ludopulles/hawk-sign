@@ -292,9 +292,9 @@ hawk_make_public(void *pubkey, size_t pubkey_len, const void *seckey,
 	 */
 	iq00 = align_i16(tmp);
 	iq10 = iq00 + n;
-	atmp = (uint8_t *)(iq10 + n);
+	atmp = (uint8_t *)align_i32(iq10 + n);
 
-	Zf(make_public)(f, g, F, NULL, iq00, iq10, logn, atmp);
+	Zf(make_public)(f, g, F, NULL, iq00, iq10, NULL, logn, atmp);
 
 	/*
 	 * Encode public key.
@@ -515,7 +515,7 @@ hawk_uncompressed_sign_finish(shake256_context *rng, void *sig, size_t *sig_len,
 #ifdef HAWK_AVX
 	atmp = (uint8_t *)align_fpr(s1 + n);
 #else
-	atmp = (uint8_t *)(s1 + n);
+	atmp = (uint8_t *)align_i32(s1 + n);
 #endif
 
 	if (Zf(decode_seckey)(f, g, F, seckey + 1, seckey_len - 1, logn) == 0) {
@@ -663,7 +663,7 @@ hawk_sign_dyn_finish(shake256_context *rng, void *sig, size_t *sig_len,
 #ifdef HAWK_AVX
 	atmp = (uint8_t *)align_fpr(sv + n);
 #else
-	atmp = (uint8_t *)align_i16(sv + n);
+	atmp = (uint8_t *)align_i32(sv + n);
 #endif
 
 	if (Zf(decode_seckey)(f, g, F, seckey + 1, seckey_len - 1, logn) == 0) {
