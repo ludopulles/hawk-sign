@@ -41,14 +41,14 @@ int poly16_eq(int16_t *p, int16_t *q, unsigned logn) {
 
 uint8_t b[48 << LOGN], outbuf[BUFLEN];
 int8_t f[N], g[N], F[N], G[N];
-fpr q00[N], q10[N], q11[N];
-int16_t iq00[N], iq10[N];
+fpr q00[N], q01[N], q11[N];
+int16_t iq00[N], iq01[N];
 
 uint8_t h[N/4];
 int16_t s0[N], s1[N], _s0[N], _s1[N];
 
 int8_t _f[N], _g[N], _F[N], _G[N];
-int16_t _iq00[N], _iq10[N];
+int16_t _iq00[N], _iq01[N];
 fpr exp_seckey[EXPANDED_SECKEY_SIZE(LOGN)];
 
 inner_shake256_context sc;
@@ -64,7 +64,7 @@ void test_encode_decode(unsigned logn) {
 
 	for (int i = 0; i < n_repetitions; i++) {
 		// Generate key pair.
-		Zf(keygen)(&sc, f, g, F, G, iq00, iq10, logn, b);
+		Zf(keygen)(&sc, f, g, F, G, iq00, iq01, logn, b);
 
 		// Test secret key encoding and decoding
 		size_t sk_len = Zf(encode_seckey)(outbuf, BUFLEN, f, g, F, logn);
@@ -85,16 +85,16 @@ void test_encode_decode(unsigned logn) {
 
 		// Test public key encoding and decoding
 		Zf(fft_to_int16)(iq00, q00, logn);
-		Zf(fft_to_int16)(iq10, q10, logn);
+		Zf(fft_to_int16)(iq01, q01, logn);
 		Zf(FFT)(q00, logn);
-		Zf(FFT)(q10, logn);
+		Zf(FFT)(q01, logn);
 
-		size_t pk_len = Zf(encode_pubkey)(outbuf, BUFLEN, iq00, iq10, logn);
+		size_t pk_len = Zf(encode_pubkey)(outbuf, BUFLEN, iq00, iq01, logn);
 		assert(pk_len != 0);
-		assert(pk_len == Zf(decode_pubkey)(_iq00, _iq10, outbuf, pk_len, logn));
+		assert(pk_len == Zf(decode_pubkey)(_iq00, _iq01, outbuf, pk_len, logn));
 
 		assert(poly16_eq(iq00, _iq00, logn));
-		assert(poly16_eq(iq10, _iq10, logn));
+		assert(poly16_eq(iq01, _iq01, logn));
 
 		// Test complete signature encoding and decoding
 		inner_shake256_extract(&sc, h, n <= 8 ? 2 : n / 4);

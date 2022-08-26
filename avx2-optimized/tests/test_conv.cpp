@@ -204,7 +204,7 @@ int8_t h0[REPETITIONS][n], h1[REPETITIONS][n]; // hashes
 int8_t x0[n], x1[n]; // output signature
 int8_t expx0[n], expx1[n]; // expected answer
 
-fpr q00[n], q10[n], q11[n];
+fpr q00[n], q01[n], q11[n];
 
 int main() {
 	unsigned char seed[48];
@@ -220,7 +220,7 @@ int main() {
 	gettimeofday(&t0, NULL);
 
 	// Generate key pair.
-	Zf(keygen)(&sc, f, g, F, G, q00, q10, q11, logn, tmp);
+	Zf(keygen)(&sc, f, g, F, G, q00, q01, q11, logn, tmp);
 
 	gettimeofday(&t1, NULL);
 	printf("Key generation took %lld microseconds\n", time_diff(&t0, &t1));

@@ -171,7 +171,7 @@ Zf(complete_pubkey)(const int16_t *restrict iq00, const int16_t *restrict iq01,
 int
 Zf(uncompressed_verify)(const uint8_t *restrict h,
 	const int16_t *restrict s0, const int16_t *restrict s1,
-	const fpr *restrict q00, const fpr *restrict q10, const fpr *restrict q11,
+	const fpr *restrict q00, const fpr *restrict q01, const fpr *restrict q11,
 	unsigned logn, uint8_t *restrict tmp)
 {
 	size_t n;
@@ -188,14 +188,14 @@ Zf(uncompressed_verify)(const uint8_t *restrict h,
 	hash_to_fft(t1, SECOND_HASH(h, logn), s1, logn);
 
 	return Zf(in_positive_half)(s1, SECOND_HASH(h, logn), logn)
-		&& has_short_trace(t0, t1, q00, q10, q11, logn);
+		&& has_short_trace(t0, t1, q00, q01, q11, logn);
 }
 
 /* see inner.h */
 int
 Zf(recover_and_verify)(const uint8_t *restrict h,
 	int16_t *restrict s0, const int16_t *restrict s1,
-	const fpr *restrict q00, const fpr *restrict q10, const fpr *restrict q11,
+	const fpr *restrict q00, const fpr *restrict q01, const fpr *restrict q11,
 	unsigned logn, uint8_t *restrict tmp)
 {
 	size_t n, u, v, w;
@@ -208,12 +208,12 @@ Zf(recover_and_verify)(const uint8_t *restrict h,
 
 	hash_to_fft(t1, SECOND_HASH(h, logn), s1, logn);
 	memcpy(t0, t1, n * sizeof *t1);
-	Zf(poly_mul_fft)(t0, q10, logn);
+	Zf(poly_mul_fft)(t0, q01, logn);
 	Zf(poly_div_autoadj_fft)(t0, q00, logn);
 	Zf(iFFT)(t0, logn);
 
 	/*
-	 * Recover s0 with s0 = round(h0 / 2 + (h1 / 2 - s1) q10 / q00).
+	 * Recover s0 with s0 = round(h0 / 2 + (h1 / 2 - s1) q01 / q00).
 	 * Put (t0, t1) = (h0 - 2 * s0, h1 - 2 * s1) in FFT representation.
 	 */
 	if (logn <= 3) {
@@ -234,20 +234,20 @@ Zf(recover_and_verify)(const uint8_t *restrict h,
 
 	hash_to_fft(t0, h, s0, logn);
 	return Zf(in_positive_half)(s1, SECOND_HASH(h, logn), logn)
-		&& has_short_trace(t0, t1, q00, q10, q11, logn);
+		&& has_short_trace(t0, t1, q00, q01, q11, logn);
 }
 
 /* see inner.h */
 int
 Zf(verify_nearest_plane)(const uint8_t *restrict h,
 	const int16_t *restrict s1,
-	const fpr *restrict q00, const fpr *restrict q10, const fpr *restrict q11,
+	const fpr *restrict q00, const fpr *restrict q01, const fpr *restrict q11,
 	unsigned logn, uint8_t *restrict tmp)
 {
 	/*
 	 * This works slightly better than simple rounding, but is also slower.
 	 * Reconstruct s0, by running Babai's NP algorithm with target
-	 *     h0 / 2 + (h1 / 2 - s1) * q10 / q00.
+	 *     h0 / 2 + (h1 / 2 - s1) * q01 / q00.
 	 */
 
 	size_t n;
@@ -262,7 +262,7 @@ Zf(verify_nearest_plane)(const uint8_t *restrict h,
 	hash_to_fft(t0, h, NULL, logn);
 	hash_to_fft(t1, SECOND_HASH(h, logn), s1, logn);
 
-	Zf(poly_mul_fft)(t1, q10, logn);
+	Zf(poly_mul_fft)(t1, q01, logn);
 	Zf(poly_div_autoadj_fft)(t1, q00, logn);
 	Zf(poly_add)(t0, t1, logn);
 	Zf(poly_mulconst)(t0, fpr_onehalf, logn);
@@ -277,7 +277,7 @@ Zf(verify_nearest_plane)(const uint8_t *restrict h,
 	/*
 	 * Now run the casual verification.
 	 */
-	return Zf(uncompressed_verify)(h, s0, s1, q00, q10, q11, logn, tmp);
+	return Zf(uncompressed_verify)(h, s0, s1, q00, q01, q11, logn, tmp);
 }
 
 /* see inner.h */

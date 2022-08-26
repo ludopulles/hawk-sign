@@ -23,18 +23,18 @@ size_t sksize[MAXLOGN+1];
 void find_seckeysizes(inner_shake256_context *sc) {
 	uint8_t b[48 << MAXLOGN];
 	int8_t f[MAXN], g[MAXN], F[MAXN], G[MAXN];
-	int16_t iq00[MAXN], iq10[MAXN];
+	int16_t iq00[MAXN], iq01[MAXN];
 
 	for (unsigned logn = 1; logn <= MAXLOGN; logn++) {
 		// Generate key pair.
-		Zf(keygen)(sc, f, g, F, G, iq00, iq10, logn, b);
+		Zf(keygen)(sc, f, g, F, G, iq00, iq01, logn, b);
 
 		// Take the header byte into account:
 		sksize[logn] = 1 + Zf(encode_seckey)(NULL, 0, f, g, F, logn);
 
 		for (int test = 10; test--; ) {
 			// Check if it is the same a second time
-			Zf(keygen)(sc, f, g, F, G, iq00, iq10, logn, b);
+			Zf(keygen)(sc, f, g, F, G, iq00, iq01, logn, b);
 			assert(sksize[logn] == 1 + Zf(encode_seckey)(NULL, 0, f, g, F, logn));
 		}
 	}
@@ -48,13 +48,13 @@ struct WorkerResult {
 	long long pksum, pksq, pkmin, pkmax;
 	long long fgsum, fgsq, FGsum, FGsq;
 	long long q00sum, q00sq;
-	long long q10sum, q10sq;
+	long long q01sum, q01sq;
 	long long q11sum, q11sq;
 
 	WorkerResult() : iterations(0),
 		pksum(0), pksq(0), pkmin(1000000), pkmax(0),
 		fgsum(0), fgsq(0), FGsum(0), FGsq(0),
-		q00sum(0), q00sq(0), q10sum(0), q10sq(0), q11sum(0), q11sq(0) {}
+		q00sum(0), q00sq(0), q01sum(0), q01sq(0), q11sum(0), q11sq(0) {}
 
 	void combine(const WorkerResult &res) {
 		iterations += res.iterations;
@@ -70,8 +70,8 @@ struct WorkerResult {
 
 		q00sum += res.q00sum;
 		q00sq += res.q00sq;
-		q10sum += res.q10sum;
-		q10sq += res.q10sq;
+		q01sum += res.q01sum;
+		q01sq += res.q01sq;
 		q11sum += res.q11sum;
 		q11sq += res.q11sq;
 	}
@@ -86,8 +86,8 @@ WorkerResult run(unsigned logn, const unsigned char *seed, size_t seed_len)
 	} tmp;
 
 	int8_t f[MAXN], g[MAXN], F[MAXN], G[MAXN];
-	fpr q00[MAXN], q10[MAXN], q11[MAXN];
-	int16_t iq00[MAXN], iq10[MAXN];
+	fpr q00[MAXN], q01[MAXN], q11[MAXN];
+	int16_t iq00[MAXN], iq01[MAXN];
 	inner_shake256_context sc;
 	WorkerResult res;
 
@@ -98,7 +98,7 @@ WorkerResult run(unsigned logn, const unsigned char *seed, size_t seed_len)
 
 	for (size_t i = 0; i < nrepetitions; i++) {
 		// Generate key pair.
-		Zf(keygen)(&sc, f, g, F, G, iq00, iq10, logn, tmp.b);
+		Zf(keygen)(&sc, f, g, F, G, iq00, iq01, logn, tmp.b);
 
 		for (size_t u = 0; u < MKN(logn); u++) {
 			res.fgsq += f[u]*f[u] + g[u]*g[u];
@@ -109,16 +109,16 @@ WorkerResult run(unsigned logn, const unsigned char *seed, size_t seed_len)
 		// Pay attention: q11 does NOT fit into a int16_t.
 
 		// Take the header byte into account:
-		int pk_sz = 1 + Zf(encode_pubkey)(NULL, 0, iq00, iq10, logn);
+		int pk_sz = 1 + Zf(encode_pubkey)(NULL, 0, iq00, iq01, logn);
 
 		res.pksum += pk_sz;
 		res.pksq += pk_sz * pk_sz;
 		if (pk_sz < res.pkmin) res.pkmin = pk_sz;
 		if (pk_sz > res.pkmax) res.pkmax = pk_sz;
 
-		Zf(complete_pubkey)(iq00, iq10, q00, q10, q11, logn);
+		Zf(complete_pubkey)(iq00, iq01, q00, q01, q11, logn);
 		Zf(iFFT)(q00, logn);
-		Zf(iFFT)(q10, logn);
+		Zf(iFFT)(q01, logn);
 		Zf(iFFT)(q11, logn);
 
 		for  (size_t u = 1; u < MKN(logn - 1); u++) {
@@ -131,9 +131,9 @@ WorkerResult run(unsigned logn, const unsigned char *seed, size_t seed_len)
 		}
 
 		for  (size_t u = 0; u < MKN(logn); u++) {
-			long long y = fpr_rint(q10[u]);
-			res.q10sum += y;
-			res.q10sq += y*y;
+			long long y = fpr_rint(q01[u]);
+			res.q01sum += y;
+			res.q01sq += y*y;
 		}
 	}
 
@@ -175,7 +175,7 @@ int main() {
 #define VAR0(sq, N) (N == 0 ? 0.0 : sqrt((double)(sq) / (double)(N)))
 
 	WorkerResult totals[MAXLOGN + 1];
-	printf("logn | sigma f,g | sigma F,G | sigma q00 | sigma q10 | sigma q11 | |sk|\n");
+	printf("logn | sigma f,g | sigma F,G | sigma q00 | sigma q01 | sigma q11 | |sk|\n");
 	for (unsigned logn = 1; logn <= MAXLOGN; logn++) {
 		tot = WorkerResult();
 
@@ -192,13 +192,13 @@ int main() {
 		// Print current values
 		int n = MKN(logn);
 		int ncc = n/2 - 1, reps = totals[logn].iterations;
-		// printf("logn = %d: sigma_{f,g} ~ %.8f, sigma_{F,G} ~ %.8f, sig_{q00} ~ %.8f, sig_{q10} ~ %.8f, sig_{q11} ~ %.8f\n",
+		// printf("logn = %d: sigma_{f,g} ~ %.8f, sigma_{F,G} ~ %.8f, sig_{q00} ~ %.8f, sig_{q01} ~ %.8f, sig_{q11} ~ %.8f\n",
 		printf("%4d | %9.7f | %9.6f | %9.4f | %9.4f | %9.3f | %4d\n",
 			(int) logn,
 			VAR0(totals[logn].fgsq, 2 * reps * n),
 			VAR0(totals[logn].FGsq, 2 * reps * n),
 			VAR0(totals[logn].q00sq, reps * ncc),
-			VAR0(totals[logn].q10sq, reps * n),
+			VAR0(totals[logn].q01sq, reps * n),
 			VAR0(totals[logn].q11sq, reps * ncc),
 			(int) sksize[logn]
 		);

@@ -42,17 +42,17 @@ void print_int16(int16_t *p, size_t logn) {
 // Huffman Encoding:
 #define MAX_Q00 (512) // ~6*sigma
 #define ENCODING_LEN_Q00 (96) // max path in the tree
-#define MAX_Q10 (2*2048)
-#define MAX_Q10_LARGE (MAX_Q10)
-#define ENCODING_LEN_Q10 (56)
+#define MAX_Q01 (2*2048)
+#define MAX_Q01_LARGE (MAX_Q01)
+#define ENCODING_LEN_Q01 (56)
 
 static struct { uint16_t a[MAX_Q00][2], p[2*MAX_Q00]; } tree_q00;
-static struct { uint16_t a[MAX_Q10][2], p[2*MAX_Q10]; } tree_q10;
-static struct { uint16_t a[MAX_Q10_LARGE][2], p[2*MAX_Q10_LARGE]; } tree_q10_large;
+static struct { uint16_t a[MAX_Q01][2], p[2*MAX_Q01]; } tree_q01;
+static struct { uint16_t a[MAX_Q01_LARGE][2], p[2*MAX_Q01_LARGE]; } tree_q01_large;
 
 static
 void create_huffman_tree() {
-	float freq[2*MAX_Q10_LARGE];
+	float freq[2*MAX_Q01_LARGE];
 	uint16_t u, l, r, v;
 
 #define BUILD_TREE(T, N, sigma)                                          \
@@ -75,8 +75,8 @@ void create_huffman_tree() {
 	}
 
 	BUILD_TREE(tree_q00, MAX_Q00, 45.75);
-	BUILD_TREE(tree_q10, MAX_Q10, 512.0);
-	BUILD_TREE(tree_q10_large, MAX_Q10_LARGE, 512.0);
+	BUILD_TREE(tree_q01, MAX_Q01, 512.0);
+	BUILD_TREE(tree_q01_large, MAX_Q01_LARGE, 512.0);
 }
 
 static size_t
@@ -85,7 +85,7 @@ Zf(huffman_encode)(void *out, size_t max_out_len, const int16_t *x,
 {
 	uint8_t *buf = (uint8_t *)out;
 	size_t n = MKN(logn), u, v = 0;
-	uint8_t acc = 0, acc_len = 0, steps[ENCODING_LEN_Q10];
+	uint8_t acc = 0, acc_len = 0, steps[ENCODING_LEN_Q01];
 
 #define ADDBIT(x) {                                                      \
 	acc = (acc << 1) | (x);                                              \
@@ -100,10 +100,10 @@ Zf(huffman_encode)(void *out, size_t max_out_len, const int16_t *x,
 }
 
 	for (u = 0; u < n; u ++)
-		if (x[u] <= -MAX_Q10 || x[u] >= MAX_Q10) return 0;
+		if (x[u] <= -MAX_Q01 || x[u] >= MAX_Q01) return 0;
 
 	/*
-	 * Then output q10 using the second Huffman tree.
+	 * Then output q01 using the second Huffman tree.
 	 */
 	for (u = 0; u < n; u ++) {
 		uint16_t t, s;
@@ -112,9 +112,9 @@ Zf(huffman_encode)(void *out, size_t max_out_len, const int16_t *x,
 		ADDBIT(x[u] >> 15); // push the sign bit
 		t = (uint16_t)(x[u] < 0 ? (-x[u]-1) : x[u]); // absolute value
 		nsteps = 0; // store the steps to go up the tree in the buffer
-		for (t += MAX_Q10; t > 1; t = s) {
-			s = tree_q10.p[t];
-			steps[nsteps++] = (tree_q10.a[s][1] == t);
+		for (t += MAX_Q01; t > 1; t = s) {
+			s = tree_q01.p[t];
+			steps[nsteps++] = (tree_q01.a[s][1] == t);
 		}
 
 		// print the bits in reverse order, i.e. from root to leaf
@@ -155,10 +155,10 @@ Zf(huffman_encode_large)(void *out, size_t max_out_len, const int16_t *x,
 }
 
 	for (u = 0; u < n; u ++)
-		if (x[u] <= -MAX_Q10_LARGE || x[u] >= MAX_Q10_LARGE) return 0;
+		if (x[u] <= -MAX_Q01_LARGE || x[u] >= MAX_Q01_LARGE) return 0;
 
 	/*
-	 * Then output q10 using the second Huffman tree.
+	 * Then output q01 using the second Huffman tree.
 	 */
 	for (u = 0; u < n; u ++) {
 		uint16_t t, s;
@@ -167,9 +167,9 @@ Zf(huffman_encode_large)(void *out, size_t max_out_len, const int16_t *x,
 		ADDBIT(x[u] >> 15); // push the sign bit
 		t = (uint16_t)(x[u] < 0 ? (-x[u]-1) : x[u]); // absolute value
 		nsteps = 0; // store the steps to go up the tree in the buffer
-		for (t += MAX_Q10_LARGE; t > 1; t = s) {
-			s = tree_q10_large.p[t];
-			steps[nsteps++] = (tree_q10_large.a[s][1] == t);
+		for (t += MAX_Q01_LARGE; t > 1; t = s) {
+			s = tree_q01_large.p[t];
+			steps[nsteps++] = (tree_q01_large.a[s][1] == t);
 		}
 
 		// print the bits in reverse order, i.e. from root to leaf
@@ -192,7 +192,7 @@ Zf(huffman_encode_large)(void *out, size_t max_out_len, const int16_t *x,
 
 /* see codec.c, Zf(comp_encode) */
 size_t
-Zf(encode_q10)(void *out, size_t max_out_len, const int16_t *x,
+Zf(encode_q01)(void *out, size_t max_out_len, const int16_t *x,
 	unsigned logn, const int lim, const int lo_bits)
 {
 	uint8_t *buf = (uint8_t *)out;
@@ -424,8 +424,8 @@ WorkerResult measure_keygen()
 		fpr dummy_fpr;
 	} tmp;
 	int8_t f[n], g[n], F[n], G[n];
-	fpr *_f = (fpr*)tmp.b, *_g = _f + n, *_F = _g + n, *_G = _F + n, q10b[n];
-	int16_t iq00[n], iq10[n];
+	fpr *_f = (fpr*)tmp.b, *_g = _f + n, *_F = _g + n, *_G = _F + n, q01b[n];
+	int16_t iq00[n], iq01[n];
 	unsigned char seed[48];
 	inner_shake256_context sc;
 	struct timeval t0, t1;
@@ -442,12 +442,12 @@ WorkerResult measure_keygen()
 	gettimeofday(&t0, NULL);
 	for (int _ = 0; _ < result.num_iters; _++) {
 		// Generate key pair.
-		Zf(keygen)(&sc, f, g, F, G, iq00, iq10, logn, tmp.b);
+		Zf(keygen)(&sc, f, g, F, G, iq00, iq01, logn, tmp.b);
 
 		size_t enc00 = Zf(encode_q00)(NULL, 0, iq00, logn, 512, 5);
 		size_t huf00 = Zf(huffman_encode_q00)(NULL, 0, iq00, logn);
-		size_t enc = Zf(encode_q10)(NULL, 0, iq10, logn, 4096, 8);
-		size_t huf = Zf(huffman_encode_large)(NULL, 0, iq10, logn);
+		size_t enc = Zf(encode_q01)(NULL, 0, iq01, logn, 4096, 8);
+		size_t huf = Zf(huffman_encode_large)(NULL, 0, iq01, logn);
 
 		if (!enc00 || !huf00 || !enc || !huf) { printf("."); fflush(stdout); result.num_fails++; _--; continue; }
 
@@ -458,12 +458,12 @@ WorkerResult measure_keygen()
 
 		Zf(ffBabai_reduce)(_f, _g, _F, _G, F, G, logn, _G + n);
 
-		// q10 = F*adj(f) + G*adj(g)
-		Zf(poly_add_muladj_fft)(q10b, _F, _G, _f, _g, logn);
-		Zf(fft_to_int16)(iq10, q10b, logn);
+		// q01 = F*adj(f) + G*adj(g)
+		Zf(poly_add_muladj_fft)(q01b, _F, _G, _f, _g, logn);
+		Zf(fft_to_int16)(iq01, q01b, logn);
 
-		size_t encB = Zf(encode_q10)(NULL, 0, iq10, logn, 2048, 8);
-		size_t hufB = Zf(huffman_encode)(NULL, 0, iq10, logn);
+		size_t encB = Zf(encode_q01)(NULL, 0, iq01, logn, 2048, 8);
+		size_t hufB = Zf(huffman_encode)(NULL, 0, iq01, logn);
 
 		if (!encB || !hufB) { result.num_fails++; _--; continue; }
 

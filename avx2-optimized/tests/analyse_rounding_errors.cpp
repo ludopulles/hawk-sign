@@ -60,7 +60,7 @@ struct HawkKeyPair {
 	int num_occuring = 0; // # of times, we find this in the text file.
 
 	vector<int8_t> f, g, F, G;
-	vector<fpr> q00, q10, q11;
+	vector<fpr> q00, q01, q11;
 
 	bool read(ifstream &in, size_t logn);
 	void complete(uint8_t *tmp);
@@ -74,10 +74,10 @@ void HawkKeyPair::complete(uint8_t *tmp)
 	F.resize(n);
 	G.resize(n);
 	q00.resize(n);
-	q10.resize(n);
+	q01.resize(n);
 	q11.resize(n);
 
-	assert(Zf(complete_private)(&f[0], &g[0], &F[0], &G[0], &q00[0], &q10[0], &q11[0], logn, tmp) != 0);
+	assert(Zf(complete_private)(&f[0], &g[0], &F[0], &G[0], &q00[0], &q01[0], &q11[0], logn, tmp) != 0);
 }
 
 bool HawkKeyPair::read(ifstream &in, size_t _logn)
@@ -108,7 +108,7 @@ void output_poly(int8_t *f, size_t logn) {
 
 int approximate_fail_prob(inner_shake256_context *rng,
 	int8_t *f, int8_t *g, int8_t *F, int8_t *G,
-	fpr *q00, fpr *q10, fpr *q11,
+	fpr *q00, fpr *q01, fpr *q11,
 	unsigned logn, uint8_t *tmp)
 {
 	int16_t sig[512];
@@ -126,7 +126,7 @@ int approximate_fail_prob(inner_shake256_context *rng,
 		inner_shake256_extract(rng, h, n / 4);
 		// Make sure that sign.c may fail on generating a signature that does not decompress correctly.
 		Zf(sign)(rng, sig, expkey, h, logn, tmp);
-		if (!Zf(verify)(h, sig, q00, q10, q11, logn, tmp))
+		if (!Zf(verify)(h, sig, q00, q01, q11, logn, tmp))
 			fails++;
 	}
 	return fails;
@@ -216,7 +216,7 @@ int main(int argc, char **argv) {
 
 	// Now compare this to the average private key
 	int8_t f[512], g[512], F[512], G[512];
-	fpr q00[512], q10[512], q11[512];
+	fpr q00[512], q01[512], q11[512];
 
 	// printf("On average: ");
 	const int n_repetitions = 1000;
@@ -225,7 +225,7 @@ int main(int argc, char **argv) {
 	double avgN = 0.0, varN = 0.0;
 	for (int i = 0; i < n_repetitions; i++) {
 		// Generate key pair.
-		Zf(keygen)(&sc, f, g, F, G, q00, q10, q11, logn, &tmp[0]);
+		Zf(keygen)(&sc, f, g, F, G, q00, q01, q11, logn, &tmp[0]);
 
 		for (size_t u = 0; u < n/2; u++) {
 			q00[u] = fpr_inv(q00[u]);
@@ -237,7 +237,7 @@ int main(int argc, char **argv) {
 
 		// Zf(FFT)(q00, logn); // restore value.
 		// for (size_t u = 0; u < n/2; u++) q00[u] = fpr_inv(q00[u]);
-		// printf("%.8f %d\n", cstQ00.v, approximate_fail_prob(&sc, f, g, F, G, q00, q10, q11, logn, &tmp[0]));
+		// printf("%.8f %d\n", cstQ00.v, approximate_fail_prob(&sc, f, g, F, G, q00, q01, q11, logn, &tmp[0]));
 
 		double norm2 = 0.0;
 		for (size_t u = 0; u < n; u++) norm2 += fpr_sqr(q00[u]).v;

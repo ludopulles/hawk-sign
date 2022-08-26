@@ -239,7 +239,7 @@ do_sign(prng *rng, const fpr *restrict expanded_seckey,
 #define N MKN(LOGN)
 uint8_t b[48 << LOGN];
 int8_t f[N], g[N], F[N], G[N];
-fpr q00[N], q10[N], q11[N], iq00[N], exp_key[9 << (LOGN-1)];
+fpr q00[N], q01[N], q11[N], iq00[N], exp_key[9 << (LOGN-1)];
 constexpr size_t num_reps = 100 * 1000;
 
 void measure_decompression_failure(inner_shake256_context *sc) {
@@ -257,13 +257,13 @@ void measure_decompression_failure(inner_shake256_context *sc) {
 		Zf(prng_get_bytes)(&rng, h, sizeof h);
 		res = do_sign(&rng, exp_key, s0, s1, h, LOGN, owntmp);
 		if (res > 1) printf("res = %d\n", res);
-		if (res	> 1 && Zf(verify_simple_rounding)(h, s0p, s1, q00, q10, q11, LOGN, owntmp)) {
+		if (res	> 1 && Zf(verify_simple_rounding)(h, s0p, s1, q00, q01, q11, LOGN, owntmp)) {
 			printf("Expecting different signature!!!\n");
 			for (size_t u = 0; u < N; u++)
 				printf("%d ", s0p[u] - s0[u]);
 			printf("\n");
 			fflush(stdout);
-			assert(!Zf(complete_verify)(h, s0, s1, q00, q10, q11, LOGN, b));
+			assert(!Zf(complete_verify)(h, s0, s1, q00, q01, q11, LOGN, b));
 		}
 	}
 }
@@ -307,7 +307,7 @@ void test_decomp_prob(inner_shake256_context *sc)
 {
 	size_t u, hn = N/2;
 
-	Zf(keygen)(sc, f, g, F, G, q00, q10, q11, LOGN, b);
+	Zf(keygen)(sc, f, g, F, G, q00, q01, q11, LOGN, b);
 
 	for (u = 0; u < hn; u ++) {
 		iq00[u] = fpr_inv(q00[u]);

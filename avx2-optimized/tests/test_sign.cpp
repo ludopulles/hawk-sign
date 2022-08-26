@@ -63,13 +63,13 @@ hash_to_fft(fpr *p, const uint8_t *h, const int16_t *s, unsigned logn)
 static int
 verify_nearest_plane_tree(const fpr *restrict tree,
 	const uint8_t *restrict h, int16_t *restrict s0, const int16_t *restrict s1,
-	const fpr *restrict q00, const fpr *restrict q10, const fpr *restrict q11,
+	const fpr *restrict q00, const fpr *restrict q01, const fpr *restrict q11,
 	unsigned logn, uint8_t *restrict tmp)
 {
 	/*
 	 * This works better than simple rounding.
 	 * Reconstruct s0, by running Babai's NP algorithm with target
-	 *     h0/2 + (h1/2 - s1) q10 / q00.
+	 *     h0/2 + (h1/2 - s1) q01 / q00.
 	 */
 
 	size_t n;
@@ -82,7 +82,7 @@ verify_nearest_plane_tree(const fpr *restrict tree,
 	hash_to_fft(t0, h, NULL, logn);
 	hash_to_fft(t1, SECOND_HASH(h, logn), s1, logn);
 
-	Zf(poly_mul_fft)(t1, q10, logn);
+	Zf(poly_mul_fft)(t1, q01, logn);
 	Zf(poly_div_autoadj_fft)(t1, q00, logn);
 	Zf(poly_add)(t0, t1, logn);
 	Zf(poly_mulconst)(t0, fpr_onehalf, logn);
@@ -91,7 +91,7 @@ verify_nearest_plane_tree(const fpr *restrict tree,
 	Zf(ffNearestPlane_tree)(t1, tree, t0, logn, t1 + n);
 	Zf(fft_to_int16)(s0, t1, logn);
 
-	return Zf(uncompressed_verify)(h, s0, s1, q00, q10, q11, logn, tmp);
+	return Zf(uncompressed_verify)(h, s0, s1, q00, q01, q11, logn, tmp);
 }
 
 // =============================================================================
@@ -110,8 +110,8 @@ void measure_sign_speed()
 	uint8_t b[50 << logn];
 	int8_t f[n], g[n], F[n], G[n];
 	fpr exp_sk[EXPANDED_SECKEY_SIZE(logn)]; // if logn is not known at compile-time, take fixed value
-	int16_t iq00[n], iq10[n], s0[n], s1[n];
-	fpr q00[n], q10[n], q11[n];
+	int16_t iq00[n], iq01[n], s0[n], s1[n];
+	fpr q00[n], q01[n], q11[n];
 	unsigned char seed[48];
 	inner_shake256_context sc;
 	timeval t0, t1;
@@ -123,8 +123,8 @@ void measure_sign_speed()
 	inner_shake256_flip(&sc);
 
 	// One key generation
-	Zf(keygen)(&sc, f, g, F, G, iq00, iq10, logn, b);
-	Zf(complete_pubkey)(iq00, iq10, q00, q10, q11, logn);
+	Zf(keygen)(&sc, f, g, F, G, iq00, iq01, logn, b);
+	Zf(complete_pubkey)(iq00, iq01, q00, q01, q11, logn);
 	Zf(expand_seckey)(exp_sk, f, g, F, logn);
 
 	// memset(pregen_h, 0, num_samples * n / 4);
@@ -162,7 +162,7 @@ void measure_sign_speed()
 	int nr_cor = 0;
 	gettimeofday(&t0, NULL);
 	for (int rep = 0; rep < num_samples; rep++)
-		nr_cor += Zf(uncompressed_verify)(pregen_h[rep], pregen_s0[rep], pregen_s1[rep], q00, q10, q11, logn, b);
+		nr_cor += Zf(uncompressed_verify)(pregen_h[rep], pregen_s0[rep], pregen_s1[rep], q00, q01, q11, logn, b);
 	gettimeofday(&t1, NULL);
 	printf("# correct = %d\n", nr_cor);
 	ll cv_us = time_diff(&t0, &t1);
@@ -170,7 +170,7 @@ void measure_sign_speed()
 	nr_cor = 0;
 	gettimeofday(&t0, NULL);
 	for (int rep = 0; rep < num_samples; rep++) {
-		nr_cor += Zf(recover_and_verify)(pregen_h[rep], s0, pregen_s[rep], q00, q10, q11, logn, b);
+		nr_cor += Zf(recover_and_verify)(pregen_h[rep], s0, pregen_s[rep], q00, q01, q11, logn, b);
 	}
 	gettimeofday(&t1, NULL);
 	printf("# correct = %d\n", nr_cor);
@@ -179,7 +179,7 @@ void measure_sign_speed()
 	nr_cor = 0;
 	gettimeofday(&t0, NULL);
 	for (int rep = 0; rep < num_samples; rep++) {
-		nr_cor += Zf(verify)(pregen_h[rep], pregen_s[rep], q00, q10, q11, logn, b);
+		nr_cor += Zf(verify)(pregen_h[rep], pregen_s[rep], q00, q01, q11, logn, b);
 	}
 	gettimeofday(&t1, NULL);
 	printf("# correct = %d\n", nr_cor);
@@ -188,7 +188,7 @@ void measure_sign_speed()
 	nr_cor = 0;
 	gettimeofday(&t0, NULL);
 	for (int rep = 0; rep < num_samples; rep++) {
-		nr_cor += Zf(verify_nearest_plane)(pregen_h[rep], pregen_s[rep], q00, q10, q11, logn, b);
+		nr_cor += Zf(verify_nearest_plane)(pregen_h[rep], pregen_s[rep], q00, q01, q11, logn, b);
 	}
 	gettimeofday(&t1, NULL);
 	ll vnp_us = time_diff(&t0, &t1);
@@ -201,7 +201,7 @@ void measure_sign_speed()
 	nr_cor = 0;
 	gettimeofday(&t0, NULL);
 	for (int rep = 0; rep < num_samples; rep++) {
-		nr_cor += verify_nearest_plane_tree(tree, pregen_h[rep], s0, pregen_s[rep], q00, q10, q11, logn, b);
+		nr_cor += verify_nearest_plane_tree(tree, pregen_h[rep], s0, pregen_s[rep], q00, q01, q11, logn, b);
 	}
 	gettimeofday(&t1, NULL);
 	ll vnpt_us = time_diff(&t0, &t1);
@@ -238,8 +238,8 @@ WorkerResult measure_signatures()
 	uint8_t b[50 << logn];
 	int8_t f[n], g[n], F[n], G[n];
 	uint8_t h[n / 4];
-	int16_t iq00[n], iq10[n], s1[n];
-	fpr q00[n], q10[n], q11[n];
+	int16_t iq00[n], iq01[n], s1[n];
+	fpr q00[n], q01[n], q11[n];
 	unsigned char seed[48];
 	inner_shake256_context sc;
 	fpr exp_sk[EXPANDED_SECKEY_SIZE(logn)];
@@ -261,8 +261,8 @@ WorkerResult measure_signatures()
 	for (int rep = 0; rep < num_reps; rep++) {
 		// Generate key pair.
 		if ((rep & 1023) == 0) {
-			Zf(keygen)(&sc, f, g, F, G, iq00, iq10, logn, b);
-			Zf(complete_pubkey)(iq00, iq10, q00, q10, q11, logn);
+			Zf(keygen)(&sc, f, g, F, G, iq00, iq01, logn, b);
+			Zf(complete_pubkey)(iq00, iq01, q00, q01, q11, logn);
 			Zf(expand_seckey)(exp_sk, f, g, F, logn);
 		}
 
@@ -272,7 +272,7 @@ WorkerResult measure_signatures()
 		// Compute the signature.
 		Zf(sign)(&sc, s1, exp_sk, h, logn, b);
 
-		if (!Zf(verify)(h, s1, q00, q10, q11, logn, b))
+		if (!Zf(verify)(h, s1, q00, q01, q11, logn, b))
 			result.fft_fail++;
 
 		/* size_t sig_sz = Zf(encode_sig)(NULL, 0, s1, logn);

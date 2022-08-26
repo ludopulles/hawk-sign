@@ -39,7 +39,7 @@ void
 keygen_count_fails(inner_shake256_context *sc,
 	int8_t *restrict f, int8_t *restrict g,
 	int8_t *restrict F, int8_t *restrict G,
-	int16_t *restrict iq00, int16_t *restrict iq10,
+	int16_t *restrict iq00, int16_t *restrict iq01,
 	unsigned logn, uint8_t *restrict tmp,
 	long long *inv_fails, long long *normfg_fails, long long *norminvq00_fails,
 	long long *NTRU_fails, long long *coeff_fails)
@@ -201,7 +201,7 @@ keygen_count_fails(inner_shake256_context *sc,
 			continue;
 		}
 
-		Zf(make_public)(f, g, F, G, iq00, iq10, iq11, logn, (uint8_t *)atmp);
+		Zf(make_public)(f, g, F, G, iq00, iq01, iq11, logn, (uint8_t *)atmp);
 
 		/*
 		 * Check the bounds on q00 and q11.
@@ -222,9 +222,9 @@ keygen_count_fails(inner_shake256_context *sc,
 			fg_okay &= x == -iq11[n - u];
 		}
 
-		bound = (int32_t)(1U << Zf(bits_q10)[logn]);
+		bound = (int32_t)(1U << Zf(bits_q01)[logn]);
 		for (u = 0; u < n; u++) {
-			x = iq10[u];
+			x = iq01[u];
 			fg_okay &= (+x - bound) >> 31;
 			fg_okay &= (-x - bound) >> 31;
 		}
@@ -274,7 +274,7 @@ struct WorkerResult {
 WorkerResult measure_keygen(unsigned logn) {
 	uint8_t b[48 << LOGN];
 	int8_t f[N], g[N], F[N], G[N];
-	int16_t iq00[N], iq10[N];
+	int16_t iq00[N], iq01[N];
 	unsigned char seed[48];
 	inner_shake256_context sc;
 
@@ -292,7 +292,7 @@ WorkerResult measure_keygen(unsigned logn) {
 	gettimeofday(&t0, NULL);
 	for (int i = 0; i < res.iters; i++) {
 		// Generate key pair.
-		keygen_count_fails(&sc, f, g, F, G, iq00, iq10, logn, b,
+		keygen_count_fails(&sc, f, g, F, G, iq00, iq01, logn, b,
 			&res.inv_fails, &res.normfg_fails, &res.norminvq00_fails,
 			&res.NTRU_fails, &res.coeff_fails);
 	}

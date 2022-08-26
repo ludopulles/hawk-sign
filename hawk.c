@@ -1046,12 +1046,12 @@ hawk_uncompressed_verify_finish(const void *sig, size_t sig_len, int sig_type,
 	uint8_t *hm, *atmp;
 
 #ifdef HAWK_AVX
-	fpr *q00, *q10, *q11;
+	fpr *q00, *q01, *q11;
 #endif
 
 	const uint8_t *pk, *es;
 	size_t u, v, n;
-	int16_t *iq00, *iq10, *s0, *s1;
+	int16_t *iq00, *iq01, *s0, *s1;
 
 	/*
 	 * Get Hawk degree from public key; verify consistency with
@@ -1110,21 +1110,21 @@ hawk_uncompressed_verify_finish(const void *sig, size_t sig_len, int sig_type,
 	s0 = align_i16(hm + HAWK_HASH_SIZE(logn));
 	s1 = s0 + n;
 	iq00 = s1 + n;
-	iq10 = iq00 + n;
+	iq01 = iq00 + n;
 
 #ifdef HAWK_AVX
 	q00 = align_fpr(s1 + n);
-	q10 = q00 + n;
-	q11 = q10 + n;
+	q01 = q00 + n;
+	q11 = q01 + n;
 	atmp = (uint8_t *)(q11 + n);
 #else
-	atmp = (uint8_t *)align_i32(iq10 + n);
+	atmp = (uint8_t *)align_i32(iq01 + n);
 #endif
 
 	/*
 	 * Decode public key.
 	 */
-	if (Zf(decode_pubkey)(iq00, iq10, pk + 1, pubkey_len - 1, logn) == 0)
+	if (Zf(decode_pubkey)(iq00, iq01, pk + 1, pubkey_len - 1, logn) == 0)
 	{
 		return HAWK_ERR_FORMAT;
 	}
@@ -1167,12 +1167,12 @@ hawk_uncompressed_verify_finish(const void *sig, size_t sig_len, int sig_type,
 	 * Verify signature.
 	 */
 #ifdef HAWK_AVX
-	Zf(complete_pubkey)(iq00, iq10, q00, q10, q11, logn);
-	if (!Zf(uncompressed_verify)(hm, s0, s1, q00, q10, q11, logn, atmp)) {
+	Zf(complete_pubkey)(iq00, iq01, q00, q01, q11, logn);
+	if (!Zf(uncompressed_verify)(hm, s0, s1, q00, q01, q11, logn, atmp)) {
 		return HAWK_ERR_BADSIG;
 	}
 #else
-	if (!Zf(uncompressed_verify_NTT)(hm, s0, s1, iq00, iq10, logn, atmp)) {
+	if (!Zf(uncompressed_verify_NTT)(hm, s0, s1, iq00, iq01, logn, atmp)) {
 		return HAWK_ERR_BADSIG;
 	}
 #endif

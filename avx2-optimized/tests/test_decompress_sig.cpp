@@ -195,7 +195,7 @@ FT fail_prob(FT iq00, long long n) {
 
 uint8_t b[48 << LOGN];
 int8_t f[N], g[N], F[N], G[N];
-int16_t iq00[N], iq10[N];
+int16_t iq00[N], iq01[N];
 fpr inv_q00[N], exp_key[9*N/2];
 
 /*
@@ -231,7 +231,7 @@ void test_decomp_prob(inner_shake256_context *sc)
 	const size_t num_reps = 100 * 1000;
 
 	while (1) {
-		Zf(keygen)(sc, f, g, F, G, iq00, iq10, LOGN, b);
+		Zf(keygen)(sc, f, g, F, G, iq00, iq01, LOGN, b);
 
 		Zf(int16_to_fft)(inv_q00, iq00, LOGN);
 		Zf(FFT)(inv_q00, LOGN);

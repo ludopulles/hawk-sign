@@ -936,7 +936,7 @@ WorkerResult run(unsigned logn, const unsigned char *seed, size_t seed_len)
 
 	int8_t f[MAXN], g[MAXN], F[MAXN], G[MAXN];
 	uint8_t h[MAXN/4];
-	int16_t iq00[MAXN], iq10[MAXN];
+	int16_t iq00[MAXN], iq01[MAXN];
 	inner_shake256_context sc;
 	WorkerResult res;
 
@@ -947,7 +947,7 @@ WorkerResult run(unsigned logn, const unsigned char *seed, size_t seed_len)
 
 	// Generate key pair.
 	for (size_t kgnr = 0; kgnr < num_kg; kgnr++) {
-		Zf(keygen)(&sc, f, g, F, G, iq00, iq10, logn, tmp.b);
+		Zf(keygen)(&sc, f, g, F, G, iq00, iq01, logn, tmp.b);
 
 		for (size_t rep = 0; rep < signs_per_kg; rep++) {
 			unsigned n = MKN(logn), u;

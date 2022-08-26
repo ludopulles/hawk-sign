@@ -34,8 +34,8 @@ void measure_keygen(unsigned logn, unsigned char *seed, size_t seed_len) {
 	size_t n;
 	uint8_t b[100 * N];
 	int8_t f[N], g[N], F[N], G[N];
-	fpr q00[N], q10[N], q11[N];
-	int16_t q00n[N], q10n[N];
+	fpr q00[N], q01[N], q11[N];
+	int16_t q00n[N], q01n[N];
 	inner_shake256_context sc;
 
 	n = MKN(logn);
@@ -46,7 +46,7 @@ void measure_keygen(unsigned logn, unsigned char *seed, size_t seed_len) {
 	inner_shake256_flip(&sc);
 
 	memset(b, (uint8_t) -1, sizeof b);
-	Zf(keygen)(&sc, f, g, F, G, q00, q10, NULL, logn, b);
+	Zf(keygen)(&sc, f, g, F, G, q00, q01, NULL, logn, b);
 
 	int len = sizeof b;
 	while (b[len - 1] == (uint8_t) -1) len--;

@@ -141,7 +141,7 @@ void _iFFT(double *f, unsigned logn)
 void measure_sizes(unsigned logn) {
 	uint8_t b[48 * MAXN], h[MAXN / 4];
 	int8_t f[MAXN], g[MAXN], F[MAXN], G[MAXN];
-	int16_t iq00[MAXN], iq10[MAXN], s1[MAXN];
+	int16_t iq00[MAXN], iq01[MAXN], s1[MAXN];
 	size_t n, hn;
 	double t0[MAXN], t1[MAXN], t2[MAXN];
 	unsigned char seed[48];
@@ -159,7 +159,7 @@ void measure_sizes(unsigned logn) {
 	for (int rep = 0; rep < n_repetitions; rep++) {
 		if (rep % spread_keygen == 0) {
 			// Generate key pair.
-			Zf(keygen)(&sc, f, g, F, G, iq00, iq10, logn, b);
+			Zf(keygen)(&sc, f, g, F, G, iq00, iq01, logn, b);
 		}
 
 		// make a signature of a random message...
@@ -170,7 +170,7 @@ void measure_sizes(unsigned logn) {
 
 		for (size_t u = 0; u < n; u++) {
 			t0[u] = (double) (((h[u>>3] >> (u & 7)) & 1) - 2 * s1[u]);
-			t1[u] = (double) iq10[u];
+			t1[u] = (double) iq01[u];
 			t2[u] = (double) iq00[u];
 		}
 		t2[0] = 0;
@@ -200,7 +200,7 @@ void measure_sizes(unsigned logn) {
 	printf("logn = %d:\n", logn);
 	for (int type = 0; type < 4; type++) {
 		if (type == 0) printf("s0:  ");
-		if (type == 1) printf("q10: ");
+		if (type == 1) printf("q01: ");
 		if (type == 2) printf("q00: ");
 		if (type == 3) printf("inv: ");
 

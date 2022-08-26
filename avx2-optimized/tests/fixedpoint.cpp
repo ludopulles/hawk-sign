@@ -55,7 +55,7 @@ WorkerResult run(unsigned logn, const unsigned char *seed, size_t seed_len)
 	} tmp;
 	int8_t f[MAXN], g[MAXN], F[MAXN], G[MAXN];
 	uint8_t h[MAXN/4];
-	int16_t iq00[MAXN], iq10[MAXN];
+	int16_t iq00[MAXN], iq01[MAXN];
 	fpr exp_sk[EXPANDED_SECKEY_SIZE(MAXLOGN)];
 	int16_t sig[MAXN];
 	inner_shake256_context sc;
@@ -68,7 +68,7 @@ WorkerResult run(unsigned logn, const unsigned char *seed, size_t seed_len)
 
 	// Generate key pair.
 	for (size_t u = 0; u < num_kg; u++) {
-		Zf(keygen)(&sc, f, g, F, G, iq00, iq10, logn, tmp.b);
+		Zf(keygen)(&sc, f, g, F, G, iq00, iq01, logn, tmp.b);
 		Zf(expand_seckey)(exp_sk, f, g, F, logn);
 
 		long long last_fail = result.fails;
@@ -79,7 +79,7 @@ WorkerResult run(unsigned logn, const unsigned char *seed, size_t seed_len)
 			// Compute the signature.
 			while (!Zf(sign)(&sc, sig, exp_sk, h, logn, tmp.b)) {}
 
-			result.fails += !Zf(verify_NTT)(h, sig, iq00, iq10, logn, tmp.b);
+			result.fails += !Zf(verify_NTT)(h, sig, iq00, iq01, logn, tmp.b);
 		}
 
 		if (last_fail < result.fails) {
