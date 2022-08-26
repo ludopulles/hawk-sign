@@ -29,8 +29,6 @@ clean:
 # Binaries:
 
 # C
-bin/test_keygen: tests/test_keygen.c $(OBJ)
-	$(CC) $(CFLAGS) -o bin/test_keygen $(filter-out build/keygen.o,$(OBJ)) tests/test_keygen.c $(LIBS)
 bin/config_fg: tests/config_fg.c $(OBJ)
 	$(CC) $(CFLAGS) -o bin/config_fg $(filter-out build/keygen.o,$(OBJ)) tests/config_fg.c $(LIBS)
 bin/config_FG: tests/config_FG.c $(OBJ)
@@ -39,6 +37,8 @@ bin/speed: tests/speed.c build/hawk.o $(OBJ)
 	$(CC) $(CFLAGS) -o bin/speed build/hawk.o $(OBJ) tests/speed.c $(LIBS)
 
 # C++
+bin/test_keygen: tests/test_keygen.cpp $(OBJ)
+	$(CXX) $(CFLAGS) -o bin/test_keygen $(filter-out build/keygen.o,$(OBJ)) tests/test_keygen.cpp $(LIBS)
 bin/test_sign: tests/test_sign.cpp $(OBJ)
 	$(CXX) $(CXXFLAGS) -o bin/test_sign $(OBJ) tests/test_sign.cpp $(LIBS)
 bin/test_babai: tests/test_babai.cpp $(OBJ)

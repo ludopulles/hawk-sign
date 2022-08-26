@@ -7,13 +7,20 @@
  * technique.
  */
 
-#include <assert.h>
-#include <stdio.h>
+#include <cassert>
+#include <climits>
+#include <cstdio>
+#include <vector>
+#include <mutex>
+#include <thread>
 
 // x86_64 specific:
 #include <sys/time.h>
 
-#include "../keygen.c"
+extern "C" {
+	#define restrict
+	#include "../keygen.c"
+}
 
 long long time_diff(const struct timeval *begin, const struct timeval *end) {
 	return 1000000LL * (end->tv_sec - begin->tv_sec) + (end->tv_usec - begin->tv_usec);
@@ -34,8 +41,8 @@ keygen_count_fails(inner_shake256_context *sc,
 	int8_t *restrict F, int8_t *restrict G,
 	int16_t *restrict iq00, int16_t *restrict iq10,
 	unsigned logn, uint8_t *restrict tmp,
-	int *inv_fails, int *normfg_fails, int *norminvq00_fails,
-	int *NTRU_fails, int *coeff_fails)
+	long long *inv_fails, long long *normfg_fails, long long *norminvq00_fails,
+	long long *NTRU_fails, long long *coeff_fails)
 {
 	/*
 	 * Algorithm is the following:
@@ -246,7 +253,25 @@ keygen_count_fails(inner_shake256_context *sc,
 #define LOGN (10)
 #define N (MKN(LOGN))
 
-void measure_keygen(unsigned logn, int n_repetitions) {
+struct WorkerResult {
+	long long iters, time_diff,
+		inv_fails, normfg_fails, norminvq00_fails, NTRU_fails, coeff_fails;
+
+	WorkerResult() : iters(0), time_diff(0),
+		inv_fails(0), normfg_fails(0), norminvq00_fails(0), NTRU_fails(0), coeff_fails(0) {}
+
+	void combine(const WorkerResult &res) {
+		iters += res.iters;
+		time_diff += res.time_diff;
+		inv_fails += res.inv_fails;
+		normfg_fails += res.normfg_fails;
+		norminvq00_fails += res.norminvq00_fails;
+		NTRU_fails += res.NTRU_fails;
+		coeff_fails += res.coeff_fails;
+	}
+};
+
+WorkerResult measure_keygen(unsigned logn) {
 	uint8_t b[48 << LOGN];
 	int8_t f[N], g[N], F[N], G[N];
 	int16_t iq00[N], iq10[N];
@@ -255,6 +280,9 @@ void measure_keygen(unsigned logn, int n_repetitions) {
 
 	struct timeval t0, t1;
 
+	WorkerResult res;
+	res.iters = logn == 9 ? 400 : 100;
+
 	// Initialize a RNG.
 	Zf(get_seed)(seed, sizeof seed);
 	inner_shake256_init(&sc);
@@ -262,32 +290,56 @@ void measure_keygen(unsigned logn, int n_repetitions) {
 	inner_shake256_flip(&sc);
 
 	gettimeofday(&t0, NULL);
-
-	int inv_fails = 0, normfg_fails = 0, norminvq00_fails = 0, NTRU_fails = 0,
-		coeff_fails = 0;
-	for (int i = 0; i < n_repetitions; i++) {
+	for (int i = 0; i < res.iters; i++) {
 		// Generate key pair.
 		keygen_count_fails(&sc, f, g, F, G, iq00, iq10, logn, b,
-			&inv_fails, &normfg_fails, &norminvq00_fails, &NTRU_fails,
-			&coeff_fails);
+			&res.inv_fails, &res.normfg_fails, &res.norminvq00_fails,
+			&res.NTRU_fails, &res.coeff_fails);
 	}
-
 	gettimeofday(&t1, NULL);
-	double kg_duration = (double)time_diff(&t0, &t1) / n_repetitions; // (in us)
-	printf("Average time per keygen HAWK-%zu: %.3f ms\n", MKN(logn), kg_duration / 1000.0);
+
+	res.time_diff = time_diff(&t0, &t1);
+	return res;
+}
+
+WorkerResult tot;
+std::mutex mx;
+
+void work(unsigned logn)
+{
+	WorkerResult result = measure_keygen(logn);
+
+	/* acquire mutex lock */ {
+		std::lock_guard<std::mutex> guard(mx);
+		tot.combine(result);
+	}
+}
+
+void measure_keygen_multithreaded(unsigned logn)
+{
+	tot = WorkerResult();
+	const int nthreads = 4;
+	std::thread* pool[nthreads-1];
+	for (int i = 0; i < nthreads-1; i++) pool[i] = new std::thread(work, logn);
+	work(logn);
+	for (int i = 0; i < nthreads-1; i++) pool[i]->join(), delete pool[i];
+
+	// Collect results
+	double kg_duration = ((double) tot.time_diff) / tot.iters;
+	printf("Average time per keygen HAWK-%zu: %.3f ms (%d samples)\n", MKN(logn), kg_duration / 1000.0, tot.iters);
 
 	/*
 	 * Crunch analysis on what may fail during basis completion, once f, g are
 	 * generated.
 	 */
-	int samples = n_repetitions + inv_fails + normfg_fails + norminvq00_fails +
-		NTRU_fails + coeff_fails;
-	printf("Pr[ NTT(f) or NTT(q00) has 0 ] = %.2f%%\n", 100.0 * inv_fails / samples);
-	printf("Pr[ || (f,g) ||^2 too small  ] = %.2f%%\n", 100.0 * normfg_fails / samples);
-	printf("Pr[ cst(1/q00) too large     ] = %.2f%%\n", 100.0 * norminvq00_fails / samples);
-	printf("Pr[ NTRU_solve fails         ] = %.2f%%\n", 100.0 * NTRU_fails / samples);
-	printf("Pr[ coeff too large          ] = %.2f%%\n", 100.0 * coeff_fails / samples);
-	printf("Pr[ keygen works             ] = %.2f%%\n", 100.0 * n_repetitions / samples);
+	int samples = tot.iters + tot.inv_fails + tot.normfg_fails +
+		tot.norminvq00_fails + tot.NTRU_fails + tot.coeff_fails;
+	printf("Pr[ NTT(f) or NTT(q00) has 0 ] = %.2f%%\n", 100.0 * tot.inv_fails / samples);
+	printf("Pr[ || (f,g) ||^2 too small  ] = %.2f%%\n", 100.0 * tot.normfg_fails / samples);
+	printf("Pr[ cst(1/q00) too large     ] = %.2f%%\n", 100.0 * tot.norminvq00_fails / samples);
+	printf("Pr[ NTRU_solve fails         ] = %.2f%%\n", 100.0 * tot.NTRU_fails / samples);
+	printf("Pr[ coeff too large          ] = %.2f%%\n", 100.0 * tot.coeff_fails / samples);
+	printf("Pr[ keygen works             ] = %.2f%%\n", 100.0 * tot.iters / samples);
 }
 
 void report_invq00_fail_prob(unsigned logn) {
@@ -331,8 +383,8 @@ void report_invq00_fail_prob(unsigned logn) {
 
 
 int main() {
-	measure_keygen( 9, 400);
-	measure_keygen(10, 100);
+	measure_keygen_multithreaded( 9);
+	measure_keygen_multithreaded(10);
 
 	report_invq00_fail_prob( 9);
 	report_invq00_fail_prob(10);
