@@ -105,11 +105,12 @@ size_t encode_q01(const int16_t *q01, unsigned logn)
 // This is just the sample program. All the meat is in rans_byte.h.
 
 // ---- Stats
+#define NUM_FREQ (16 * 1024)
 
 struct SymbolStats
 {
-    uint32_t freqs[256];
-    uint32_t cum_freqs[257];
+    uint32_t freqs[NUM_FREQ];
+    uint32_t cum_freqs[NUM_FREQ + 1];
 
     void init_freqs();
     void normalize_freqs(uint32_t target_total);
@@ -117,35 +118,35 @@ struct SymbolStats
 
 void SymbolStats::init_freqs()
 {
-    for (int i=0; i < 256; i++)
+    for (int i=0; i < NUM_FREQ; i++)
         freqs[i] = 0;
 }
 
 void SymbolStats::normalize_freqs(uint32_t target_total)
 {
-    assert(target_total >= 256);
+    assert(target_total >= NUM_FREQ);
 
     cum_freqs[0] = 0;
-    for (int i=0; i < 256; i++)
+    for (int i=0; i < NUM_FREQ; i++)
         cum_freqs[i+1] = cum_freqs[i] + freqs[i];
-    uint32_t cur_total = cum_freqs[256];
+    uint32_t cur_total = cum_freqs[NUM_FREQ];
 
     // resample distribution based on cumulative freqs
-    for (int i = 1; i <= 256; i++)
+    for (int i = 1; i <= NUM_FREQ; i++)
         cum_freqs[i] = ((uint64_t)target_total * cum_freqs[i])/cur_total;
 
     // if we nuked any non-0 frequency symbol to 0, we need to steal
     // the range to make the frequency nonzero from elsewhere.
     //
     // this is not at all optimal, i'm just doing the first thing that comes to mind.
-    for (int i=0; i < 256; i++) {
+    for (int i=0; i < NUM_FREQ; i++) {
         if (freqs[i] && cum_freqs[i+1] == cum_freqs[i]) {
             // symbol i was set to zero freq
 
             // find best symbol to steal frequency from (try to steal from low-freq ones)
             uint32_t best_freq = ~0u;
             int best_steal = -1;
-            for (int j=0; j < 256; j++) {
+            for (int j=0; j < NUM_FREQ; j++) {
                 uint32_t freq = cum_freqs[j+1] - cum_freqs[j];
                 if (freq > 1 && freq < best_freq) {
                     best_freq = freq;
@@ -167,8 +168,8 @@ void SymbolStats::normalize_freqs(uint32_t target_total)
     }
 
     // calculate updated freqs and make sure we didn't screw anything up
-    assert(cum_freqs[0] == 0 && cum_freqs[256] == target_total);
-    for (int i=0; i < 256; i++) {
+    assert(cum_freqs[0] == 0 && cum_freqs[NUM_FREQ] == target_total);
+    for (int i=0; i < NUM_FREQ; i++) {
         if (freqs[i] == 0)
             assert(cum_freqs[i+1] == cum_freqs[i]);
         else
@@ -185,7 +186,12 @@ void report_ANS_size(const vector<vector<int>> &data, int othersize) {
 
     SymbolStats stats;
     stats.init_freqs();
-	for (const vector<int> &v : data) for (const int &x : v) stats.freqs[x]++;
+	for (const vector<int> &v : data) {
+		for (const int &x : v) {
+			assert(0 <= x && x < NUM_FREQ);
+			stats.freqs[x]++;
+		}
+	}
     stats.normalize_freqs(prob_scale);
 
     static size_t out_max_size = 32<<20; // 32MB
@@ -193,10 +199,10 @@ void report_ANS_size(const vector<vector<int>> &data, int othersize) {
 
     // try rANS encode
     uint8_t *rans_begin;
-    RansEncSymbol esyms[256];
-    RansDecSymbol dsyms[256];
+    RansEncSymbol esyms[NUM_FREQ];
+    RansDecSymbol dsyms[NUM_FREQ];
 
-    for (int i=0; i < 256; i++) {
+    for (int i=0; i < NUM_FREQ; i++) {
         RansEncSymbolInit(&esyms[i], stats.cum_freqs[i], stats.freqs[i], prob_bits);
         RansDecSymbolInit(&dsyms[i], stats.cum_freqs[i], stats.freqs[i]);
     }
@@ -299,7 +305,6 @@ int main(int argc, char **argv) {
 				dq01[s][i] = w >> (low_bits_q01[logn] - saving);
 			}
 		}
-
 
 		report_ANS_size(dq00, 2 + ((low_bits_q00[logn] - saving + 1) * (n/2 - 1) + 7) / 8);
 		report_ANS_size(dq01, ((low_bits_q01[logn] - saving + 1) * n + 7) / 8);
