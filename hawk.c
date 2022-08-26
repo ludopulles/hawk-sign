@@ -150,7 +150,7 @@ hawk_keygen_make(shake256_context *rng, unsigned logn, void *seckey,
 	size_t tmp_len)
 {
 	int8_t *f, *g, *F, *G;
-	int16_t *iq00, *iq10;
+	int16_t *iq00, *iq01;
 	uint8_t *sk, *pk, *atmp;
 	size_t u, n, sk_len, pk_len;
 	unsigned oldcw;
@@ -174,7 +174,7 @@ hawk_keygen_make(shake256_context *rng, unsigned logn, void *seckey,
 
 	/*
 	 * Prepare buffers and generate secret key.
-	 * The buffers for iq00 and iq10 overlap with those of f, g, F, G but this
+	 * The buffers for iq00 and iq01 overlap with those of f, g, F, G but this
 	 * is fine as we encode the public key after the secret key is already
 	 * encoded.
 	 */
@@ -185,8 +185,8 @@ hawk_keygen_make(shake256_context *rng, unsigned logn, void *seckey,
 	F = g + n;
 	G = F + n;
 	iq00 = align_i16(G + n);
-	iq10 = iq00 + n;
-	atmp = (uint8_t *)align_fpr(iq10 + n);
+	iq01 = iq00 + n;
+	atmp = (uint8_t *)align_fpr(iq01 + n);
 
 	/*
 	 * Fix the first byte of secret key and secret key.
@@ -208,7 +208,7 @@ hawk_keygen_make(shake256_context *rng, unsigned logn, void *seckey,
 	do {
 		oldcw = set_fpu_cw(2);
 		Zf(keygen)((inner_shake256_context *)rng,
-			f, g, F, G, iq00, iq10, logn, atmp);
+			f, g, F, G, iq00, iq01, logn, atmp);
 		set_fpu_cw(oldcw);
 
 		/*
@@ -222,7 +222,7 @@ hawk_keygen_make(shake256_context *rng, unsigned logn, void *seckey,
 		}
 
 		pk_len = Zf(encode_pubkey)(pk + 1, HAWK_PUBKEY_SIZE[logn] - 1,
-			iq00, iq10, logn);
+			iq00, iq01, logn);
 
 		/*
 		 * Retry key-generation as the secret key or public key cannot be
@@ -254,7 +254,7 @@ hawk_make_public(void *pubkey, size_t pubkey_len, const void *seckey,
 	uint8_t *pk, *atmp;
 	const uint8_t *sk;
 	int8_t *f, *g, *F;
-	int16_t *iq00, *iq10;
+	int16_t *iq00, *iq01;
 
 	/*
 	 * Get degree from secret key header byte, and check parameters.
@@ -291,10 +291,10 @@ hawk_make_public(void *pubkey, size_t pubkey_len, const void *seckey,
 	 * Compute public key.
 	 */
 	iq00 = align_i16(tmp);
-	iq10 = iq00 + n;
-	atmp = (uint8_t *)align_i32(iq10 + n);
+	iq01 = iq00 + n;
+	atmp = (uint8_t *)align_i32(iq01 + n);
 
-	Zf(make_public)(f, g, F, NULL, iq00, iq10, NULL, logn, atmp);
+	Zf(make_public)(f, g, F, NULL, iq00, iq01, NULL, logn, atmp);
 
 	/*
 	 * Encode public key.
@@ -303,7 +303,7 @@ hawk_make_public(void *pubkey, size_t pubkey_len, const void *seckey,
 	pk[0] = 0x00 + logn;
 
 	pk_len = Zf(encode_pubkey)(pk + 1, HAWK_PUBKEY_SIZE[logn] - 1,
-		iq00, iq10, logn);
+		iq00, iq01, logn);
 	if (pk_len == 0) {
 		return HAWK_ERR_FORMAT;
 	}
@@ -902,9 +902,9 @@ hawk_verify_finish(const void *sig, size_t sig_len, int sig_type,
 {
 	unsigned logn, salt_len;
 	uint8_t *hm, *atmp;
-	int16_t *iq00, *iq10;
+	int16_t *iq00, *iq01;
 #ifdef HAWK_AVX
-	fpr *q00, *q10, *q11;
+	fpr *q00, *q01, *q11;
 #endif
 	const uint8_t *pk, *es;
 	size_t u, v, n;
@@ -965,12 +965,12 @@ hawk_verify_finish(const void *sig, size_t sig_len, int sig_type,
 	hm = (uint8_t *)tmp;
 	sv = align_i16(hm + HAWK_HASH_SIZE(logn));
 	iq00 = sv + n;
-	iq10 = iq00 + n;
+	iq01 = iq00 + n;
 
 	/*
 	 * Decode public key.
 	 */
-	if (Zf(decode_pubkey)(iq00, iq10, pk + 1, pubkey_len - 1, logn) == 0)
+	if (Zf(decode_pubkey)(iq00, iq01, pk + 1, pubkey_len - 1, logn) == 0)
 	{
 		return HAWK_ERR_FORMAT;
 	}
@@ -1011,24 +1011,24 @@ hawk_verify_finish(const void *sig, size_t sig_len, int sig_type,
 
 #ifdef HAWK_AVX
 	q00 = (fpr *)align_fpr(sv + n);
-	q10 = q00 + n;
-	q11 = q10 + n;
+	q01 = q00 + n;
+	q11 = q01 + n;
 	atmp = (uint8_t *)(q11 + n);
 
 	/*
 	 * Construct full public key and verify signature.
 	 */
-	Zf(complete_pubkey)(iq00, iq10, q00, q10, q11, logn);
-	if (!Zf(verify)(hm, sv, q00, q10, q11, logn, atmp)) {
+	Zf(complete_pubkey)(iq00, iq01, q00, q01, q11, logn);
+	if (!Zf(verify)(hm, sv, q00, q01, q11, logn, atmp)) {
 		return HAWK_ERR_BADSIG;
 	}
 #else
-	atmp = (uint8_t *)align_fpr(iq10 + n);
+	atmp = (uint8_t *)align_fpr(iq01 + n);
 
 	/*
 	 * Verify signature.
 	 */
-	if (!Zf(verify_NTT)(hm, sv, iq00, iq10, logn, atmp)) {
+	if (!Zf(verify_NTT)(hm, sv, iq00, iq01, logn, atmp)) {
 		return HAWK_ERR_BADSIG;
 	}
 #endif

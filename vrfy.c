@@ -76,7 +76,7 @@ hash_to_fft(fpr *p, const uint8_t *h, const int16_t *s, unsigned logn)
  */
 static int
 has_short_trace(const fpr *restrict t0, const fpr *restrict t1,
-	const fpr *restrict q00, const fpr *restrict q10, const fpr *restrict q11,
+	const fpr *restrict q00, const fpr *restrict q01, const fpr *restrict q11,
 	unsigned logn)
 {
 	size_t u, hn;
@@ -121,7 +121,7 @@ has_short_trace(const fpr *restrict t0, const fpr *restrict t1,
 		im = fpr_sub(fpr_mul(t0[u], t1[u + hn]), fpr_mul(t0[u + hn], t1[u]));
 
 		trace = fpr_add(trace, fpr_double(
-			fpr_sub(fpr_mul(re, q10[u]), fpr_mul(im, q10[u + hn]))
+			fpr_sub(fpr_mul(re, q01[u]), fpr_mul(im, q01[u + hn]))
 		));
 	}
 
@@ -143,24 +143,24 @@ has_short_trace(const fpr *restrict t0, const fpr *restrict t1,
 
 /* see inner.h */
 void
-Zf(complete_pubkey)(const int16_t *restrict iq00, const int16_t *restrict iq10,
-	fpr *restrict q00, fpr *restrict q10, fpr *restrict q11, unsigned logn)
+Zf(complete_pubkey)(const int16_t *restrict iq00, const int16_t *restrict iq01,
+	fpr *restrict q00, fpr *restrict q01, fpr *restrict q11, unsigned logn)
 {
 	size_t u, hn;
 
 	hn = MKN(logn - 1);
 
 	/*
-	 * Doing this in reverse, allows iq00, iq10 to overlap with the begin of
+	 * Doing this in reverse, allows iq00, iq01 to overlap with the begin of
 	 * q00.
 	 */
-	Zf(int16_to_fft)(q10, iq10, logn);
+	Zf(int16_to_fft)(q01, iq01, logn);
 	Zf(int16_to_fft)(q00, iq00, logn);
 
 	/*
-	 * Reconstruct q11 using q11 = (1 + q10 adj(q10)) / q00.
+	 * Reconstruct q11 using q11 = (1 + adj(q01)*q01) / q00.
 	 */
-	Zf(poly_prod_selfadj_fft)(q11, q10, logn);
+	Zf(poly_prod_selfadj_fft)(q11, q01, logn);
 	for (u = 0; u < hn; u ++) {
 		q11[u] = fpr_add(q11[u], fpr_one);
 	}
@@ -283,7 +283,7 @@ Zf(verify_nearest_plane)(const uint8_t *restrict h,
 /* see inner.h */
 int
 Zf(verify)(const uint8_t *restrict h, const int16_t *restrict s1,
-	const fpr *restrict q00, const fpr *restrict q10, const fpr *restrict q11,
+	const fpr *restrict q00, const fpr *restrict q01, const fpr *restrict q11,
 	unsigned logn, uint8_t *restrict tmp)
 {
 	size_t u, v, w, n;
@@ -296,12 +296,12 @@ Zf(verify)(const uint8_t *restrict h, const int16_t *restrict s1,
 	t1 = t0 + n;
 
 	hash_to_fft(t1, SECOND_HASH(h, logn), s1, logn);
-	Zf(poly_prod_fft)(t0, t1, q10, logn);
+	Zf(poly_prod_fft)(t0, t1, q01, logn);
 	Zf(poly_div_autoadj_fft)(t0, q00, logn);
 	Zf(iFFT)(t0, logn);
 
 	/*
-	 * Recover s0 with s0 = round(h0 / 2 + (h1 / 2 - s1) q10 / q00).
+	 * Recover s0 with s0 = round(h0 / 2 + (h1 / 2 - s1) q01 / q00).
 	 * Put (t0, t1) = (h0 - 2 * s0, h1 - 2 * s1) in FFT representation.
 	 */
 	if (logn <= 3) {
@@ -324,7 +324,7 @@ Zf(verify)(const uint8_t *restrict h, const int16_t *restrict s1,
 	Zf(FFT)(t0, logn);
 
 	return Zf(in_positive_half)(s1, SECOND_HASH(h, logn), logn)
-		&& has_short_trace(t0, t1, q00, q10, q11, logn);
+		&& has_short_trace(t0, t1, q00, q01, q11, logn);
 }
 
 /* ============================================================================
@@ -1051,7 +1051,7 @@ hash_to_ntt(uint32_t *a, const uint8_t *h, const int16_t *s,
 int
 Zf(uncompressed_verify_NTT)(const uint8_t *restrict h,
 	const int16_t *restrict s0, const int16_t *restrict s1,
-	const int16_t *restrict q00, const int16_t *restrict q10,
+	const int16_t *restrict q00, const int16_t *restrict q01,
 	unsigned logn, uint8_t *restrict tmp)
 {
 	/*
@@ -1087,10 +1087,10 @@ Zf(uncompressed_verify_NTT)(const uint8_t *restrict h,
 	hash_to_ntt(s1_i32, SECOND_HASH(h, logn), s1, gm, R2, p, p0i, logn);
 
 	/*
-	 * Store q00 in r0_i32 and assume q10 is in r1_i32 (NTT representation).
+	 * Store q00 in r0_i32 and assume q01 is in r1_i32 (NTT representation).
 	 */
 	int16_to_ntt(r0_i32, q00, gm, p, p0i, logn);
-	int16_to_ntt(r1_i32, q10, gm, p, p0i, logn);
+	int16_to_ntt(r1_i32, q01, gm, p, p0i, logn);
 
 	// s0* q00 s0
 	for (u = 0; u < hn; u++) {
@@ -1148,7 +1148,7 @@ Zf(uncompressed_verify_NTT)(const uint8_t *restrict h,
 	}
 
 	// s0* q01 s1 + s1* q10 s0
-	int16_to_ntt(r0_i32, q10, gm, p, p0i, logn);
+	int16_to_ntt(r0_i32, q01, gm, p, p0i, logn);
 	for (u = 0; u < n; u++) {
 		term = modp_montymul(s1_i32[u], s0_i32[n - 1 - u], p, p0i);
 		norm1 = modp_add(norm1, modp_montymul(term, r0_i32[u], p, p0i), p);
@@ -1653,14 +1653,14 @@ fpp_iFFT(int32_t *f, unsigned logn)
 /* see inner.h */
 int Zf(verify_NTT)(const uint8_t *restrict h,
 	const int16_t *restrict s1,
-	const int16_t *restrict q00, const int16_t *restrict q10,
+	const int16_t *restrict q00, const int16_t *restrict q01,
 	unsigned logn, uint8_t *restrict tmp)
 {
 	/*
 	 * Recover, using fixed-point arithmetic s0 by:
-	 *     s0 = round(h0 / 2 + (h1 / 2 - s1) q10 / q00).
+	 *     s0 = round(h0 / 2 + (h1 / 2 - s1) q01 / q00).
 	 */
-	size_t n, hn, u, v, w, sh_s1, sh_q00, sh_q10, sh_back;
+	size_t n, hn, u, v, w, sh_s1, sh_q00, sh_q01, sh_back;
 	uint8_t hash, *atmp;
 	int16_t bound_s0, *s0;
 	int32_t *t0, *t1, *t2;
@@ -1670,8 +1670,8 @@ int Zf(verify_NTT)(const uint8_t *restrict h,
 	hn = n >> 1;
 	sh_s1 = 29 - (1 + Zf(bits_s1)[logn]);
 	sh_q00 = 29 - Zf(bits_q00)[logn];
-	sh_q10 = 29 - Zf(bits_q10)[logn];
-	sh_back = sh_s1 + sh_q10 - sh_q00 - (logn - 1);
+	sh_q01 = 29 - Zf(bits_q01)[logn];
+	sh_back = sh_s1 + sh_q01 - sh_q00 - (logn - 1);
 
 	t0 = (int32_t *)tmp;
 	t1 = t0 + n;
@@ -1683,7 +1683,7 @@ int Zf(verify_NTT)(const uint8_t *restrict h,
 	/*
 	 * Throughout FFT, the following quantities are bounded in size as follows:
 	 * - (h1 - 2 s1): 2^(1 + Zf(bits_s1)[logn])
-	 * - q10:         2^Zf(bits_q10)[logn],
+	 * - q01:         2^Zf(bits_q01)[logn],
 	 * - q00:         2^Zf(bits_q00)[logn],
 	 * where the maximum is determined by running keygen and sign a great
 	 * number of times and then rounding up 6 standard deviations to the
@@ -1692,7 +1692,7 @@ int Zf(verify_NTT)(const uint8_t *restrict h,
 	 * Therefore left shifting by 29 - x (where x is the exponent) eliminates
 	 * overflows.
 	 *
-	 * Convert (h1 - 2 s1), q00 and q10 to fixed point FFT representation.
+	 * Convert (h1 - 2 s1), q00 and q01 to fixed point FFT representation.
 	 */
 	if (logn <= 3) {
 		for (w = 0; w < n; w ++) {
@@ -1709,7 +1709,7 @@ int Zf(verify_NTT)(const uint8_t *restrict h,
 	}
 
 	for (u = 0; u < n; u++) {
-		t1[u] = (int32_t)q10[u] * (1 << sh_q10);
+		t1[u] = (int32_t)q01[u] * (1 << sh_q01);
 		t2[u] = (int32_t)q00[u] * (1 << sh_q00);
 	}
 
@@ -1738,7 +1738,7 @@ int Zf(verify_NTT)(const uint8_t *restrict h,
 	fpp_iFFT(t0, logn);
 
 	/*
-	 * Recover s0 with s0 = round(h0 / 2 + (h1 / 2 - s1) q10 / q00).
+	 * Recover s0 with s0 = round(h0 / 2 + (h1 / 2 - s1) q01 / q00).
 	 */
 	if (logn <= 3) {
 		for (w = 0; w < n; w ++) {
@@ -1776,5 +1776,5 @@ int Zf(verify_NTT)(const uint8_t *restrict h,
 		}
 	}
 
-	return Zf(uncompressed_verify_NTT)(h, s0, s1, q00, q10, logn, atmp);
+	return Zf(uncompressed_verify_NTT)(h, s0, s1, q00, q01, logn, atmp);
 }

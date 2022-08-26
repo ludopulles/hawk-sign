@@ -523,7 +523,7 @@ extern const uint32_t Zf(l2bound_1024)[11];
 
 /*
  * A public key Q = [[q00,q01],[q10,q11]] should be rejected whenever one of
- * q00, q10, q11 has a coefficient with absolute value greater than or equal to
+ * q00, q01, q11 has a coefficient with absolute value greater than or equal to
  * its respective bound with index logn, with the exception of the constant
  * coefficient in q00 and q11 as these follow a chi-squared distribution and
  * are therefore concentrated around their averages.
@@ -531,11 +531,11 @@ extern const uint32_t Zf(l2bound_1024)[11];
  * Values are expressed as number of bits after the sign.
  * e.g.: |q00[u]| < 2^Zf(bits_q00)[logn] must hold for all 0 < u < n.
  *
- * Note, 1 << Zf(bits_q00)[logn] and 1 << Zf(bits_q10)[logn] can be of type
+ * Note, 1 << Zf(bits_q00)[logn] and 1 << Zf(bits_q01)[logn] can be of type
  * int16_t, but 1 << Zf(bits_q11)[logn] needs to be of type (at least) int32_t.
  */
 extern const unsigned Zf(bits_q00)[11];
-extern const unsigned Zf(bits_q10)[11];
+extern const unsigned Zf(bits_q01)[11];
 extern const unsigned Zf(bits_q11)[11];
 
 /*
@@ -604,13 +604,13 @@ size_t Zf(decode_seckey)(int8_t *f, int8_t *g, int8_t *F,
  * Encode the Gram matrix of the NTRU-basis with determinant 1.
  */
 size_t Zf(encode_pubkey)(void *out, size_t max_out_len,
-	const int16_t *q00, const int16_t *q10, unsigned logn);
+	const int16_t *q00, const int16_t *q01, unsigned logn);
 
 /*
  * Decode the Gram matrix of the NTRU-basis with determinant 1.
- * The q11 can be recovered by q11 = (1 + q10 q10^*) / q00.
+ * The q11 can be recovered by q11 = (1 + adj(q01)*q01) / q00.
  */
-size_t Zf(decode_pubkey)(int16_t *q00, int16_t *q10,
+size_t Zf(decode_pubkey)(int16_t *q00, int16_t *q01,
 	const void *in, size_t max_in_len, unsigned logn);
 
 /*
@@ -953,13 +953,13 @@ void Zf(ffBabai_reduce)(const fpr *restrict f, const fpr *restrict g,
  */
 
 /*
- * Generates q00 and q10 from the Gram matrix of the lattice basis.
+ * Generates q00 and q01 from the Gram matrix of the lattice basis.
  *
  * Note: tmp[] must have space for at least 24 * 2^logn bytes.
  */
 void Zf(make_public)(const int8_t *restrict f, const int8_t *restrict g,
 	const int8_t *restrict F, const int8_t *restrict G,
-	int16_t *restrict iq00, int16_t *restrict iq10, int16_t *restrict iq11,
+	int16_t *restrict iq00, int16_t *restrict iq01, int16_t *restrict iq11,
 	unsigned logn, uint8_t *restrict tmp);
 
 /*
@@ -980,7 +980,7 @@ void Zf(make_public)(const int8_t *restrict f, const int8_t *restrict g,
 void Zf(keygen)(inner_shake256_context *rng,
 	int8_t *restrict f, int8_t *restrict g,
 	int8_t *restrict F, int8_t *restrict G,
-	int16_t *restrict iq00, int16_t *restrict iq10,
+	int16_t *restrict iq00, int16_t *restrict iq01,
 	unsigned logn, uint8_t *restrict tmp);
 
 /* ==================================================================== */
@@ -1028,7 +1028,7 @@ int Zf(sign_dyn)(inner_shake256_context *rng, int16_t *restrict sig,
 
 /*
  * Expands a secret key given by the key generation, to produce the secret key
- * basis [[f,g], [F,G]] and 1/(f^* f + g^* g) in FFT-representation.
+ * basis [[f,g], [F,G]] and 1 / (adj(f)*f + adj(g)*g) in FFT-representation.
  *
  * Note: expanded_seckey[] must have space for at least
  * EXPANDED_SECKEY_SIZE(logn) floating point values, since there are 4
@@ -1085,12 +1085,12 @@ int Zf(sign_NTT)(inner_shake256_context *rng, int16_t *restrict sig,
  */
 
 /*
- * Given iq00, iq10 in integer representation, compute the full public
- * key, which is q00, q10 and q11 in FFT representation.
- * Note here that q11 is reconstructed using the rule q00 q11 - q10 q01 = 1.
+ * Given iq00, iq01 in integer representation, compute the full public
+ * key, which is q00, q01 and q11 in FFT representation.
+ * Note here that q11 is reconstructed using q11 = (1 + q10*q01) / q00.
  */
-void Zf(complete_pubkey)(const int16_t *iq00, const int16_t *iq10,
-	fpr *q00, fpr *q10, fpr *q11, unsigned logn);
+void Zf(complete_pubkey)(const int16_t *iq00, const int16_t *iq01,
+	fpr *q00, fpr *q01, fpr *q11, unsigned logn);
 
 /*
  * Verify if a signature (s0, s1) is valid for a message hm.
@@ -1135,7 +1135,7 @@ int Zf(verify_nearest_plane)(const uint8_t *restrict h,
  * Note: tmp[] must have space for at least 16 * 2^logn bytes.
  */
 int Zf(verify)(const uint8_t *restrict h, const int16_t *restrict s1,
-	const fpr *restrict q00, const fpr *restrict q10, const fpr *restrict q11,
+	const fpr *restrict q00, const fpr *restrict q01, const fpr *restrict q11,
 	unsigned logn, uint8_t *restrict tmp);
 
 /*
@@ -1159,7 +1159,7 @@ int Zf(uncompressed_verify_NTT)(const uint8_t *restrict h,
  * Note: tmp[] must have space for at least 28 * 2^logn bytes.
  */
 int Zf(verify_NTT)(const uint8_t *restrict h, const int16_t *restrict s1,
-	const int16_t *restrict q00, const int16_t *restrict q10,
+	const int16_t *restrict q00, const int16_t *restrict q01,
 	unsigned logn, uint8_t *restrict tmp);
 
 #endif

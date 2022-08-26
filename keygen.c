@@ -3969,7 +3969,7 @@ solve_NTRU(unsigned logn, int8_t *F, int8_t *G,
 void
 Zf(make_public)(const int8_t *restrict f, const int8_t *restrict g,
 	const int8_t *restrict F, const int8_t *restrict G,
-	int16_t *restrict iq00, int16_t *restrict iq10, int16_t *restrict iq11,
+	int16_t *restrict iq00, int16_t *restrict iq01, int16_t *restrict iq11,
 	unsigned logn, uint8_t *restrict tmp)
 {
 	size_t n, u, v;
@@ -4015,7 +4015,7 @@ Zf(make_public)(const int8_t *restrict f, const int8_t *restrict g,
 	}
 
 	for (u = 0, v = n - 1; u < v; u++, v--) {
-		uint32_t q00, q10a, q10b;
+		uint32_t q00, q01a, q01b;
 
 		/*
 		 * Calculate q00 = adj(f) * f + adj(g) * g.
@@ -4026,23 +4026,21 @@ Zf(make_public)(const int8_t *restrict f, const int8_t *restrict g,
 		q00 = modp_montymul(q00, R2, p, p0i);
 
 		/*
-		 * Calculate q10 = adj(f) * F + adj(g) * G.
+		 * Calculate q01 = adj(f) * F + adj(g) * G.
 		 */
-		q10a = modp_add(
+		q01a = modp_add(
 			modp_montymul(t0[v], t2[u], p, p0i),
 			modp_montymul(t1[v], t3[u], p, p0i), p);
-		q10b = modp_add(
+		q01b = modp_add(
 			modp_montymul(t0[u], t2[v], p, p0i),
 			modp_montymul(t1[u], t3[v], p, p0i), p);
-		q10a = modp_montymul(q10a, R2, p, p0i);
-		q10b = modp_montymul(q10b, R2, p, p0i);
 
 		/*
 		 * Now store the result in t0, t1.
 		 */
 		t0[u] = t0[v] = q00;
-		t1[u] = q10a;
-		t1[v] = q10b;
+		t1[u] = modp_montymul(q01a, R2, p, p0i);
+		t1[v] = modp_montymul(q01b, R2, p, p0i);
 
 		if (iq11 != NULL) {
 			/*
@@ -4060,7 +4058,7 @@ Zf(make_public)(const int8_t *restrict f, const int8_t *restrict g,
 
 	for (u = 0; u < n; u++) {
 		iq00[u] = modp_norm(t0[u], p);
-		iq10[u] = modp_norm(t1[u], p);
+		iq01[u] = modp_norm(t1[u], p);
 	}
 
 	if (iq11 != NULL) {
@@ -4080,7 +4078,7 @@ void
 Zf(keygen)(inner_shake256_context *sc,
 	int8_t *restrict f, int8_t *restrict g,
 	int8_t *restrict F, int8_t *restrict G,
-	int16_t *restrict iq00, int16_t *restrict iq10,
+	int16_t *restrict iq00, int16_t *restrict iq01,
 	unsigned logn, uint8_t *restrict tmp)
 {
 	/*
@@ -4232,7 +4230,7 @@ Zf(keygen)(inner_shake256_context *sc,
 			continue;
 		}
 
-		Zf(make_public)(f, g, F, G, iq00, iq10, iq11, logn, (uint8_t *)atmp);
+		Zf(make_public)(f, g, F, G, iq00, iq01, iq11, logn, (uint8_t *)atmp);
 
 		/*
 		 * Check the bounds on q00 and q11.
@@ -4253,9 +4251,9 @@ Zf(keygen)(inner_shake256_context *sc,
 			fg_okay &= x == -iq11[n - u];
 		}
 
-		bound = (int32_t)(1U << Zf(bits_q10)[logn]);
+		bound = (int32_t)(1U << Zf(bits_q01)[logn]);
 		for (u = 0; u < n; u++) {
-			x = iq10[u];
+			x = iq01[u];
 			fg_okay &= (+x - bound) >> 31;
 			fg_okay &= (-x - bound) >> 31;
 		}

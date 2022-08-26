@@ -38,14 +38,14 @@
 static const size_t low_bits_q00[11] = {
 	0 /* unused */, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6
 };
-static const size_t low_bits_q10[11] = {
+static const size_t low_bits_q01[11] = {
 	0 /* unused */, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10
 };
 
 /* see inner.h */
 size_t
 Zf(encode_pubkey)(void *out, size_t max_out_len,
-	const int16_t *q00, const int16_t *q10, unsigned logn)
+	const int16_t *q00, const int16_t *q01, unsigned logn)
 {
 	uint8_t *buf;
 	size_t n, u, v;
@@ -68,12 +68,12 @@ Zf(encode_pubkey)(void *out, size_t max_out_len,
 		}
 	}
 
-	bound = (int16_t)(1U << Zf(bits_q10)[logn]);
+	bound = (int16_t)(1U << Zf(bits_q01)[logn]);
 	/*
 	 * Make sure no coefficient is too large.
 	 */
 	for (u = 0; u < n; u ++) {
-		if (q10[u] < -bound || q10[u] >= bound) {
+		if (q01[u] < -bound || q01[u] >= bound) {
 			return 0;
 		}
 	}
@@ -145,24 +145,24 @@ Zf(encode_pubkey)(void *out, size_t max_out_len,
 	}
 
 	/*
-	 * Encode q10.
+	 * Encode q01.
 	 */
-	low_mask = (1U << low_bits_q10[logn]) - 1;
+	low_mask = (1U << low_bits_q01[logn]) - 1;
 	for (u = 0; u < n; u ++) {
 		/*
 		 * Push the sign bit and store |x| - [x<0] in w.
 		 * Note that x = 1,0,-1,-2,... give value for w of 1,0,0,1,... resp.
 		 */
-		w = (uint16_t) q10[u];
+		w = (uint16_t) q01[u];
 		acc = (acc << 1) | (w >> 15);
 		w ^= -(w >> 15);
 
 		/*
 		 * Push the low 8 bits of w.
 		 */
-		acc = (acc << low_bits_q10[logn]) | (w & low_mask);
-		w >>= low_bits_q10[logn];
-		acc_len += low_bits_q10[logn] + 1;
+		acc = (acc << low_bits_q01[logn]) | (w & low_mask);
+		w >>= low_bits_q01[logn];
+		acc_len += low_bits_q01[logn] + 1;
 
 		/*
 		 * Push as many zeros as necessary, then a one.
@@ -221,7 +221,7 @@ Zf(encode_pubkey)(void *out, size_t max_out_len,
 
 /* see inner.h */
 size_t
-Zf(decode_pubkey)(int16_t *q00, int16_t *q10,
+Zf(decode_pubkey)(int16_t *q00, int16_t *q01,
 	const void *in, size_t max_in_len, unsigned logn)
 {
 	const uint8_t *buf;
@@ -299,11 +299,11 @@ Zf(decode_pubkey)(int16_t *q00, int16_t *q10,
 	}
 
 	/*
-	 * Decode q10.
+	 * Decode q01.
 	 */
-	high_inc = (1U << low_bits_q10[logn]);
+	high_inc = (1U << low_bits_q01[logn]);
 	low_mask = high_inc - 1;
-	bound = (int16_t)(1U << Zf(bits_q10)[logn]);
+	bound = (int16_t)(1U << Zf(bits_q01)[logn]);
 	for (u = 0; u < n; u ++) {
 		uint16_t s, w;
 
@@ -316,14 +316,14 @@ Zf(decode_pubkey)(int16_t *q00, int16_t *q10,
 		/*
 		 * Get next eight bits that make up the lowest significant bits of w.
 		 */
-		if (acc_len < low_bits_q10[logn]) {
+		if (acc_len < low_bits_q01[logn]) {
 			// should be true all the time
 			if (v >= max_in_len) return 0;
 			acc = (acc << 8) | buf[v ++];
 			acc_len += 8;
 
-			// Note: low_bits_q10[logn] may be 9.
-			if (acc_len < low_bits_q10[logn]) {
+			// Note: low_bits_q01[logn] may be 9.
+			if (acc_len < low_bits_q01[logn]) {
 				// should be true all the time
 				if (v >= max_in_len) return 0;
 				acc = (acc << 8) | buf[v ++];
@@ -334,11 +334,11 @@ Zf(decode_pubkey)(int16_t *q00, int16_t *q10,
 		/*
 		 * Get 8 least significant bits of w.
 		 */
-		w = (acc >> (acc_len -= low_bits_q10[logn])) & low_mask;
+		w = (acc >> (acc_len -= low_bits_q01[logn])) & low_mask;
 
 		/*
 		 * Recover the most significant bits of w: count number of consecutive
-		 * zeros up to the first 1 and add 2^low_bits_q10[logn] to w for each
+		 * zeros up to the first 1 and add 2^low_bits_q01[logn] to w for each
 		 * one you see.
 		 */
 		ENSUREBIT();
@@ -350,7 +350,7 @@ Zf(decode_pubkey)(int16_t *q00, int16_t *q10,
 			ENSUREBIT();
 		}
 
-		q10[u] = w ^ -s;
+		q01[u] = w ^ -s;
 	}
 
 	/*

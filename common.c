@@ -48,7 +48,7 @@ const uint32_t Zf(l2bound_1024)[11] = {
 const unsigned Zf(bits_q00)[11] = {
 	0 /* unused */, 5, 6, 6, 7, 7,  8,  8,  9,  9, 10
 };
-const unsigned Zf(bits_q10)[11] = {
+const unsigned Zf(bits_q01)[11] = {
 	0 /* unused */, 5, 6, 7, 8, 8,  9, 10, 11, 12, 14
 };
 const unsigned Zf(bits_q11)[11] = {
