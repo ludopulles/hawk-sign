@@ -1,5 +1,6 @@
 /*
  * Report on the size of signatures
+ * Original source: https://github.com/rygorous/ryg_rans
  */
 #include<bits/stdc++.h>
 

@@ -1,3 +1,7 @@
+/*
+ * Source: https://github.com/rygorous/ryg_rans
+ */
+
 // Simple byte-aligned rANS encoder/decoder - public domain - Fabian 'ryg' Giesen 2014
 //
 // Not intended to be "industrial strength"; just meant to illustrate the general

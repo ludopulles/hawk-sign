@@ -1,3 +1,7 @@
+/*
+ * Source: https://github.com/rygorous/ryg_rans
+ */
+
 // Just some platform utilities.
 #ifndef PLATFORM_H_INCLUDED
 #define PLATFORM_H_INCLUDED
