@@ -139,7 +139,7 @@ align_i16(void *tmp)
 	return (int16_t *)atmp;
 }
 
-static inline int32_t *
+static inline uint32_t *
 align_i32(void *tmp)
 {
 	uint8_t *atmp;
@@ -150,7 +150,7 @@ align_i32(void *tmp)
 	if (off != 0) {
 		atmp += 4u - off;
 	}
-	return (int32_t *)atmp;
+	return (uint32_t *)atmp;
 }
 
 static inline fpr *
@@ -366,11 +366,18 @@ int
 hawk_expand_seckey(void *expanded_key, size_t expanded_key_len,
 	const void *seckey, size_t seckey_len)
 {
-	unsigned logn, oldcw;
+#ifdef HAWK_AVX
+	unsigned oldcw;
+#endif
+	unsigned logn;
 	const uint8_t *sk;
 	int8_t *f, *g, *F;
 	size_t n;
+#ifdef HAWK_AVX
 	fpr *expkey;
+#else
+	uint32_t *expkey;
+#endif
 
 	/*
 	 * Get degree from secret key header byte, and check parameters.
@@ -392,15 +399,14 @@ hawk_expand_seckey(void *expanded_key, size_t expanded_key_len,
 	}
 
 	/*
-	 * Expand secret key.
-	 */
-	*(uint8_t *)expanded_key = logn;
-	expkey = align_fpr((uint8_t *)expanded_key + 1);
-
-	/*
 	 * Decode secret key elements, and complete secret key.
 	 */
 	n = MKN(logn);
+#ifdef HAWK_AVX
+	expkey = align_fpr((uint8_t *)expanded_key + 1);
+#else
+	expkey = align_i32((uint8_t *)expanded_key + 1);
+#endif
 	f = (int8_t *)(expkey + 3*n);
 	g = f + n;
 	F = g + n;
@@ -408,9 +414,17 @@ hawk_expand_seckey(void *expanded_key, size_t expanded_key_len,
 		return HAWK_ERR_FORMAT;
 	}
 
+	/*
+	 * Expand secret key.
+	 */
+	*(uint8_t *)expanded_key = logn;
+#ifdef HAWK_AVX
 	oldcw = set_fpu_cw(2);
 	Zf(expand_seckey)(expkey, f, g, F, logn);
 	set_fpu_cw(oldcw);
+#else
+	Zf(expand_seckey_NTT)(expkey, f, g, F, logn);
+#endif
 
 	return 0;
 }
@@ -731,7 +745,7 @@ hawk_sign_dyn_finish(shake256_context *rng, void *sig, size_t *sig_len,
 		}
 		set_fpu_cw(oldcw);
 #else
-		if (!Zf(sign_NTT)((inner_shake256_context *)rng, sv, f, g, F, NULL,
+		if (!Zf(sign_dyn_NTT)((inner_shake256_context *)rng, sv, f, g, F, NULL,
 				hm, logn, atmp)) {
 			continue;
 		}
@@ -775,9 +789,14 @@ hawk_sign_finish(shake256_context *rng, void *sig, size_t *sig_len,
 	int sig_type, const void *expanded_key, shake256_context *hash_data,
 	void *salt, void *tmp, size_t tmp_len)
 {
-	unsigned logn, oldcw;
-	uint8_t *es, *hm, *atmp;
+#ifdef HAWK_AVX
+	unsigned oldcw;
 	const fpr *expkey;
+#else
+	const uint32_t *expkey;
+#endif
+	unsigned logn;
+	uint8_t *es, *hm, *atmp;
 	int16_t *sv;
 	size_t u, v, n, es_len;
 	inner_shake256_context hash_state;
@@ -789,9 +808,15 @@ hawk_sign_finish(shake256_context *rng, void *sig, size_t *sig_len,
 	if (logn < 1 || logn > 10) {
 		return HAWK_ERR_FORMAT;
 	}
+#ifdef HAWK_AVX
 	if (tmp_len < HAWK_TMPSIZE_SIGN(logn)) {
 		return HAWK_ERR_SIZE;
 	}
+#else
+	if (tmp_len < HAWK_TMPSIZE_SIGN_NTT(logn)) {
+		return HAWK_ERR_SIZE;
+	}
+#endif
 	es_len = *sig_len;
 	if (es_len < 1 + HAWK_SALT_SIZE(logn)) {
 		return HAWK_ERR_SIZE;
@@ -815,7 +840,11 @@ hawk_sign_finish(shake256_context *rng, void *sig, size_t *sig_len,
 	sv = align_i16(hm + HAWK_HASH_SIZE(logn));
 	atmp = (uint8_t *)align_fpr(sv + n);
 
+#ifdef HAWK_AVX
 	expkey = (const fpr *)align_fpr((uint8_t *)expanded_key + 1);
+#else
+	expkey = (const uint32_t *)align_i32((uint8_t *)expanded_key + 1);
+#endif
 
 	/*
 	 * Fix the first byte (containing logn).
@@ -843,6 +872,7 @@ hawk_sign_finish(shake256_context *rng, void *sig, size_t *sig_len,
 		 * almost-constant probability and the recovery check works almost
 		 * always.
 		 */
+#ifdef HAWK_AVX
 		oldcw = set_fpu_cw(2);
 		if (!Zf(sign)((inner_shake256_context *)rng, sv, expkey, hm, logn,
 				atmp)) {
@@ -850,6 +880,12 @@ hawk_sign_finish(shake256_context *rng, void *sig, size_t *sig_len,
 			continue;
 		}
 		set_fpu_cw(oldcw);
+#else
+		if (!Zf(sign_NTT)((inner_shake256_context *)rng, sv, expkey, hm, logn,
+				atmp)) {
+			continue;
+		}
+#endif
 
 		/*
 		 * Fix the bytes for the salt.

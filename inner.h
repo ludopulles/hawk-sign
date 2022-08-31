@@ -987,6 +987,8 @@ int Zf(sign_dyn)(inner_shake256_context *rng, int16_t *restrict sig,
 #define EXPANDED_SECKEY_SIZE(logn) (8u << ((logn) - 1))
 #endif
 
+#define EXPANDED_SECKEY_NTT_SIZE(logn) (8u << ((logn) - 1))
+
 /*
  * Expands a secret key given by the key generation, to produce the secret key
  * basis [[f,g], [F,G]] and 1 / (adj(f)*f + adj(g)*g) in FFT-representation.
@@ -996,6 +998,17 @@ int Zf(sign_dyn)(inner_shake256_context *rng, int16_t *restrict sig,
  * polynomials in the basis and 1/(f* f + g* g) is self-adjoint.
  */
 void Zf(expand_seckey)(fpr *restrict expanded_seckey,
+	const int8_t *f, const int8_t *g, const int8_t *F, unsigned logn);
+
+/*
+ * Expands a secret key given by the key generation, to produce the secret key
+ * basis [[f,g], [F,G]] in NTT-representation.
+ *
+ * Note: expanded_seckey[] must have space for at least
+ * EXPANDED_SECKEY_SIZE(logn) floating point values, since there are 4
+ * polynomials in the basis.
+ */
+void Zf(expand_seckey_NTT)(uint32_t *restrict expanded_seckey,
 	const int8_t *f, const int8_t *g, const int8_t *F, unsigned logn);
 
 /*
@@ -1035,11 +1048,25 @@ int Zf(uncompressed_sign_NTT)(inner_shake256_context *rng,
  *
  * Note: tmp[] must have space for at least 24 * 2^logn bytes.
  */
-int Zf(sign_NTT)(inner_shake256_context *rng, int16_t *restrict sig,
+int Zf(sign_dyn_NTT)(inner_shake256_context *rng, int16_t *restrict sig,
 	const int8_t *restrict f, const int8_t *restrict g,
 	const int8_t *restrict F, const int8_t *restrict G,
 	const uint8_t *restrict h, unsigned logn, uint8_t *restrict tmp);
 
+/*
+ * Compute s1 of a signature of h, i.e. a signature is a vector (s0, s1) that
+ * is close to (h0, h1) / 2 with respect to the quadratic form Q. It is NOT
+ * guaranteed that one can succesfully recover a s0 during verification such
+ * that (s0, s1) is a valid signature.
+ * Return if the signature has small enough norm.
+ *
+ * This function does not use any floating point numbers.
+ *
+ * Note: tmp[] must have space for at least 8 * 2^logn bytes.
+ */
+int Zf(sign_NTT)(inner_shake256_context *rng, int16_t *restrict sig,
+	const uint32_t *restrict expanded_seckey, const uint8_t *restrict h,
+	unsigned logn, uint8_t *restrict tmp);
 /* ==================================================================== */
 /*
  * Signature verification functions (vrfy.c)

@@ -124,6 +124,7 @@ extern "C" {
  *   HAWK_TMPSIZE_SIGNDYN_NTT
  *   HAWK_TMPSIZE_SIGN
  *   HAWK_TMPSIZE_MAKEPUB
+ *   HAWK_TMPSIZE_SIGN_NTT
  *
  * i.e. a temporary buffer large enough for dynamic floating-point signing
  * ("SIGNDYN") will also be large enough for key pair generation ("KEYGEN"),
@@ -132,17 +133,17 @@ extern "C" {
  *
  * Here are the actual values for the temporary buffer sizes (in bytes):
  *
- *  deg  sigD  kgen   ver  verN sigDN   sig mkpub
- *    2   115   103   101    77    63    61    51
- *    4   221   199   193   145   121   113    99
- *    8   433   391   377   281   237   217   195
- *   16   859   775   747   555   471   427   387
- *   32  1711  1543  1487  1103   939   847   771
- *   64  3415  3079  2967  2199  1875  1687  1539
- *  128  6823  6151  5927  4391  3747  3367  3075
- *  256 13639 12295 11847  8775  7491  6727  6147
- *  512 27271 24583 23687 17543 14979 13447 12291
- * 1024 54535 49159 47367 35079 29955 26887 24579
+ *  deg  sigD  kgen   ver  verN sigDN   sig mkpub  sigN
+ *    2   115   103   101    77    63    61    51    31
+ *    4   221   199   193   145   121   113    99    57
+ *    8   433   391   377   281   237   217   195   109
+ *   16   859   775   747   555   471   427   387   215
+ *   32  1711  1543  1487  1103   939   847   771   427
+ *   64  3415  3079  2967  2199  1875  1687  1539   851
+ *  128  6823  6151  5927  4391  3747  3367  3075  1699
+ *  256 13639 12295 11847  8775  7491  6727  6147  3395
+ *  512 27271 24583 23687 17543 14979 13447 12291  6787
+ * 1024 54535 49159 47367 35079 29955 26887 24579 13571
  *
  *  deg  usig  kgen  uver uverN usigN mkpub
  *    2   119   103    97    69    67    51
@@ -459,20 +460,29 @@ extern const size_t HAWK_PUBKEY_SIZE[11];
  */
 #define HAWK_TMPSIZE_SIGN(logn) \
 	(HAWK_HASH_SIZE(logn) + (26u << (logn)) + 7)
-
+#define HAWK_TMPSIZE_SIGN_NTT(logn) \
+	(HAWK_HASH_SIZE(logn) + (13u << (logn)) + 3)
 /*
  * Size of an expanded secret key.
  */
+#ifdef HAWK_AVX
+
 #if HAWK_RECOVER_CHECK
 /* For the recover-check, we also need to store 1/q00. */
 #define HAWK_EXPANDEDKEY_SIZE(logn) \
 	((36u << (logn)) + 8)
-#else
+#else // HAWK_RECOVER_CHECK
 /* Store f, g, F, G in FFT-representation */
 #define HAWK_EXPANDEDKEY_SIZE(logn) \
 	((32u << (logn)) + 8)
-#endif
+#endif // HAWK_RECOVER_CHECK
 
+#else // HAWK_AVX
+
+#define HAWK_EXPANDEDKEY_SIZE(logn) \
+	((16u << (logn)) + 4)
+
+#endif // HAWK_AVX
 /*
  * Temporary buffer size for verifying a signature.
  */

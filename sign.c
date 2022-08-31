@@ -916,8 +916,56 @@ Zf(uncompressed_sign_NTT)(inner_shake256_context *rng,
 }
 
 /* see inner.h */
+int Zf(sign_NTT)(inner_shake256_context *rng, int16_t *restrict s1,
+	const uint32_t *restrict expanded_seckey, const uint8_t *restrict h,
+	unsigned logn, uint8_t *restrict tmp)
+{
+	size_t n, u;
+	uint32_t flag, *bf, *bg, *bF, *bG, *x0, *x1;
+	int norm_okay;
+	prng p;
+
+	n = MKN(logn);
+
+	bf = expanded_seckey;
+	bg = bf + n;
+	bF = bg + n;
+	bG = bF + n;
+
+	x0 = (uint32_t *)tmp;
+	x1 = x0 + n;
+
+	Zf(prng_init)(&p, rng);
+
+	norm_okay = sample_short_NTT(&p, x0, x1, bf, bg, bF, bG, h, logn);
+
+	/*
+	 * Compute s1 in (s0, s1) = ((h0, h1) - B^{-1} (x0, x1)) / 2, so
+	 *
+	 *     s1 = (h1 - (x0 * (-g) + x1 f)) / 2.
+	 */
+	for (u = 0; u < n; u++) {
+		x1[u] = Zf(mf_sub)(Zf(mf_mul)(bf[u], x1[u]), Zf(mf_mul)(bg[u], x0[u]));
+	}
+	Zf(mf_iNTT)(x1, logn);
+
+	/*
+	 * The polynomial x1 is stored at s1, so conversion to int16_t is done
+	 * automatically. Normalize s1 elements into the [-q/2..q/2] range.
+	 */
+	for (u = 0; u < n; u ++) {
+		s1[u] = Zf(mf_conv_signed)(x1[u]);
+	}
+
+	flag = (uint32_t)Zf(in_positive_half)(s1, SECOND_HASH(h, logn), logn);
+	conditional_flip(flag, s1, SECOND_HASH(h, logn), logn);
+
+	return norm_okay;
+}
+
+/* see inner.h */
 int
-Zf(sign_NTT)(inner_shake256_context *rng, int16_t *restrict s1,
+Zf(sign_dyn_NTT)(inner_shake256_context *rng, int16_t *restrict s1,
 	const int8_t *restrict f, const int8_t *restrict g,
 	const int8_t *restrict F, const int8_t *restrict G,
 	const uint8_t *restrict h, unsigned logn, uint8_t *restrict tmp)
@@ -990,4 +1038,23 @@ Zf(expand_seckey)(fpr *restrict expanded_seckey,
 #if HAWK_RECOVER_CHECK
 	Zf(poly_invnorm2_fft)(bG + n, bf, bg, logn);
 #endif
+}
+
+void
+Zf(expand_seckey_NTT)(uint32_t *restrict expanded_seckey,
+	const int8_t *f, const int8_t *g, const int8_t *F, unsigned logn)
+{
+	size_t n;
+	uint32_t *bf, *bg, *bF, *bG;
+
+	n = MKN(logn);
+	bf = expanded_seckey;
+	bg = bf + n;
+	bF = bg + n;
+	bG = bF + n;
+
+	/*
+	 * We load the secret key elements directly into the 2x2 matrix B.
+	 */
+	mf_NTRU(f, g, F, NULL, bf, bg, bF, bG, logn);
 }
