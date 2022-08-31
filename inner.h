@@ -884,6 +884,11 @@ void Zf(ffBabai_reduce)(const fpr *restrict f, const fpr *restrict g,
 
 /*
  * Generates q00 and q01 from the Gram matrix of the lattice basis.
+ * Note that this code uses column-notation. Thus, the lattice basis is given
+ * by two vectors: (f, g) and (F, G). Therefore we have:
+ *
+ *     q00 = adj(f)*f + adj(g)*g,
+ *     q01 = adj(f)*F + adj(g)*G.
  *
  * Note: tmp[] must have space for at least 24 * 2^logn bytes.
  */
