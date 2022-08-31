@@ -40,9 +40,8 @@ const uint32_t Zf(l2bound_512)[10] = {
 
 /* NIST-5: */
 const uint32_t Zf(l2bound_1024)[11] = {
-	0u /* unused */, 32u, 65u, 130u, 261u, 522u, 1045u, 2091u, 4182u, 8364u, 16728u
+	0u /* unused */, 39u, 79u, 158u, 316u, 632u, 1265u, 2530u, 5060u, 10121u, 20243u
 };
-
 
 /* see inner.h */
 const unsigned Zf(bits_q00)[11] = {

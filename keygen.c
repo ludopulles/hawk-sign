@@ -2327,7 +2327,7 @@ align_u32(void *base, void *data)
 /*
  * Table below incarnates a discrete Gaussian distribution:
  *    D(x) = exp(-(x^2)/(2*sigma^2))
- * where sigma = 1.500.
+ * where sigma = 1.500 for HAWK-512 and sigma = 2.000 for HAWK-1024.
  * Element k (k >= 0) contains P(|X| >= k+1) scaled up by 2^63.
  * To generate the values in the table below, run `sage code/renyi.sage`.
  */
@@ -4069,9 +4069,13 @@ Zf(make_public)(const int8_t *restrict f, const int8_t *restrict g,
 	}
 }
 
-static const int32_t l2bound_ssec_1024[11] = {
-	0u /* unused */, 15u, 31u, 62u, 124u, 249u, 498u, 997u, 1995u, 3990u, 7980u
+static const int32_t l2bound_ssec_512[10] = {
+	0u /* unused */, 8, 16, 32, 64, 129, 259, 519, 1039, 2079
 };
+static const int32_t l2bound_ssec_1024[11] = {
+	0u /* unused */, 15, 31, 62, 124, 249, 498, 997, 1995, 3990, 7980
+};
+
 
 /* see inner.h */
 void
@@ -4185,12 +4189,10 @@ Zf(keygen)(inner_shake256_context *sc,
 		}
 
 		/*
-		 * If the l2-norm of (f, g) is shorter than sigma_sec^2 * 2n, BKZ may
+		 * If the l2-norm of (f, g) is shorter than sigma_ver^2 * 2n, BKZ may
 		 * return a shortest vector when given the public key much faster than
 		 * other instances, so this secret key is not secure to use.
-		 * Thus, set fg_okay to 0 when ||(f, g)||^2 < Zf(l2bound)[logn]/4.
-		 *
-		 * For NIST-5, ssec != sver so use a different bound array.
+		 * Thus, set fg_okay to 0 when ||(f, g)||^2 < l2bound_ssec[logn].
 		 */
 		norm = 0;
 		for (u = 0; u < n; u++) {
@@ -4198,12 +4200,7 @@ Zf(keygen)(inner_shake256_context *sc,
 			norm += (int32_t)g[u] * (int32_t)g[u];
 		}
 
-		if (logn == 10) {
-			norm -= l2bound_ssec_1024[logn];
-		} else {
-			norm -= (int32_t)(Zf(l2bound_512)[logn] >> 2);
-		}
-
+		norm -= (logn == 10 ? l2bound_ssec_1024[logn] : l2bound_ssec_512[logn]);
 		fg_okay &= ((uint32_t) -norm) >> 31;
 
 		if (fg_okay == 0) {
