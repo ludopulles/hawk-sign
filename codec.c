@@ -1,5 +1,5 @@
 /*
- * Hawk pk, sk and sig compression 
+ * Hawk pk, sk and sig compression.
  *
  * ==========================(LICENSE BEGIN)============================
  *

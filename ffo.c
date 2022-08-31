@@ -1,5 +1,6 @@
 /*
- * ffLDL-tree taken from Falcon's sign.c code.
+ * Hawk ffNearestPlane implementation to be used in key generation.
+ * ffLDL-tree is taken from Falcon's sign.c code.
  *
  * ==========================(LICENSE BEGIN)============================
  *

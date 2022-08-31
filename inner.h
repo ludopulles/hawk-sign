@@ -2,7 +2,7 @@
 #define HAWK_INNER_H__
 
 /*
- * Internal functions for Falcon. This is not the API intended to be
+ * Internal functions for Hawk. This is not the API intended to be
  * used by applications; instead, this internal API provides all the
  * primitives on which wrappers build to provide external APIs.
  *
@@ -78,7 +78,7 @@
 #include <string.h>
 
 /*
- * Optionally, one can do a lightweight-check during signing in HAWK (not
+ * Optionally, one can do a lightweight-check during signing in Hawk (not
  * uncompressed) if recovering the first half of the signature works. To have
  * this, add the flag -DHAWK_RECOVER_CHECK to $(CFLAGS) in the Makefile.
  */

@@ -1,5 +1,5 @@
 /*
- * Hawk signature generation.
+ * Hawk NTT implementation with small q.
  *
  * ==========================(LICENSE BEGIN)============================
  *
