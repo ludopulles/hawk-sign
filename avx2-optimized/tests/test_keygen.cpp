@@ -326,7 +326,7 @@ void measure_keygen_multithreaded(unsigned logn)
 
 	// Collect results
 	double kg_duration = ((double) tot.time_diff) / tot.iters;
-	printf("Average time per keygen HAWK-%zu: %.3f ms (%d samples)\n", MKN(logn), kg_duration / 1000.0, tot.iters);
+	printf("Average time per keygen HAWK-%zu: %.3f ms (%lld samples)\n", MKN(logn), kg_duration / 1000.0, tot.iters);
 
 	/*
 	 * Crunch analysis on what may fail during basis completion, once f, g are
