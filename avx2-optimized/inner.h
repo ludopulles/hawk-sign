@@ -674,57 +674,82 @@ size_t Zf(decode_sig)(int16_t *s1, const void *in, size_t max_in_len,
  * Reduce a small signed integer modulo q. The source integer MUST
  * be between -q/2 and +q/2.
  */
-uint32_t Zf(mf_conv_small)(int x);
+uint32_t Zf(mq_conv_small)(int x);
 
 /*
  * Returns a signed integer between -q/2 and q/2, given a reduced integer
  * modulo q.
  */
-int32_t Zf(mf_conv_signed)(uint32_t x);
+int32_t Zf(mq_conv_signed)(uint32_t x);
 
 /*
  * Addition modulo q. Operands must be in the 0..q-1 range.
  */
-uint32_t Zf(mf_add)(uint32_t x, uint32_t y);
+uint32_t Zf(mq_add)(uint32_t x, uint32_t y);
 
 /*
  * Subtraction modulo q. Operands must be in the 0..q-1 range.
  */
-uint32_t Zf(mf_sub)(uint32_t x, uint32_t y);
+uint32_t Zf(mq_sub)(uint32_t x, uint32_t y);
+
+/*
+ * Montgomery multiplication modulo q. If we set R = 2^16 mod q, then
+ * this function computes: x * y / R mod q.
+ * Operands must be in the 0..q-1 range.
+ */
+uint32_t Zf(mq_montymul)(uint32_t x, uint32_t y);
 
 /*
  * Ordinary multiplication modulo q. This function computes: x * y mod q.
  * Operands must be in the 0..q-1 range.
  */
-uint32_t Zf(mf_mul)(uint32_t x, uint32_t y);
-
-/*
- * Modular division modulo q. This function computes: x / y mod q.
- * Operands must be in the 0..q-1 range.
- */
-uint32_t Zf(mf_div)(uint32_t x, uint32_t y);
+uint32_t Zf(mq_mul)(uint32_t x, uint32_t y);
 
 /*
  * Compute NTT on a ring element.
  */
-void Zf(mf_NTT)(uint32_t *a, unsigned logn);
+void Zf(mq_NTT)(uint16_t *a, unsigned logn);
 
 /*
  * Compute the inverse NTT on a ring element, binary case.
  */
-void Zf(mf_iNTT)(uint32_t *a, unsigned logn);
+void Zf(mq_iNTT)(uint16_t *a, unsigned logn);
 
 /*
  * Convert a polynomial of int8_t's to NTT form.
  */
-void Zf(mf_int8_to_NTT)(uint32_t *restrict p, const int8_t *restrict f,
+void Zf(mq_int8_to_NTT)(uint16_t *restrict p, const int8_t *restrict f,
 	unsigned logn);
+
+/*
+ * Multiply polynomial a with the adjoint of polynomial b. a and b MUST NOT
+ * overlap. This function works only in NTT representation.
+ */
+void Zf(mq_poly_muladj)(uint16_t *restrict a, const uint16_t *restrict b,
+	unsigned logn);
+
+/*
+ * Multiply polynomial with its own adjoint. This function works only in NTT
+ * representation.
+ */
+void Zf(mq_poly_mulselfadj)(uint16_t *a, unsigned logn);
+
+/*
+ * Convert a polynomial (mod q) to Montgomery representation.
+ */
+void Zf(mq_poly_tomonty)(uint16_t *f, unsigned logn);
+
+/*
+ * Divide polynomial f by g (NTT representation), assuming both f, g are not in
+ * Montgomery representation. Result f / g is written over f.
+ */
+void Zf(mq_poly_div)(uint16_t *f, uint16_t *g, unsigned logn);
 
 /*
  * Return whether f is invertible in NTT representation, meaning NTT(f) has no
  * nonzero entries.
  */
-int Zf(mf_is_invertible)(int8_t *f, unsigned logn, uint8_t *restrict tmp);
+int Zf(mq_is_invertible)(int8_t *f, unsigned logn, uint8_t *restrict tmp);
 
 /* ==================================================================== */
 /*
@@ -1086,7 +1111,7 @@ int Zf(sign)(inner_shake256_context *rng, int16_t *restrict sig,
  * close to (h0, h1) / 2 with respect to the quadratic form Q.
  * Return if the signature has small enough norm.
  *
- * Note: tmp[] must have space for at least 24 * 2^logn bytes.
+ * Note: tmp[] must have space for at least 8 * 2^logn bytes.
  */
 int Zf(uncompressed_sign_NTT)(inner_shake256_context *rng,
 	int16_t *restrict s0, int16_t *restrict s1,
@@ -1103,7 +1128,7 @@ int Zf(uncompressed_sign_NTT)(inner_shake256_context *rng,
  *
  * This function does not use any floating point numbers.
  *
- * Note: tmp[] must have space for at least 24 * 2^logn bytes.
+ * Note: tmp[] must have space for at least 10 * 2^logn bytes.
  */
 int Zf(sign_NTT)(inner_shake256_context *rng, int16_t *restrict sig,
 	const int8_t *restrict f, const int8_t *restrict g,

@@ -104,7 +104,7 @@ keygen_count_fails(inner_shake256_context *sc,
 			& poly_small_mkgauss(&rng, g, logn) & 1u;
 		if (fg_okay == 0U) { continue; }
 
-		fg_okay &= Zf(mf_is_invertible)(f, logn, tmp);
+		fg_okay &= Zf(mq_is_invertible)(f, logn, tmp);
 		if (fg_okay == 0U) { (*inv_fails)++; continue; }
 
 		Zf(int8_to_fft)(rt2, f, logn);

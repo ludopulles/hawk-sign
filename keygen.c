@@ -57,7 +57,6 @@
  */
 
 #include "inner.h"
-#include <assert.h>
 
 /* ==================================================================== */
 /*
@@ -4170,7 +4169,7 @@ Zf(keygen)(inner_shake256_context *sc,
 		fg_okay = poly_small_mkgauss(&rng, f, logn)
 			& poly_small_mkgauss(&rng, g, logn) & 1u;
 
-		fg_okay &= Zf(mf_is_invertible)(f, logn, tmp);
+		fg_okay &= Zf(mq_is_invertible)(f, logn, tmp);
 
 		Zf(int8_to_fft)(rt2, f, logn);
 		Zf(int8_to_fft)(rt3, g, logn);
