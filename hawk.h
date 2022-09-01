@@ -48,13 +48,14 @@ extern "C" {
  *
  * HAWK DEGREE
  *
- * Hawk is parameterized by a degree, which is a power of two. Formally,
- * one value is possible: 512 for Hawk-512. This implementation also supports
- * lower degrees, from 2 to 256; these reduced variants do not provide adequate
- * security and should be used for research purposes only.
+ * Hawk is parameterized by a degree, which is a power of two. Formally, two
+ * values are possible: 512 for Hawk-512 and 1024 for Hawk-1024. This
+ * implementation also supports lower degrees, from 2 to 256; these reduced
+ * variants do NOT provide adequate security and should be used for research
+ * purposes only.
  *
  * In all functions and macros defined below, the degree is provided
- * logarithmically as the 'logn' parameter: logn ranges from 1 to 9,
+ * logarithmically as the 'logn' parameter: logn ranges from 1 to 10,
  * and represents the degree 2^logn.
  *
  *
@@ -83,125 +84,122 @@ extern "C" {
  * implementation is used.
  *
  * The same temporary buffer can be reused for several operations,
- * possibly distinct from each other. For all degrees from 8 to 512
- * (logn = 3 to 9), the following sizes are in ascending order:
- * TODO: sort table to size
+ * possibly distinct from each other. For all degrees (logn = 1 to 10), the
+ * following sizes are in descending order:
  *
- *    HAWK_TMPSIZE_MAKEPUB
- *    HAWK_TMPSIZE_UNCOMPRESSED_VERIFY
- *    HAWK_TMPSIZE_UNCOMPRESSED_VERIFY_NTT
- *    HAWK_TMPSIZE_VERIFY
- *    HAWK_TMPSIZE_VERIFY_NTT
- *    HAWK_TMPSIZE_KEYGEN
- *    HAWK_TMPSIZE_UNCOMPRESSED_SIGN
- *    HAWK_TMPSIZE_UNCOMPRESSED_SIGN_NTT
- *    HAWK_TMPSIZE_SIGN
- *    HAWK_TMPSIZE_SIGNDYN
- *    HAWK_TMPSIZE_SIGNDYN_NTT
+ *   HAWK_TMPSIZE_UNCOMPRESSED_SIGN
+ *   HAWK_TMPSIZE_SIGNDYN
+ *   HAWK_TMPSIZE_KEYGEN
+ *   HAWK_TMPSIZE_VERIFY
+ *   HAWK_TMPSIZE_UNCOMPRESSED_VERIFY
+ *   HAWK_TMPSIZE_VERIFY_NTT
+ *   HAWK_TMPSIZE_UNCOMPRESSED_VERIFY_NTT
+ *   HAWK_TMPSIZE_UNCOMPRESSED_SIGN_NTT
+ *   HAWK_TMPSIZE_SIGNDYN_NTT
+ *   HAWK_TMPSIZE_SIGN
+ *   HAWK_TMPSIZE_MAKEPUB
  *
- * i.e. a temporary buffer large enough for computing signatures with
- * an expanded key ("SIGN") will also be large enough for a
- * key pair generation ("KEYGEN"). For logn = 1 or 2, the same order
- * holds, except that the KEYGEN buffer is larger.
+ * i.e. a temporary buffer large enough for dynamic floating-point signing
+ * ("SIGNDYN") will also be large enough for key pair generation ("KEYGEN"),
+ * dynamic integer-only signing ("SIGNDYN_NTT") and any signature verification
+ * ("VERIFY" / "VERIFY_NTT").
  *
  * Here are the actual values for the temporary buffer sizes (in bytes):
  *
- * TODO: update table, with considering the first byte as part of sk/pk size.
- * degree  mkpub  verify  keygen      sign  expkey  signdyn
- *     2      13      17     285       107     111      163
- *     4      25      33     291       207     215      319
- *     8      49      65     303       407     423      631
- *    16      97     129     503       807     839     1255
- *    32     193     257     999      1607    1671     2503
- *    64     385     513    1991      3207    3335     4999
- *   128     769    1025    3975      6407    6663     9991
- *   256    1537    2049    7943     12807   13319    19975
- *   512    3073    4097   15879     25607   26631    39943
+ *  deg  sigD  kgen   ver  verN sigDN   sig mkpub
+ *    2   115   103   101    77    63    61    51
+ *    4   221   199   193   145   121   113    99
+ *    8   433   391   377   281   237   217   195
+ *   16   859   775   747   555   471   427   387
+ *   32  1711  1543  1487  1103   939   847   771
+ *   64  3415  3079  2967  2199  1875  1687  1539
+ *  128  6823  6151  5927  4391  3747  3367  3075
+ *  256 13639 12295 11847  8775  7491  6727  6147
+ *  512 27271 24583 23687 17543 14979 13447 12291
+ * 1024 54535 49159 47367 35079 29955 26887 24579
  *
- * Take care that the "expkey" column here qualifies the temporary buffer
- * for the key expansion process, but NOT the expanded key itself (which
- * has size HAWK_EXPANDEDKEY_SIZE(logn) and is larger than that).
+ *  deg  usig  kgen  uver uverN usigN mkpub
+ *    2   119   103    97    69    67    51
+ *    4   229   199   185   133   129    99
+ *    8   449   391   361   261   253   195
+ *   16   891   775   715   519   503   387
+ *   32  1775  1543  1423  1035  1003   771
+ *   64  3543  3079  2839  2067  2003  1539
+ *  128  7079  6151  5671  4131  4003  3075
+ *  256 14151 12295 11335  8259  8003  6147
+ *  512 28295 24583 22663 16515 16003 12291
+ * 1024 56583 49159 45319 33027 32003 24579
+ *
+ * Here, first the scheme Hawk is listed and second is the uncompressed version
+ * of Hawk (with prefix 'u') which does not provide as compact signatures as
+ * Hawk does. The suffix 'D' stands for dynamic signing as opposed to batched
+ * signing where you need to do some preprocessing on the secret key to get the
+ * expanded key. The suffix 'N' stands for number theoretic transform and these
+ * functions will be used by the reference implementation as these functions
+ * do not make use of floating point numbers while the AVX2 optimized version
+ * uses floats for faster signing/verifying.
+ *
+ *
+ * KEY SIZES
+ *
+ * Public and secret keys are exchanged as serialized sequences of bytes.
+ * The secret key size is fixed for a given degree and the HAWK_SECKEY_SIZE
+ * macro returns this value as constant expressions.
+ * For a given degree, the public key size follows a distribution that is close
+ * to a normal distribution. The average number of bytes of a public key
+ * together with the standard deviation is reported below. The HAWK_PUBKEY_SIZE
+ * array contains for all degrees (logn = 1 to 10) a number that is six
+ * standard deviations above the average, so a generated public key will be
+ * larger than this number only once in a million times. The public key is
+ * padded with zeros to the size in HAWK_PUBKEY_SIZE.
+ *
+ * Below is the average size in bytes of the public key together with standard
+ * deviation and the minimum and maximum size encountered measured over 100,000
+ * key generations. The column 6sigma gives avg + 6 stddev which when rounded
+ * to the nearest integer are the values found in the HAWK_PUBKEY_SIZE array.
+ * Note: these numbers include the header byte which contains the degree.
+ *
+ *  deg     avg+/-stddev min  max  6sigma  
+ *    2    4.67+/- 0.49    4    8    7.62
+ *    4    6.59+/- 0.56    6   12    9.96
+ *    8   11.40+/- 0.67   10   18   15.45
+ *   16   22.05+/- 0.83   20   28   27.02
+ *   32   46.01+/- 1.35   43   55   54.09
+ *   64   98.61+/- 1.61   94  112  108.25
+ *  128  214.12+/- 2.78  206  232  230.82
+ *  256  464.55+/- 3.43  454  484  485.14
+ *  512 1006.51+/- 6.09  987 1035 1043.02
+ * 1024 2329.17+/-11.18 2291 2392 2396.25
  *
  *
  * FORMATS
  *
- * Public and secret keys are exchanged as serialized sequences of bytes.
- * The secret key sizes are fixed (for a given degree).
- * The public key sizes (for a given degree) follow a distribution that is
- * close to a normal distribution.
- *
- * The HAWK_SECKEY_SIZE and HAWK_PUBKEY_SIZE arrays contain the number of bytes
- * required for an encoded secret and public key respectively, including
- * possible padding.
- *
- * Below are the average sizes in number of bytes of secret keys and public
- * keys, taken over 1000 samples. To arrive at the minimal and maximal sizes,
- * add -,+5 std.dev. to the average and round to the average.
- *
- * TODO: run code for 10'000 samples.
- * logn | Average +/- stddev | min  | max
- * -----+- Secret key -------+------+-----
- *    1 |    3.40 +/-   0.49 |    3 |    5
- *    2 |    5.40 +/-   0.51 |    5 |    7
- *    3 |    9.51 +/-   0.70 |    8 |   12
- *    4 |   18.21 +/-   1.03 |   15 |   21
- *    5 |   36.90 +/-   1.82 |   32 |   43
- *    6 |   76.15 +/-   2.08 |   71 |   83
- *    7 |  158.85 +/-   3.58 |  149 |  170
- *    8 |  332.19 +/-   4.14 |  318 |  345
- *    9 |  694.63 +/-   6.93 |  672 |  716
- * -----+- Public key -------+------+-----
- *    1 |    4.37 +/-   0.49 |    4 |    6
- *    2 |    6.32 +/-   0.49 |    6 |    8
- *    3 |   10.99 +/-   0.75 |   10 |   16
- *    4 |   21.59 +/-   0.87 |   20 |   25
- *    5 |   45.47 +/-   1.55 |   42 |   52
- *    6 |   98.04 +/-   1.81 |   93 |  104
- *    7 |  213.59 +/-   3.11 |  204 |  224
- *    8 |  464.20 +/-   3.66 |  454 |  477
- *    9 | 1006.21 +/-   6.32 |  987 | 1028
- *
  * There are two formats for signatures:
  *
  *   - COMPACT: this is the default format, which yields the shortest
- *     signatures on average. However, the size is variable (see below)
- *     though within a limited range.
+ *     signatures on average. However, the size is variable though within a
+ *     limited range (see below).
  *
  *   - PADDED: this is the compact format, but with extra padding bytes
  *     to obtain a fixed size known at compile-time. The size depends only
  *     on the degree; the HAWK_SIG_PADDED_SIZE macro computes it. The
- *     signature process enforces that size by restarting the process
- *     until an appropriate size is obtained (such restarts are uncommon
- *     enough that the computational overhead is negligible).
+ *     signature process enforces that size by signing with a fresh salt until
+ *     an appropriate size is obtained (such restarts are uncommon enough that
+ *     the computational overhead is negligible).
  *
  * The signature format is selected by the 'sig_type' parameter to
  * the signature generation and verification functions.
  *
- * Actual signature size has been measured over 10000 signatures for each
- * degree (100 random keys, 100 signatures per key):
+ * Actual signature size has been measured over 1,000,000 signatures for
+ * degrees 512 and 1024 (10,000 random keys, 100 signatures per key):
  *
- * TODO: update table.
- * uncompressed Hawk512 : 1222.9 (+/- 7.2)
- *              Hawk512 : 541.5 (+/- 4.3)
- *
- * degree     ct   padded   compact (with std. dev)  comp_max
- *     2      44      44       44.00 (+/- 0.00)            44
- *     4      47      47       46.03 (+/- 0.17)            47
- *     8      52      52       50.97 (+/- 0.26)            52
- *    16      65      63       60.45 (+/- 0.52)            64
- *    32      89      82       79.53 (+/- 0.68)            86
- *    64     137     122      117.69 (+/- 0.94)           130
- *   128     233     200      193.96 (+/- 1.30)           219
- *   256     425     356      346.53 (+/- 1.84)           397
- *   512     809     666      651.59 (+/- 2.55)           752
- *
- * with:
- *   degree = Hawk degree = 2^logn
- *   padded = HAWK_SIG_PADDED_SIZE(logn)  (size of a PADDED signature)
- *   compact = measured average length of a COMPACT signature
- *   v_max = HAWK_SIG_COMPACT_MAXSIZE(logn)  (maximum theoretical
- *           size of a COMPACT signature)
- * All lengths are in bytes.
+ *   deg  Gol.Rice enc   huffman enc
+ *   512   541.7+/-4.4   539.1+/-4.4
+ *  1024  1194.7+/-5.7  1189.4+/-5.9
+ * 
+ * Here the Golomb-Rice encodings output 5 and 6 of the lowest significant bits
+ * in binary for Hawk-512 and Hawk-1024 respectively. All lengths are in bytes
+ * and include the header byte and salt.
  *
  * A secret key, in its encoded format, can be used as parameter to
  * hawk_sign_dyn(). An "expanded secret key" is computed with
@@ -210,8 +208,8 @@ extern "C" {
  * its format is not portable. Its size (in bytes) is provided by
  * HAWK_EXPANDEDKEY_SIZE. There are no specific alignment requirements
  * on expanded keys, except that the alignment of a given expanded key
- * must not change (i.e. if an expanded key is moved from address addr1
- * to address addr2, then it must hold that addr1 = addr2 mod 8).
+ * must not change, i.e. if an expanded key is moved from address addr1
+ * to address addr2 then it must hold that addr1 = addr2 (mod 8).
  * Expanded secret keys are meant to be used when several signatures are
  * to be computed with the same secret key: amortized cost per signature
  * is about halved when using expanded secret keys (for short messages,
@@ -312,10 +310,10 @@ extern "C" {
  * Sizes.
  *
  * The sizes are expressed in bytes. Each size depends on the Hawk degree,
- * which is provided logarithmically: use logn=9 for Hawk-512. Valid values for
- * logn range from 1 to 9 (values 1 to 8 correspond to reduced variants of Hawk
- * that do not provided adequate security and are meant for research purposes
- * only).
+ * which is provided logarithmically: use logn=9 for Hawk-512 and logn=10 for
+ * Hawk-1024. Valid values for logn range from 1 to 10 (values 1 to 8
+ * correspond to reduced variants of Hawk that do not provided adequate
+ * security and are meant for research purposes only).
  *
  * The sizes are provided as macros that evaluate to constant expressions, as
  * long as the 'logn' parameter is itself a constant expression. Moreover, all
@@ -334,14 +332,13 @@ extern "C" {
 /*
  * Public key size (in bytes). The size is an upper bound on the allowed size,
  * the average is lower than this.
- * TODO: make this into a macro.
  */
 extern const size_t HAWK_PUBKEY_SIZE[11];
 
 /*
- * Currently, only the signature sizes for logn = 9 are determined, as these
- * are determined by simulations in each case, giving an average size and
- * standard deviation. Currently the compact maxsize is avg + 12 stdddev,
+ * Currently, signature sizes are only determined for logn = 9 and logn = 10,
+ * as these are determined by simulations in each case, giving an average size
+ * and standard deviation. Currently the compact maxsize is avg + 12 stdddev,
  * while the padded size is avg + 6 stddev.
  *
  * The padded signature is therefore expected to fail with probability at most
@@ -358,27 +355,27 @@ extern const size_t HAWK_PUBKEY_SIZE[11];
  * and the uncompressed scheme.
  */
 #define HAWK_UNCOMPRESSED_SIG_COMPACT_MAXSIZE(logn) \
-	((logn) == 10 ? 2863u : 1309u)
+	((logn) == 10 ? 2872u : 1310u)
 
 /*
  * Signature size (in bytes) when using the PADDED format and the uncompressed
  * scheme. The size is exact.
  */
 #define HAWK_UNCOMPRESSED_SIG_PADDED_SIZE(logn) \
-	((logn) == 10 ? 2799u : 1266u)
+	((logn) == 10 ? 2804u : 1267u)
 
 /*
  * Maximum practical signature size (in bytes) when using the COMPACT
  * format.
  */
 #define HAWK_SIG_COMPACT_MAXSIZE(logn) \
-	((logn) == 10 ? 1263u : 593u)
+	((logn) == 10 ? 1264u : 595u)
 
 /*
  * Signature size (in bytes) when using the PADDED format. The size is exact.
  */
 #define HAWK_SIG_PADDED_SIZE(logn) \
-	((logn) == 10 ? 1229u : 567u)
+	((logn) == 10 ? 1229u : 568u)
 
 /*
  * The number of bytes that are required for the salt that gets prepended to a
@@ -541,7 +538,7 @@ int shake256_init_prng_from_system(shake256_context *sc);
 /*
  * Generate a new keypair.
  *
- * The logarithm of the Hawk degree (logn) must be in the 1 to 9
+ * The logarithm of the Hawk degree (logn) must be in the 1 to 10
  * range; values 1 to 8 correspond to reduced versions of Hawk that do
  * not provide adequate security and are meant for research purposes
  * only.
@@ -600,7 +597,7 @@ int hawk_make_public(void *pubkey, size_t pubkey_len, const void *seckey,
 
 /*
  * Get the Hawk degree from an encoded secret key, public key or
- * signature. Returned value is the logarithm of the degree (1 to 9),
+ * signature. Returned value is the logarithm of the degree (1 to 10),
  * or a negative error code.
  */
 int hawk_get_logn(const void *obj, size_t len);
