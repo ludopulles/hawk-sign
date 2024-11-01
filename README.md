@@ -2,7 +2,9 @@
 
 Hawk is a post-quantum signature scheme, which has a hash-then-sign design and is based on the lattice isomorphism problem. The scheme allows efficient signature generation and verification, even on constrained devices. The signatures and public keys are relatively compact compared to prior post-quantum signature schemes.
 
-**Disclaimer:** *this code was written to accompany [1] and currently serves research purposes. There was no security review yet so use at own risk*.
+**Disclaimer:** *this code was written to accompany [1] and currently serves research purposes. There was no security review yet so use at own risk.*
+
+**NOTE:** *See [hawk-sign/dev](https://github.com/hawk-sign/dev/) for the implementation that accompanies the submission to the [Standardization Process for Additional Digital Signature Schemes](https://csrc.nist.gov/Projects/pqc-dig-sig), organized by NIST.*
 
 This implementation is written in C. The implementation in avx2-optimized contains another implementation, which is optimized for processors that support both the AVX2 instruction set and floating points.
 However, in both cases, the same API is implemented.
